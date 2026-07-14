@@ -1,0 +1,10 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/resources/bridge/*
+!src-tauri/resources/bridge/.gitkeep
+backend/**/bin/
+backend/**/obj/
+*.log
+.env.local
