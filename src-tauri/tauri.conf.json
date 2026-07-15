@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Local Media Manager Next",
-  "version": "0.2.0",
-  "identifier": "local.media.manager.next",
+  "productName": "Local Media Manager",
+  "version": "0.3.0",
+  "identifier": "local.media.manager",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -26,7 +26,20 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "icon": ["icons/icon.ico"],
-    "resources": ["resources/bridge/*", "resources/migration/*"]
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "headerImage": "../assets/brand/installer/header.bmp",
+        "uninstallerHeaderImage": "../assets/brand/installer/header.bmp",
+        "sidebarImage": "../assets/brand/installer/sidebar.bmp"
+      }
+    },
+    "resources": [
+      "resources/bridge/*",
+      "resources/migration/*",
+      "resources/migration/migrations/*.sql"
+    ]
   }
 }

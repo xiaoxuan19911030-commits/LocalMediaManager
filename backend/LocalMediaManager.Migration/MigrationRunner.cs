@@ -78,6 +78,9 @@ internal static class MigrationRunner
             await tx.CommitAsync();
         }
 
+        IReadOnlyList<int> appliedMigrations = await DatabaseUpgradeRunner.ApplyPendingAsync(
+            target, Path.Combine(AppContext.BaseDirectory, "migrations"));
+
         await ExecuteAsync(target, "PRAGMA wal_checkpoint(TRUNCATE)");
         string integrity = await ScalarText(target, "PRAGMA integrity_check") ?? "unknown";
         long foreignKeyErrors = await CountRows(target, "PRAGMA foreign_key_check");
@@ -107,8 +110,8 @@ internal static class MigrationRunner
         }
 
         var report = new MigrationReport(
-            "0.1.0", started, DateTimeOffset.Now, legacyBusinessDb, legacyConfigDb, sourceBusinessHash,
-            sourceConfigHash, switched ? officialDb : tempDb, targetHash, 1, confirmSwitch, allowed, switched,
+            "0.3.0", started, DateTimeOffset.Now, legacyBusinessDb, legacyConfigDb, sourceBusinessHash,
+            sourceConfigHash, switched ? officialDb : tempDb, targetHash, appliedMigrations.DefaultIfEmpty(1).Max(), confirmSwitch, allowed, switched,
             integrity, foreignKeyErrors, legacyMovieCount, newMovieCount, orphanMovieActors, duplicatePaths,
             duplicateCodes, counts, maps.ToDictionary(pair => pair.Key, pair => (long)pair.Value.Count),
             warnings, samples, legacyBackup, reportDir);
@@ -383,9 +386,9 @@ internal static class MigrationRunner
         string businessHash, string configHash, DateTimeOffset started)
     {
         foreach ((string key, string value) in new Dictionary<string, string> {
-            ["CreatedByVersion"]="0.1.0", ["SchemaVersion"]="1", ["LastMigrationAt"]=UtcNow(),
+            ["CreatedByVersion"]="0.3.0", ["SchemaVersion"]="1", ["LastMigrationAt"]=UtcNow(),
             ["LegacyBusinessSha256"]=businessHash, ["LegacyConfigSha256"]=configHash,
-            ["MigrationStartedAt"]=started.ToString("O"), ["DataSeparationNotice"]="Next data is independent from the legacy WPF databases."
+            ["MigrationStartedAt"]=started.ToString("O"), ["DataSeparationNotice"]="LMM data is independent from the legacy WPF databases."
         }) await ExecuteAsync(target, "INSERT INTO DatabaseMetadata(Key,Value) VALUES($key,$value)", tx, ("$key", key), ("$value", value));
     }
 
@@ -419,7 +422,7 @@ internal static class MigrationRunner
         Directory.CreateDirectory(report.ReportDirectory);
         var json = new JsonSerializerOptions { WriteIndented = true };
         await File.WriteAllTextAsync(Path.Combine(report.ReportDirectory, "migration-report.json"), JsonSerializer.Serialize(report, json));
-        var md = new StringBuilder("# Local Media Manager Next migration report\n\n");
+        var md = new StringBuilder("# Local Media Manager migration report\n\n");
         md.AppendLine($"- Started: {report.StartedAt:O}").AppendLine($"- Completed: {report.CompletedAt:O}")
           .AppendLine($"- Legacy business database: `{report.LegacyBusinessDatabase}`")
           .AppendLine($"- New database: `{report.NewDatabase}`").AppendLine($"- Schema: v{report.SchemaVersion}")

@@ -22,7 +22,7 @@ if (command == "migrate") {
         Directory.CreateDirectory(reportDirectory);
         string officialDatabase = Path.Combine(dataRoot, "data", "LocalMediaManager.db");
         var failure = new {
-            ToolVersion = "0.2.0",
+            ToolVersion = "0.3.0",
             Status = "Failed",
             FailedAt = DateTimeOffset.Now,
             LegacyBusinessDatabase = businessDb,
@@ -41,14 +41,21 @@ if (command == "migrate") {
         return 4;
     }
 }
+if (command == "upgrade") {
+    bool confirm = args.Contains("--confirm", StringComparer.OrdinalIgnoreCase);
+    string dataRoot = Environment.GetEnvironmentVariable("LMM_NEXT_DATA_ROOT") ?? @"D:\Local Media Manager Next Data";
+    DatabaseUpgradeReport upgrade = await DatabaseUpgradeRunner.UpgradeAsync(dataRoot, confirm);
+    Console.WriteLine(JsonSerializer.Serialize(upgrade, new JsonSerializerOptions { WriteIndented = true }));
+    return upgrade.Status == "Completed" ? 0 : 3;
+}
 if (command != "analyze") {
-    Console.Error.WriteLine("Use: analyze [output] or migrate [--confirm-switch].");
+    Console.Error.WriteLine("Use: analyze [output], migrate [--confirm-switch], or upgrade [--confirm].");
     return 2;
 }
 
 Directory.CreateDirectory(output);
 var report = new LegacyAnalysisReport(
-    ToolVersion: "0.1.0",
+    ToolVersion: "0.3.0",
     GeneratedAt: DateTimeOffset.Now,
     Databases: [await AnalyzeAsync("business", businessDb), await AnalyzeAsync("configuration", configDb)]);
 

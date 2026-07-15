@@ -2,6 +2,7 @@ import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import { Alert, Box, Button, CircularProgress, InputAdornment, MenuItem, Pagination, Snackbar, TextField } from '@mui/material'
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router'
 import { MediaCard } from '@/components/MediaCard'
 import { PageHeader } from '@/components/PageHeader'
 import { bridge } from '@/services/bridge'
@@ -10,6 +11,7 @@ import type { MediaItem } from '@/types/media'
 const pageSize = 24
 
 export default function MediaPage() {
+  const navigate = useNavigate()
   const [items, setItems] = useState<MediaItem[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -39,7 +41,7 @@ export default function MediaPage() {
 
   return (
     <Box>
-      <PageHeader title="全部影片" description={`来自独立 LocalMediaManager.db，共 ${total} 部影片。`}
+      <PageHeader title="影片墙" description={`共 ${total} 部影片，支持搜索、排序和分页浏览。`}
         action={<Button startIcon={<RefreshRoundedIcon />} variant="outlined" onClick={load}>刷新</Button>} />
       <Box component="form" onSubmit={(event) => { event.preventDefault(); submitSearch() }}
         sx={{ display: 'flex', gap: 1.25, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -54,7 +56,7 @@ export default function MediaPage() {
       {error && <Alert severity="error">{error}</Alert>}
       {loading ? <Box sx={{ display: 'grid', placeItems: 'center', minHeight: 300 }}><CircularProgress /></Box> :
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(142px, 1fr))', gap: 1.5 }}>
-          {items.map((item) => <MediaCard key={item.dataId} item={item} onPlay={play} />)}
+          {items.map((item) => <MediaCard key={item.dataId} item={item} onPlay={play} onOpen={() => navigate(`/movies/${item.dataId}`)} />)}
         </Box>}
       {total > pageSize && <Box sx={{ display: 'flex', justifyContent: 'center', pt: 3 }}>
         <Pagination count={Math.ceil(total / pageSize)} page={page} onChange={(_, value) => setPage(value)} color="primary" />

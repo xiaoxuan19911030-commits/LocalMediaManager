@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 180" role="img" aria-label="Local Media Manager">
+  <defs><linearGradient id="brand" x1="12" y1="12" x2="168" y2="168" gradientUnits="userSpaceOnUse"><stop stop-color="#35B8FF"/><stop offset=".52" stop-color="#4F7CFF"/><stop offset="1" stop-color="#9B6CFF"/></linearGradient></defs>
+  <rect x="10" y="10" width="160" height="160" rx="38" fill="url(#brand)"/>
+  <path d="M45 45v88h38" fill="none" stroke="#fff" stroke-width="19" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M90 133V65c0-9 10-13 17-7l14 14 14-14c7-6 17-2 17 7v68" fill="none" stroke="#fff" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="205" y="86" fill="#F8FAFC" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="42" font-weight="700">Local Media Manager</text>
+  <text x="207" y="125" fill="#98A2B3" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="22" font-weight="600" letter-spacing="5">LMM</text>
+</svg>

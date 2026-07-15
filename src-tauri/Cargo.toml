@@ -1,13 +1,13 @@
 [package]
-name = "local-media-manager-next"
-version = "0.2.0"
-description = "Local Media Manager next-generation desktop frontend"
+name = "local-media-manager"
+version = "0.3.0"
+description = "Local Media Manager desktop application"
 authors = ["Local Media Manager contributors"]
 license = "GPL-3.0-only"
 edition = "2024"
 
 [lib]
-name = "local_media_manager_next_lib"
+name = "local_media_manager_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

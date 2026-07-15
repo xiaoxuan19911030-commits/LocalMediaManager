@@ -3,9 +3,10 @@ import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import { Box, Card, CardContent, Chip, IconButton, Rating, Tooltip, Typography } from '@mui/material'
 import type { MediaItem } from '@/types/media'
 
-export function MediaCard({ item, onPlay }: { item: MediaItem; onPlay: (item: MediaItem) => void }) {
+export function MediaCard({ item, onPlay, onOpen }: { item: MediaItem; onPlay: (item: MediaItem) => void; onOpen?: (item: MediaItem) => void }) {
   return (
-    <Card sx={{ overflow: 'hidden', minWidth: 0 }}>
+    <Card onClick={() => onOpen?.(item)} sx={{ overflow: 'hidden', minWidth: 0, cursor: onOpen ? 'pointer' : 'default', transition: 'transform .18s ease, border-color .18s ease',
+      '&:hover': onOpen ? { transform: 'translateY(-3px)', borderColor: 'primary.main' } : undefined }}>
       <Box sx={{ position: 'relative', aspectRatio: '2 / 3', bgcolor: 'action.hover' }}>
         {item.coverUrl ? (
           <Box component="img" src={item.coverUrl} alt={item.code} loading="lazy"
@@ -14,7 +15,7 @@ export function MediaCard({ item, onPlay }: { item: MediaItem; onPlay: (item: Me
           <Box sx={{ height: '100%', display: 'grid', placeItems: 'center', color: 'text.disabled' }}>暂无海报</Box>
         )}
         <Tooltip title="播放">
-          <IconButton onClick={() => onPlay(item)} color="primary"
+          <IconButton onClick={(event) => { event.stopPropagation(); onPlay(item) }} color="primary"
             sx={{ position: 'absolute', right: 8, bottom: 8, bgcolor: 'rgba(15,17,23,.82)', '&:hover': { bgcolor: 'rgba(15,17,23,.95)' } }}>
             <PlayArrowRoundedIcon />
           </IconButton>

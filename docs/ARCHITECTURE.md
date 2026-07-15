@@ -8,7 +8,7 @@ Proxy-specific frontend pages, Mihomo APIs, proxy profiles, rules, connections, 
 
 ## Selected Bridge boundary
 
-Next uses an independent .NET 8 loopback HTTP process.
+LMM uses an independent .NET 8 loopback HTTP process.
 
 ```text
 Tauri 2 / React / Material UI
@@ -24,7 +24,13 @@ LocalMediaManager.db + existing media/image paths
 
 HTTP provides a debuggable, typed JSON boundary that can be exercised independently from Tauri and does not require duplicating a pipe client in Rust and TypeScript. It binds only to loopback. Authentication and per-session tokens are required before any write endpoint is introduced.
 
-The Bridge exposes health, library summary, paged/searchable/sortable media DTOs, movie details, cover streaming, player launch, and the seven-category legacy settings DTO. React never accesses SQLite directly. Runtime media access uses only Database v1; legacy configuration is read-only and temporary until validated `settings.json` persistence is implemented.
+The Bridge exposes health, dashboard, global search, libraries, tasks, paged/searchable/sortable media DTOs, movie details, cover streaming, player launch, and settings DTOs. React never accesses SQLite directly. Runtime media access uses only Database v1.
+
+## Product phase boundary
+
+Version 0.3.0 adds product-facing routes without changing the foundation: Dashboard, movie wall, movie details, global search, media libraries, and task center. Pages contain presentation and interaction only; SQL remains in the Bridge product reader. Database corrections and upgrades remain checksummed migrations.
+
+The official brand is Local Media Manager (LMM). Brand SVG sources live under `assets/brand`, while generated PNG, ICO, application, and NSIS assets are derived from those sources.
 
 ## Existing C# reuse assessment
 
@@ -37,6 +43,6 @@ The Bridge exposes health, library summary, paged/searchable/sortable media DTOs
 
 - Legacy databases are opened with `SqliteOpenMode.ReadOnly`; their hashes are checked before and after migration.
 - The stable WPF installation is never overwritten by the Next build.
-- The Next deployment root is `D:\Local Media Manager Next`; Database v1 and its reports/backups are in `D:\Local Media Manager Next Data`.
+- The deployment root remains `D:\Local Media Manager Next` for upgrade compatibility; Database v1 and its reports/backups remain in `D:\Local Media Manager Next Data`.
 - Schema changes are formal, checksummed migrations. Full import uses a new temporary database, integrity and foreign-key checks, sampling, a report, and an explicit confirmed switch.
 - AI remains an architecture-only future module; see `AI_ARCHITECTURE.md`.

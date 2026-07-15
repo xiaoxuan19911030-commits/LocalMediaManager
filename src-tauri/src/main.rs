@@ -1,4 +1,3 @@
 fn main() {
-    local_media_manager_next_lib::run();
+    local_media_manager_lib::run();
 }
-

@@ -9,11 +9,12 @@ import { SettingsItem, SettingsLayout, SettingsSaveBar, SettingsSection, Setting
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
 import type { SettingsSnapshot } from '@/types/settings'
+import { BrandMark } from '@/components/BrandMark'
 
 const descriptions: Record<string, string> = {
   general: '启动、窗口行为和语言。', library: '媒体库行为、扫描导入和数据库状态。',
   playback: '播放器路径和系统默认播放行为。', metadata: '图片、同步、网络、NFO、缓存、视频处理和重命名。',
-  appearance: '主题与影片卡片显示。主题预览仅影响 Next 当前窗口，不写入旧配置。', shortcuts: '老板键和旧快捷键配置。',
+  appearance: '主题与影片卡片显示。主题预览仅影响当前窗口，不写入旧配置。', shortcuts: '老板键和旧快捷键配置。',
   advanced: '插件、服务器、端口、日志及尚未归类的兼容字段。',
 }
 
@@ -30,14 +31,14 @@ export default function SettingsPage() {
   const sections = [...new Set(mapped.map(field => field.section))]
 
   return <Box>
-    <PageHeader title="设置" description="读取旧配置并建立 Next 的统一只读设置模型。" />
+    <PageHeader title="设置" description="Local Media Manager 的统一设置中心。" />
     {error && <Alert severity="error">设置读取失败：{error}</Alert>}
     {!snapshot && !error ? <Box sx={{ minHeight: 320, display: 'grid', placeItems: 'center' }}><CircularProgress /></Box> : snapshot &&
       <SettingsLayout category={category} onCategoryChange={setCategory}>
         <Typography variant="h5" sx={{ fontWeight: 800 }}>{title}</Typography>
         <Typography color="text.secondary" sx={{ mt: 0.5, mb: 2 }}>{descriptions[category]}</Typography>
         <SettingsStatusBanner errors={snapshot.errors} mapped={snapshot.mappedCount} unmapped={snapshot.unmappedCount} />
-        {category === 'appearance' && <SettingsSection title="Next 主题预览" description="即时预览功能只修改当前 Next 窗口，不会写回旧主题设置。">
+        {category === 'appearance' && <SettingsSection title="主题预览" description="即时预览只修改当前窗口，不会写回旧主题设置。">
           <Stack direction="row" spacing={1} sx={{ p: 2 }}>
             <Button variant={mode === 'light' ? 'contained' : 'outlined'} startIcon={<LightModeRoundedIcon />} onClick={() => setMode('light')}>浅色</Button>
             <Button variant={mode === 'dark' ? 'contained' : 'outlined'} startIcon={<DarkModeRoundedIcon />} onClick={() => setMode('dark')}>深色</Button>
@@ -55,6 +56,9 @@ export default function SettingsPage() {
               <TableCell>{server.available > 0 ? '可用' : '未知'}</TableCell><TableCell>{server.lastRefreshDate || '未记录'}</TableCell><TableCell>{server.headers}</TableCell>
             </TableRow>)}</TableBody>
           </Table></TableContainer>
+        </SettingsSection>}
+        {category === 'advanced' && <SettingsSection title="关于 Local Media Manager" description="本地优先、可维护的现代媒体管理工具。">
+          <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}><BrandMark/><Typography color="text.secondary">版本 0.3.0</Typography></Box>
         </SettingsSection>}
         {compatibility.length > 0 && <Accordion disableGutters><AccordionSummary expandIcon={<ExpandMoreRoundedIcon />}>
           <Typography sx={{ fontWeight: 700 }}>兼容字段（{compatibility.length}）</Typography></AccordionSummary>

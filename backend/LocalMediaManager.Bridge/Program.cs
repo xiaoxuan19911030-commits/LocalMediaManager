@@ -23,6 +23,9 @@ var app = builder.Build();
 app.UseCors();
 
 app.MapGet("/health", () => Results.Ok(new {
+    product = "Local Media Manager",
+    abbreviation = "LMM",
+    version = "0.3.0",
     status = "ok",
     databaseAvailable = File.Exists(databasePath),
     databasePath,
@@ -34,6 +37,22 @@ app.MapGet("/health", () => Results.Ok(new {
 }));
 
 app.MapGet("/api/settings", async () => Results.Ok(await SettingsReader.ReadAsync(configDatabasePath)));
+
+app.MapGet("/api/dashboard", async () => File.Exists(databasePath)
+    ? Results.Ok(await ProductReader.ReadDashboardAsync(databasePath, bridgeUrl))
+    : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
+
+app.MapGet("/api/search", async (string? q, int? limit) => File.Exists(databasePath)
+    ? Results.Ok(await ProductReader.SearchAsync(databasePath, bridgeUrl, q ?? string.Empty, Math.Clamp(limit ?? 12, 1, 48)))
+    : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
+
+app.MapGet("/api/libraries", async () => File.Exists(databasePath)
+    ? Results.Ok(await ProductReader.ReadLibrariesAsync(databasePath))
+    : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
+
+app.MapGet("/api/tasks", async (int? limit) => File.Exists(databasePath)
+    ? Results.Ok(await ProductReader.ReadTasksAsync(databasePath, Math.Clamp(limit ?? 50, 1, 200)))
+    : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
 
 app.MapGet("/api/library/summary", async () => {
     if (!File.Exists(databasePath))
@@ -114,33 +133,8 @@ app.MapGet("/api/videos", async (int? limit, int? offset, string? search, string
 
 app.MapGet("/api/videos/{movieId:long}", async (long movieId) => {
     if (!File.Exists(databasePath)) return Results.NotFound();
-    await using var connection = await OpenReadOnlyAsync(databasePath);
-    await using var command = connection.CreateCommand();
-    command.CommandText = """
-        SELECT m.Id,m.Code,m.Title,m.OriginalTitle,m.ReleaseDate,m.DurationSeconds,m.Description,
-               m.ProviderRating,m.IsScraped,m.ScrapeStatus,m.NfoPath,m.ImportedAt,m.UpdatedAt,
-               s.IsFavorite,s.UserRating,s.PlayCount,s.LastPlayedAt,s.LastPositionSeconds,s.Notes,
-               f.Id,f.FilePath,f.FileName,f.Extension,f.FileSize,f.SourceType,f.ExistsState
-          FROM Movies m
-          LEFT JOIN UserMovieState s ON s.MovieId=m.Id
-          LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1
-         WHERE m.Id=$id LIMIT 1
-        """;
-    command.Parameters.AddWithValue("$id", movieId);
-    await using var reader = await command.ExecuteReaderAsync();
-    if (!await reader.ReadAsync()) return Results.NotFound();
-    var detail = new {
-        id = reader.GetInt64(0), code = Text(reader, 1), title = Text(reader, 2), originalTitle = Text(reader, 3),
-        releaseDate = Text(reader, 4), durationSeconds = Number(reader, 5), description = Text(reader, 6),
-        providerRating = DecimalNumber(reader, 7), scraped = Number(reader, 8) == 1, scrapeStatus = Text(reader, 9),
-        nfoPath = Text(reader, 10), importedAt = Text(reader, 11), updatedAt = Text(reader, 12),
-        favorite = Number(reader, 13) == 1, userRating = DecimalNumber(reader, 14), playCount = Number(reader, 15),
-        lastPlayedAt = Text(reader, 16), lastPositionSeconds = Number(reader, 17), notes = Text(reader, 18),
-        mediaFile = reader.IsDBNull(19) ? null : new { id = reader.GetInt64(19), path = Text(reader, 20), fileName = Text(reader, 21),
-            extension = Text(reader, 22), fileSize = Number(reader, 23), sourceType = Text(reader, 24), existsState = Text(reader, 25) },
-        coverUrl = $"{bridgeUrl}/api/images/{movieId}/primary",
-    };
-    return Results.Ok(detail);
+    MovieDetailDto? detail = await ProductReader.ReadMovieAsync(databasePath, bridgeUrl, movieId);
+    return detail is null ? Results.NotFound() : Results.Ok(detail);
 });
 
 app.MapGet("/api/covers/{code}", (string code) => {
@@ -234,6 +228,3 @@ static bool IsVideoFile(string path) => Path.GetExtension(path).ToLowerInvariant
     or ".vob" or ".mpg" or ".mpeg";
 
 static string EscapeLike(string value) => value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
-static string? Text(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
-static long Number(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? 0 : reader.GetInt64(ordinal);
-static double DecimalNumber(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? 0 : reader.GetDouble(ordinal);
