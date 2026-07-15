@@ -62,6 +62,7 @@ export interface LibraryFolder {
   includeSubfolders: boolean
   scanMode: string
   lastScannedAt?: string
+  excludePatterns: string[]
 }
 
 export interface MediaLibrary {
@@ -78,6 +79,7 @@ export interface TaskItem {
   id: number
   type: string
   status: string
+  name: string
   progress: number
   totalItems: number
   completedItems: number
@@ -86,6 +88,34 @@ export interface TaskItem {
   startedAt?: string
   completedAt?: string
 }
+export interface TaskLogItem { id: number; level: string; message: string; createdAt: string }
+export interface TaskMutationResult { taskId: number; status: string; message: string }
+
+export interface LibraryFolderInput {
+  path: string
+  includeSubfolders: boolean
+  enabled: boolean
+  scanMode: 'normal' | 'watch' | 'manual'
+  excludePatterns: string[]
+}
+
+export interface LibraryInput {
+  name: string
+  description?: string
+  enabled: boolean
+  folders: LibraryFolderInput[]
+}
+
+export interface LibraryMutationResult extends MutationResult { id: number }
+export interface LibraryDeletePreview {
+  libraryId: number
+  name: string
+  folderCount: number
+  linkedFiles: number
+  confirmationToken: string
+  warnings: string[]
+}
+export interface ScanLaunchResult { taskId: number; status: string; message: string }
 
 export interface NamedItem { id: number; name: string }
 export interface MediaFileItem {

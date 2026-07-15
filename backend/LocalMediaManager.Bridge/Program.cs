@@ -21,6 +21,7 @@ builder.WebHost.UseUrls(bridgeUrl);
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddSingleton(new ProductWriter(databasePath));
+builder.Services.AddSingleton(new LibraryWorkflowService(databasePath));
 
 var app = builder.Build();
 app.UseCors();
@@ -88,9 +89,31 @@ app.MapGet("/api/libraries", async () => File.Exists(databasePath)
     ? Results.Ok(await ProductReader.ReadLibrariesAsync(databasePath))
     : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
 
+app.MapPost("/api/libraries", async (LibraryCommand command, LibraryWorkflowService service) =>
+    Results.Ok(await service.CreateLibraryAsync(command)));
+app.MapPut("/api/libraries/{libraryId:long}", async (long libraryId, LibraryCommand command, LibraryWorkflowService service) =>
+    Results.Ok(await service.UpdateLibraryAsync(libraryId, command)));
+app.MapGet("/api/libraries/{libraryId:long}/delete-preview", async (long libraryId, LibraryWorkflowService service) =>
+    Results.Ok(await service.PreviewDeleteLibraryAsync(libraryId)));
+app.MapPost("/api/libraries/{libraryId:long}/delete", async (long libraryId, ConfirmCommand command, LibraryWorkflowService service) =>
+    Results.Ok(await service.DeleteLibraryAsync(libraryId, command)));
+app.MapPost("/api/libraries/{libraryId:long}/scan", async (long libraryId, ScanLibraryCommand command, LibraryWorkflowService service) =>
+    Results.Ok(await service.StartScanAsync(libraryId, command)));
+
 app.MapGet("/api/tasks", async (int? limit) => File.Exists(databasePath)
     ? Results.Ok(await ProductReader.ReadTasksAsync(databasePath, Math.Clamp(limit ?? 50, 1, 200)))
     : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
+app.MapGet("/api/tasks/{taskId:long}/logs", async (long taskId, int? limit) => File.Exists(databasePath)
+    ? Results.Ok(await ProductReader.ReadTaskLogsAsync(databasePath, taskId, Math.Clamp(limit ?? 200, 1, 1000)))
+    : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
+app.MapPost("/api/tasks/{taskId:long}/pause", async (long taskId, LibraryWorkflowService service) =>
+    Results.Ok(await service.PauseTaskAsync(taskId)));
+app.MapPost("/api/tasks/{taskId:long}/resume", async (long taskId, LibraryWorkflowService service) =>
+    Results.Ok(await service.ResumeTaskAsync(taskId)));
+app.MapPost("/api/tasks/{taskId:long}/cancel", async (long taskId, LibraryWorkflowService service) =>
+    Results.Ok(await service.CancelTaskAsync(taskId)));
+app.MapPost("/api/tasks/{taskId:long}/retry", async (long taskId, LibraryWorkflowService service) =>
+    Results.Ok(await service.RetryTaskAsync(taskId)));
 
 app.MapGet("/api/entities/{entityType}", async (string entityType, string? search, string? sort, int? limit, int? offset) => {
     if (!File.Exists(databasePath)) return Results.Problem($"找不到数据库：{databasePath}", statusCode: 503);

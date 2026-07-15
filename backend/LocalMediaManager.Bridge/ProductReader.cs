@@ -9,11 +9,13 @@ public sealed record DashboardDto(long MovieCount, long FavoriteCount, long Play
 public sealed record SearchEntityDto(long Id, string Name, long MovieCount);
 public sealed record GlobalSearchDto(string Query, IReadOnlyList<MediaCardDto> Movies,
     IReadOnlyList<SearchEntityDto> Actors, IReadOnlyList<SearchEntityDto> Tags);
-public sealed record LibraryFolderDto(long Id, string Path, bool Enabled, bool IncludeSubfolders, string ScanMode, string? LastScannedAt);
+public sealed record LibraryFolderDto(long Id, string Path, bool Enabled, bool IncludeSubfolders, string ScanMode,
+    string? LastScannedAt, IReadOnlyList<string> ExcludePatterns);
 public sealed record LibraryDto(long Id, string Name, string? Description, bool Enabled, long MovieCount,
     long MissingCount, IReadOnlyList<LibraryFolderDto> Folders);
-public sealed record TaskDto(long Id, string Type, string Status, double Progress, long TotalItems,
+public sealed record TaskDto(long Id, string Type, string Status, string Name, double Progress, long TotalItems,
     long CompletedItems, string? ErrorMessage, string CreatedAt, string? StartedAt, string? CompletedAt);
+public sealed record TaskLogDto(long Id, string Level, string Message, string CreatedAt);
 public sealed record NamedDto(long Id, string Name);
 public sealed record MediaFileDto(long Id, string Path, string FileName, string? Extension, long FileSize,
     string SourceType, string ExistsState, bool Primary);
@@ -95,10 +97,16 @@ public static class ProductReader
         foreach (var library in libraries) {
             var folders = new List<LibraryFolderDto>();
             await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT Id,FolderPath,IsEnabled,IncludeSubfolders,ScanMode,LastScannedAt FROM LibraryFolders WHERE LibraryId=$id ORDER BY Id";
+            command.CommandText = "SELECT Id,FolderPath,IsEnabled,IncludeSubfolders,ScanMode,LastScannedAt,ExcludePatternsJson FROM LibraryFolders WHERE LibraryId=$id ORDER BY Id";
             command.Parameters.AddWithValue("$id", library.Id);
             await using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync()) folders.Add(new(reader.GetInt64(0),reader.GetString(1),reader.GetInt64(2)==1,reader.GetInt64(3)==1,reader.GetString(4),Text(reader,5)));
+            while (await reader.ReadAsync()) {
+                IReadOnlyList<string> excludePatterns;
+                try { excludePatterns = System.Text.Json.JsonSerializer.Deserialize<string[]>(reader.IsDBNull(6) ? "[]" : reader.GetString(6)) ?? []; }
+                catch (System.Text.Json.JsonException) { excludePatterns = []; }
+                folders.Add(new(reader.GetInt64(0),reader.GetString(1),reader.GetInt64(2)==1,
+                    reader.GetInt64(3)==1,reader.GetString(4),Text(reader,5),excludePatterns));
+            }
             result.Add(new(library.Id,library.Name,library.Description,library.Enabled,library.Movies,library.Missing,folders));
         }
         return result;
@@ -107,14 +115,54 @@ public static class ProductReader
     public static async Task<IReadOnlyList<TaskDto>> ReadTasksAsync(string databasePath, int limit)
     {
         await using var connection = await OpenAsync(databasePath);
+        var libraryNames = new Dictionary<long, string>();
+        await using (var libraries = connection.CreateCommand()) {
+            libraries.CommandText = "SELECT Id,Name FROM Libraries";
+            await using var libraryReader = await libraries.ExecuteReaderAsync();
+            while (await libraryReader.ReadAsync()) libraryNames[libraryReader.GetInt64(0)] = libraryReader.GetString(1);
+        }
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id,TaskType,Status,Progress,TotalItems,CompletedItems,ErrorMessage,CreatedAt,StartedAt,CompletedAt FROM Tasks ORDER BY Id DESC LIMIT $limit";
+        command.CommandText = "SELECT Id,TaskType,Status,Progress,TotalItems,CompletedItems,ErrorMessage,CreatedAt,StartedAt,CompletedAt,PayloadJson FROM Tasks ORDER BY Id DESC LIMIT $limit";
         command.Parameters.AddWithValue("$limit", limit);
         var tasks = new List<TaskDto>();
         await using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync()) tasks.Add(new(reader.GetInt64(0),reader.GetString(1),reader.GetString(2),reader.GetDouble(3),
-            reader.GetInt64(4),reader.GetInt64(5),Text(reader,6),reader.GetString(7),Text(reader,8),Text(reader,9)));
+        while (await reader.ReadAsync()) {
+            string type = reader.GetString(1);
+            string? payload = Text(reader, 10);
+            tasks.Add(new(reader.GetInt64(0),type,reader.GetString(2),TaskName(type,payload,libraryNames),reader.GetDouble(3),
+                reader.GetInt64(4),reader.GetInt64(5),Text(reader,6),reader.GetString(7),Text(reader,8),Text(reader,9)));
+        }
         return tasks;
+    }
+
+    public static async Task<IReadOnlyList<TaskLogDto>> ReadTaskLogsAsync(string databasePath, long taskId, int limit)
+    {
+        await using var connection = await OpenAsync(databasePath);
+        if (await ScalarAsync(connection, $"SELECT COUNT(*) FROM Tasks WHERE Id={taskId}") == 0)
+            throw new KeyNotFoundException("任务不存在。");
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id,Level,Message,CreatedAt FROM TaskLogs WHERE TaskId=$task ORDER BY Id DESC LIMIT $limit";
+        command.Parameters.AddWithValue("$task", taskId);
+        command.Parameters.AddWithValue("$limit", limit);
+        var result = new List<TaskLogDto>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) result.Add(new(reader.GetInt64(0),reader.GetString(1),reader.GetString(2),reader.GetString(3)));
+        result.Reverse();
+        return result;
+    }
+
+    private static string TaskName(string type, string? payload, IReadOnlyDictionary<long, string> libraryNames)
+    {
+        if (!string.IsNullOrWhiteSpace(payload)) {
+            try {
+                using var json = System.Text.Json.JsonDocument.Parse(payload);
+                if (json.RootElement.TryGetProperty("LibraryId", out var library) && library.TryGetInt64(out long libraryId))
+                    return libraryNames.GetValueOrDefault(libraryId, $"媒体库 #{libraryId}");
+                if (json.RootElement.TryGetProperty("MovieId", out var movie) && movie.TryGetInt64(out long movieId))
+                    return $"影片 #{movieId}";
+            } catch (System.Text.Json.JsonException) { }
+        }
+        return type switch { "ActorRepair" => "演员关系修复", _ => type };
     }
 
     public static async Task<EntityPageDto> ReadEntitiesPageAsync(string databasePath, string bridgeUrl,

@@ -90,7 +90,7 @@ Planning → Design → Develop → Self Test → Smoke Test → Freeze → Rele
 
 ## 0.4.2 — Legacy Feature Migration Part 2
 
-**状态：Planning（下一规划版本）**
+**状态：Develop**
 
 - 媒体扫描与导入
 - 新增后自动同步

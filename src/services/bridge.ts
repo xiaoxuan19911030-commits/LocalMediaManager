@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, EntityPageResult, GlobalSearchResult, ImpactPreview, LibrarySummary, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, TaskItem } from '@/types/media'
+import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, EntityPageResult, GlobalSearchResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, ScanLaunchResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
 import type { SettingsSnapshot } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
@@ -36,7 +36,17 @@ export const bridge = {
   neighbors: (id: number, search = '', sort = 'newest') => request<NeighborResult>(`/api/videos/${id}/neighbors?${new URLSearchParams({ search, sort })}`),
   search: (query: string, limit = 12) => request<GlobalSearchResult>(`/api/search?${new URLSearchParams({ q: query, limit: String(limit) })}`),
   libraries: () => request<MediaLibrary[]>('/api/libraries'),
+  createLibrary: (value: LibraryInput) => request<LibraryMutationResult>('/api/libraries', { method: 'POST', body: JSON.stringify(value) }),
+  updateLibrary: (libraryId: number, value: LibraryInput) => request<LibraryMutationResult>(`/api/libraries/${libraryId}`, { method: 'PUT', body: JSON.stringify(value) }),
+  previewDeleteLibrary: (libraryId: number) => request<LibraryDeletePreview>(`/api/libraries/${libraryId}/delete-preview`),
+  deleteLibrary: (libraryId: number, confirmationToken: string) => request<LibraryMutationResult>(`/api/libraries/${libraryId}/delete`, { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
+  scanLibrary: (libraryId: number, fullScan = false, autoSync = true) => request<ScanLaunchResult>(`/api/libraries/${libraryId}/scan`, { method: 'POST', body: JSON.stringify({ fullScan, autoSync }) }),
   tasks: (limit = 100) => request<TaskItem[]>(`/api/tasks?limit=${limit}`),
+  taskLogs: (taskId: number, limit = 200) => request<TaskLogItem[]>(`/api/tasks/${taskId}/logs?limit=${limit}`),
+  pauseTask: (taskId: number) => request<TaskMutationResult>(`/api/tasks/${taskId}/pause`, { method: 'POST' }),
+  resumeTask: (taskId: number) => request<TaskMutationResult>(`/api/tasks/${taskId}/resume`, { method: 'POST' }),
+  cancelTask: (taskId: number) => request<TaskMutationResult>(`/api/tasks/${taskId}/cancel`, { method: 'POST' }),
+  retryTask: (taskId: number) => request<ScanLaunchResult>(`/api/tasks/${taskId}/retry`, { method: 'POST' }),
   entities: (type: 'actors' | 'tags', search = '', sort = 'count', limit = 48, offset = 0) => request<EntityPageResult>(`/api/entities/${type}?${new URLSearchParams({ search, sort, limit: String(limit), offset: String(offset) })}`),
   actor: (id: number) => request<ActorDetail>(`/api/actors/${id}`),
   entityMovies: (type: 'actors' | 'tags', id: number, limit = 48, offset = 0) => request<MediaPageResult>(`/api/entities/${type}/${id}/movies?${new URLSearchParams({ limit: String(limit), offset: String(offset) })}`),
