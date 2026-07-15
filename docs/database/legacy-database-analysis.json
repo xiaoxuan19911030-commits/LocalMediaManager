@@ -1,0 +1,3097 @@
+{
+  "ToolVersion": "0.1.0",
+  "GeneratedAt": "2026-07-15T12:57:13.0228869+08:00",
+  "Databases": [
+    {
+      "Name": "business",
+      "Path": "D:\\Jvedio\\Jvedio5.0\\data\\Administrator\\app_datas.sqlite",
+      "Sha256": "5e9f0b56f54de301433a7828832b5c692893bde8b6665bb1c6ba76da452ba09a",
+      "Size": 11005952,
+      "Tables": [
+        {
+          "Name": "actor_info",
+          "RowCount": 1667,
+          "CreateSql": "CREATE TABLE actor_info( ActorID INTEGER PRIMARY KEY autoincrement, ActorName VARCHAR(500), Country VARCHAR(500), Nation VARCHAR(500), BirthPlace VARCHAR(500), Birthday VARCHAR(100), Age INT, BloodType VARCHAR(100), Height INT, Weight INT, Gender INT DEFAULT 0, Hobby VARCHAR(500), Cup VARCHAR(1) DEFAULT \u0027Z\u0027, Chest INT, Waist INT, Hipline INT, WebType  VARCHAR(100), WebUrl  VARCHAR(2000), Grade FLOAT DEFAULT 0.0, ExtraInfo TEXT, CreateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), UpdateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)) , ImageUrl TEXT)",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "ActorID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "ActorName",
+              "Type": "VARCHAR(500)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 1
+            },
+            {
+              "Ordinal": 2,
+              "Name": "Country",
+              "Type": "VARCHAR(500)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 804,
+              "EmptyCount": 863
+            },
+            {
+              "Ordinal": 3,
+              "Name": "Nation",
+              "Type": "VARCHAR(500)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 804,
+              "EmptyCount": 863
+            },
+            {
+              "Ordinal": 4,
+              "Name": "BirthPlace",
+              "Type": "VARCHAR(500)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 804,
+              "EmptyCount": 863
+            },
+            {
+              "Ordinal": 5,
+              "Name": "Birthday",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 804,
+              "EmptyCount": 863
+            },
+            {
+              "Ordinal": 6,
+              "Name": "Age",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 7,
+              "Name": "BloodType",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 804,
+              "EmptyCount": 863
+            },
+            {
+              "Ordinal": 8,
+              "Name": "Height",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 9,
+              "Name": "Weight",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 10,
+              "Name": "Gender",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 11,
+              "Name": "Hobby",
+              "Type": "VARCHAR(500)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 804,
+              "EmptyCount": 863
+            },
+            {
+              "Ordinal": 12,
+              "Name": "Cup",
+              "Type": "VARCHAR(1)",
+              "NotNull": false,
+              "DefaultValue": "\u0027Z\u0027",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 13,
+              "Name": "Chest",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 14,
+              "Name": "Waist",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 15,
+              "Name": "Hipline",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 16,
+              "Name": "WebType",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 804,
+              "EmptyCount": 863
+            },
+            {
+              "Ordinal": 17,
+              "Name": "WebUrl",
+              "Type": "VARCHAR(2000)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 804,
+              "EmptyCount": 863
+            },
+            {
+              "Ordinal": 18,
+              "Name": "Grade",
+              "Type": "FLOAT",
+              "NotNull": false,
+              "DefaultValue": "0.0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 19,
+              "Name": "ExtraInfo",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 804,
+              "EmptyCount": 863
+            },
+            {
+              "Ordinal": 20,
+              "Name": "CreateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 863
+            },
+            {
+              "Ordinal": 21,
+              "Name": "UpdateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 863
+            },
+            {
+              "Ordinal": 22,
+              "Name": "ImageUrl",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 369
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "actor_info_idx_ActorName",
+              "Unique": false,
+              "Columns": [
+                "ActorName"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "app_databases",
+          "RowCount": 2,
+          "CreateSql": "CREATE TABLE app_databases ( DBId INTEGER PRIMARY KEY autoincrement, Name VARCHAR(500), Count INTEGER DEFAULT 0, DataType INT DEFAULT 0, ImagePath TEXT DEFAULT \u0027\u0027, ViewCount INT DEFAULT 0, Hide INT DEFAULT 0, ScanPath TEXT, ExtraInfo TEXT, CreateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), UpdateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "DBId",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "Name",
+              "Type": "VARCHAR(500)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "Count",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "DataType",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "ImagePath",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": "\u0027\u0027",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 2
+            },
+            {
+              "Ordinal": 5,
+              "Name": "ViewCount",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 6,
+              "Name": "Hide",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 7,
+              "Name": "ScanPath",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 8,
+              "Name": "ExtraInfo",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 2
+            },
+            {
+              "Ordinal": 9,
+              "Name": "CreateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 10,
+              "Name": "UpdateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "type_idx",
+              "Unique": false,
+              "Columns": [
+                "DataType"
+              ]
+            },
+            {
+              "Name": "name_idx",
+              "Unique": false,
+              "Columns": [
+                "Name"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "common_ai_face",
+          "RowCount": 0,
+          "CreateSql": "CREATE TABLE common_ai_face ( AIId INTEGER PRIMARY KEY autoincrement, Age INT DEFAULT 0, Beauty FLOAT DEFAULT 0, Expression VARCHAR(100), FaceShape VARCHAR(100), Gender INT DEFAULT 0, Glasses INT DEFAULT 0, Race VARCHAR(100), Emotion VARCHAR(100), Mask INT DEFAULT 0, Platform VARCHAR(100), ExtraInfo TEXT, CreateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), UpdateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "AIId",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "Age",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "Beauty",
+              "Type": "FLOAT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "Expression",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "FaceShape",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 5,
+              "Name": "Gender",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 6,
+              "Name": "Glasses",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 7,
+              "Name": "Race",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 8,
+              "Name": "Emotion",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 9,
+              "Name": "Mask",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 10,
+              "Name": "Platform",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 11,
+              "Name": "ExtraInfo",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 12,
+              "Name": "CreateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 13,
+              "Name": "UpdateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": []
+        },
+        {
+          "Name": "common_association",
+          "RowCount": 0,
+          "CreateSql": "CREATE TABLE common_association ( AID INTEGER PRIMARY KEY autoincrement, MainDataID INTEGER, SubDataID INTEGER, AssociationType INT DEFAULT 0, CreateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), UpdateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), unique(MainDataID,SubDataID,AssociationType) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "AID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "MainDataID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "SubDataID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "AssociationType",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "CreateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 5,
+              "Name": "UpdateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "common_association_idx_MainDataID_SubDataID",
+              "Unique": false,
+              "Columns": [
+                "MainDataID",
+                "SubDataID"
+              ]
+            },
+            {
+              "Name": "common_association_idx_SubDataID",
+              "Unique": false,
+              "Columns": [
+                "SubDataID"
+              ]
+            },
+            {
+              "Name": "common_association_idx_MainDataID",
+              "Unique": false,
+              "Columns": [
+                "MainDataID"
+              ]
+            },
+            {
+              "Name": "sqlite_autoindex_common_association_1",
+              "Unique": true,
+              "Columns": [
+                "MainDataID",
+                "SubDataID",
+                "AssociationType"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "common_deleted_rating_memory",
+          "RowCount": 2,
+          "CreateSql": "CREATE TABLE common_deleted_rating_memory (FileName TEXT PRIMARY KEY, Grade FLOAT DEFAULT 0.0, UpdateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)))",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "FileName",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "Grade",
+              "Type": "FLOAT",
+              "NotNull": false,
+              "DefaultValue": "0.0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "UpdateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "common_deleted_rating_memory_idx_FileName",
+              "Unique": false,
+              "Columns": [
+                "FileName"
+              ]
+            },
+            {
+              "Name": "sqlite_autoindex_common_deleted_rating_memory_1",
+              "Unique": true,
+              "Columns": [
+                "FileName"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "common_images",
+          "RowCount": 0,
+          "CreateSql": "CREATE TABLE common_images( ImageID INTEGER PRIMARY KEY autoincrement,  Name VARCHAR(500), Path VARCHAR(1000), PathType INT DEFAULT 0, Ext VARCHAR(100), Size INTEGER, Height INT, Width INT,  Url TEXT, ExtraInfo TEXT, Source VARCHAR(100),  CreateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), UpdateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)),  unique(PathType,Path) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "ImageID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "Name",
+              "Type": "VARCHAR(500)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "Path",
+              "Type": "VARCHAR(1000)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "PathType",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "Ext",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 5,
+              "Name": "Size",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 6,
+              "Name": "Height",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 7,
+              "Name": "Width",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 8,
+              "Name": "Url",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 9,
+              "Name": "ExtraInfo",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 10,
+              "Name": "Source",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 11,
+              "Name": "CreateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 12,
+              "Name": "UpdateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "sqlite_autoindex_common_images_1",
+              "Unique": true,
+              "Columns": [
+                "PathType",
+                "Path"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "common_magnets",
+          "RowCount": 0,
+          "CreateSql": "CREATE TABLE common_magnets ( MagnetID INTEGER PRIMARY KEY autoincrement, MagnetLink VARCHAR(40), TorrentUrl VARCHAR(2000), DataID INTEGER, VID INTEGER, Title TEXT, Size INTEGER DEFAULT 0, Releasedate VARCHAR(10) DEFAULT \u00271900-01-01\u0027, Tag TEXT, DownloadNumber INT DEFAULT 0, ExtraInfo TEXT, CreateDate VARCHAR(30) NOT NULL DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), UpdateDate VARCHAR(30) NOT NULL DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), unique(MagnetLink) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "MagnetID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "MagnetLink",
+              "Type": "VARCHAR(40)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "TorrentUrl",
+              "Type": "VARCHAR(2000)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "DataID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "VID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 5,
+              "Name": "Title",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 6,
+              "Name": "Size",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 7,
+              "Name": "Releasedate",
+              "Type": "VARCHAR(10)",
+              "NotNull": false,
+              "DefaultValue": "\u00271900-01-01\u0027",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 8,
+              "Name": "Tag",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 9,
+              "Name": "DownloadNumber",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 10,
+              "Name": "ExtraInfo",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 11,
+              "Name": "CreateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": true,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 12,
+              "Name": "UpdateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": true,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "common_magnets_idx_VID",
+              "Unique": false,
+              "Columns": [
+                "VID"
+              ]
+            },
+            {
+              "Name": "common_magnets_idx_DataID",
+              "Unique": false,
+              "Columns": [
+                "DataID"
+              ]
+            },
+            {
+              "Name": "sqlite_autoindex_common_magnets_1",
+              "Unique": true,
+              "Columns": [
+                "MagnetLink"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "common_picture_exist",
+          "RowCount": 7529,
+          "CreateSql": "CREATE TABLE common_picture_exist ( id INTEGER PRIMARY KEY autoincrement, DataID INTEGER, PathType INT DEFAULT 0, ImageType INT DEFAULT 0, Exist INT DEFAULT 0, CreateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), UpdateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), unique(DataID,PathType,ImageType,Exist) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "id",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "DataID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "PathType",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "ImageType",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "Exist",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 5,
+              "Name": "CreateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 6,
+              "Name": "UpdateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "common_picture_exist_idx_DataID_PathType_ImageType",
+              "Unique": false,
+              "Columns": [
+                "DataID",
+                "PathType",
+                "ImageType"
+              ]
+            },
+            {
+              "Name": "sqlite_autoindex_common_picture_exist_1",
+              "Unique": true,
+              "Columns": [
+                "DataID",
+                "PathType",
+                "ImageType",
+                "Exist"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "common_play_history",
+          "RowCount": 592,
+          "CreateSql": "CREATE TABLE common_play_history (HistoryID INTEGER PRIMARY KEY autoincrement, DataID INTEGER, DBId INTEGER, DataType INT DEFAULT 0, Title TEXT, Path TEXT, PlayDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), CreateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)))",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "HistoryID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "DataID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "DBId",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "DataType",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "Title",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 1,
+              "EmptyCount": 193
+            },
+            {
+              "Ordinal": 5,
+              "Name": "Path",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 6,
+              "Name": "PlayDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 7,
+              "Name": "CreateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "common_play_history_idx_PlayDate",
+              "Unique": false,
+              "Columns": [
+                "PlayDate"
+              ]
+            },
+            {
+              "Name": "common_play_history_idx_DBId_DataType_PlayDate",
+              "Unique": false,
+              "Columns": [
+                "DBId",
+                "DataType",
+                "PlayDate"
+              ]
+            },
+            {
+              "Name": "common_play_history_idx_DataID_PlayDate",
+              "Unique": false,
+              "Columns": [
+                "DataID",
+                "PlayDate"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "common_search_histories",
+          "RowCount": 6,
+          "CreateSql": "CREATE TABLE common_search_histories ( ID INTEGER PRIMARY KEY autoincrement, SearchMode INT DEFAULT 0, SearchField VARCHAR(200), SearchValue TEXT, CreateYear INT DEFAULT 2022, CreateMonth INT DEFAULT 7, CreateDay INT DEFAULT 3, ExtraInfo TEXT, CreateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), UpdateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)) , TypeMode INT DEFAULT 0)",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "ID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "SearchMode",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "SearchField",
+              "Type": "VARCHAR(200)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "SearchValue",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "CreateYear",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "2022",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 5,
+              "Name": "CreateMonth",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "7",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 6,
+              "Name": "CreateDay",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "3",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 7,
+              "Name": "ExtraInfo",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 6,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 8,
+              "Name": "CreateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 9,
+              "Name": "UpdateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 10,
+              "Name": "TypeMode",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "common_search_histories_idx_SearchMode_SearchField_CreateDate",
+              "Unique": false,
+              "Columns": [
+                "SearchMode",
+                "SearchField",
+                "CreateDate"
+              ]
+            },
+            {
+              "Name": "common_search_histories_idx_SearchMode_SearchField_CreateYear_CreateMonth_CreateDay",
+              "Unique": false,
+              "Columns": [
+                "SearchMode",
+                "SearchField",
+                "CreateYear",
+                "CreateMonth",
+                "CreateDay"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "common_tagstamp",
+          "RowCount": 2,
+          "CreateSql": "CREATE TABLE common_tagstamp ( TagID INTEGER PRIMARY KEY autoincrement, Foreground VARCHAR(100), Background VARCHAR(100), TagName VARCHAR(200), ExtraInfo TEXT, CreateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), UpdateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "TagID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "Foreground",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "Background",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "TagName",
+              "Type": "VARCHAR(200)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "ExtraInfo",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 2,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 5,
+              "Name": "CreateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 6,
+              "Name": "UpdateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": []
+        },
+        {
+          "Name": "common_transaltions",
+          "RowCount": 0,
+          "CreateSql": "CREATE TABLE common_transaltions( TransaltionID INTEGER PRIMARY KEY autoincrement,  SourceLang VARCHAR(100), TargetLang VARCHAR(100), SourceText TEXT, TargetText TEXT, Platform VARCHAR(100),  CreateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), UpdateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "TransaltionID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "SourceLang",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "TargetLang",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "SourceText",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "TargetText",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 5,
+              "Name": "Platform",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 6,
+              "Name": "CreateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 7,
+              "Name": "UpdateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": []
+        },
+        {
+          "Name": "common_translations",
+          "RowCount": 0,
+          "CreateSql": "CREATE TABLE common_translations( TranslationID INTEGER PRIMARY KEY autoincrement,  SourceLang VARCHAR(100), TargetLang VARCHAR(100), SourceText TEXT, TargetText TEXT, Platform VARCHAR(100),  CreateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), UpdateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "TranslationID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "SourceLang",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "TargetLang",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "SourceText",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "TargetText",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 5,
+              "Name": "Platform",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 6,
+              "Name": "CreateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 7,
+              "Name": "UpdateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": []
+        },
+        {
+          "Name": "common_url_code",
+          "RowCount": 726,
+          "CreateSql": "CREATE TABLE common_url_code ( CodeId INTEGER PRIMARY KEY autoincrement, LocalValue VARCHAR(500), ValueType  VARCHAR(20) DEFAULT \u0027video\u0027, RemoteValue VARCHAR(100), WebType VARCHAR(100), CreateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), UpdateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), unique(ValueType,WebType,LocalValue,RemoteValue) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "CodeId",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "LocalValue",
+              "Type": "VARCHAR(500)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "ValueType",
+              "Type": "VARCHAR(20)",
+              "NotNull": false,
+              "DefaultValue": "\u0027video\u0027",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "RemoteValue",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 27
+            },
+            {
+              "Ordinal": 4,
+              "Name": "WebType",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 5,
+              "Name": "CreateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 6,
+              "Name": "UpdateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "common_url_code_idx_ValueType_WebType_LocalValue",
+              "Unique": false,
+              "Columns": [
+                "ValueType",
+                "WebType",
+                "LocalValue"
+              ]
+            },
+            {
+              "Name": "sqlite_autoindex_common_url_code_1",
+              "Unique": true,
+              "Columns": [
+                "ValueType",
+                "WebType",
+                "LocalValue",
+                "RemoteValue"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "metadata",
+          "RowCount": 2500,
+          "CreateSql": "CREATE TABLE metadata ( DataID INTEGER PRIMARY KEY autoincrement, DBId INTEGER, Title TEXT, Size  INTEGER DEFAULT 0, Path TEXT, Hash VARCHAR(32), Country VARCHAR(50), ReleaseDate VARCHAR(30), ReleaseYear INT DEFAULT 1900, ViewCount INT DEFAULT 0, DataType INT DEFAULT 0, Rating FLOAT DEFAULT 0.0, RatingCount INT DEFAULT 0, FavoriteCount INT DEFAULT 0, Genre TEXT, Grade FLOAT DEFAULT 0.0, ViewDate VARCHAR(30), FirstScanDate VARCHAR(30), LastScanDate VARCHAR(30), CreateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), UpdateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)) , PathExist INT DEFAULT 0)",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "DataID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "DBId",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "Title",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 4,
+              "EmptyCount": 1081
+            },
+            {
+              "Ordinal": 3,
+              "Name": "Size",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "Path",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 5,
+              "Name": "Hash",
+              "Type": "VARCHAR(32)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 1393
+            },
+            {
+              "Ordinal": 6,
+              "Name": "Country",
+              "Type": "VARCHAR(50)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 4,
+              "EmptyCount": 2496
+            },
+            {
+              "Ordinal": 7,
+              "Name": "ReleaseDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 4,
+              "EmptyCount": 1282
+            },
+            {
+              "Ordinal": 8,
+              "Name": "ReleaseYear",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "1900",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 9,
+              "Name": "ViewCount",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 10,
+              "Name": "DataType",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 11,
+              "Name": "Rating",
+              "Type": "FLOAT",
+              "NotNull": false,
+              "DefaultValue": "0.0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 12,
+              "Name": "RatingCount",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 13,
+              "Name": "FavoriteCount",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 14,
+              "Name": "Genre",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 4,
+              "EmptyCount": 1276
+            },
+            {
+              "Ordinal": 15,
+              "Name": "Grade",
+              "Type": "FLOAT",
+              "NotNull": false,
+              "DefaultValue": "0.0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 16,
+              "Name": "ViewDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 3,
+              "EmptyCount": 1921
+            },
+            {
+              "Ordinal": 17,
+              "Name": "FirstScanDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 18,
+              "Name": "LastScanDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 19,
+              "Name": "CreateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 20,
+              "Name": "UpdateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 21,
+              "Name": "PathExist",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "metadata_idx_DBId_DataType_Title",
+              "Unique": false,
+              "Columns": [
+                "DBId",
+                "DataType",
+                "Title"
+              ]
+            },
+            {
+              "Name": "metadata_idx_DBId_DataType_PathExist",
+              "Unique": false,
+              "Columns": [
+                "DBId",
+                "DataType",
+                "PathExist"
+              ]
+            },
+            {
+              "Name": "metadata_idx_DBId_DataType_ViewCount",
+              "Unique": false,
+              "Columns": [
+                "DBId",
+                "DataType",
+                "ViewCount"
+              ]
+            },
+            {
+              "Name": "metadata_idx_DBId_DataType_ViewDate",
+              "Unique": false,
+              "Columns": [
+                "DBId",
+                "DataType",
+                "ViewDate"
+              ]
+            },
+            {
+              "Name": "metadata_idx_DBId_DataType_Size",
+              "Unique": false,
+              "Columns": [
+                "DBId",
+                "DataType",
+                "Size"
+              ]
+            },
+            {
+              "Name": "metadata_idx_DBId_DataType_Grade",
+              "Unique": false,
+              "Columns": [
+                "DBId",
+                "DataType",
+                "Grade"
+              ]
+            },
+            {
+              "Name": "metadata_idx_DBId_DataType_LastScanDate",
+              "Unique": false,
+              "Columns": [
+                "DBId",
+                "DataType",
+                "LastScanDate"
+              ]
+            },
+            {
+              "Name": "metadata_idx_DBId_DataType_FirstScanDate",
+              "Unique": false,
+              "Columns": [
+                "DBId",
+                "DataType",
+                "FirstScanDate"
+              ]
+            },
+            {
+              "Name": "metadata_idx_DBId_DataType_ReleaseDate",
+              "Unique": false,
+              "Columns": [
+                "DBId",
+                "DataType",
+                "ReleaseDate"
+              ]
+            },
+            {
+              "Name": "metadata_idx_DBId_DataType_Hash",
+              "Unique": false,
+              "Columns": [
+                "DBId",
+                "DataType",
+                "Hash"
+              ]
+            },
+            {
+              "Name": "metadata_idx_DBId_Hash",
+              "Unique": false,
+              "Columns": [
+                "DBId",
+                "Hash"
+              ]
+            },
+            {
+              "Name": "metadata_idx_Hash",
+              "Unique": false,
+              "Columns": [
+                "Hash"
+              ]
+            },
+            {
+              "Name": "metadata_idx_DBId_DataID",
+              "Unique": false,
+              "Columns": [
+                "DBId",
+                "DataType"
+              ]
+            },
+            {
+              "Name": "metadata_idx_DataID",
+              "Unique": false,
+              "Columns": [
+                "DataID"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "metadata_comic",
+          "RowCount": 0,
+          "CreateSql": "CREATE TABLE metadata_comic( CID INTEGER PRIMARY KEY autoincrement, DataID INTEGER, Language VARCHAR(100), ComicType INT DEFAULT 0, Artist TEXT, Plot TEXT, Outline TEXT, PicCount INTEGER DEFAULT 0, PicPaths TEXT, WebType  VARCHAR(100), WebUrl  VARCHAR(2000), ExtraInfo TEXT, unique(DataID,CID) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "CID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "DataID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "Language",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "ComicType",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "Artist",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 5,
+              "Name": "Plot",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 6,
+              "Name": "Outline",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 7,
+              "Name": "PicCount",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 8,
+              "Name": "PicPaths",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 9,
+              "Name": "WebType",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 10,
+              "Name": "WebUrl",
+              "Type": "VARCHAR(2000)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 11,
+              "Name": "ExtraInfo",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "metadata_comic_idx_DataID_CID",
+              "Unique": false,
+              "Columns": [
+                "DataID",
+                "CID"
+              ]
+            },
+            {
+              "Name": "sqlite_autoindex_metadata_comic_1",
+              "Unique": true,
+              "Columns": [
+                "DataID",
+                "CID"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "metadata_game",
+          "RowCount": 0,
+          "CreateSql": "CREATE TABLE metadata_game( GID INTEGER PRIMARY KEY autoincrement, DataID INTEGER, Branch VARCHAR(100), OriginalPainting VARCHAR(200), VoiceActors VARCHAR(200), Play VARCHAR(200), Music VARCHAR(200), Singers VARCHAR(200), Plot TEXT, Outline TEXT, ExtraName TEXT, Studio TEXT, Publisher TEXT, WebType  VARCHAR(100), WebUrl  VARCHAR(2000), ExtraInfo TEXT, unique(DataID,GID) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "GID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "DataID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "Branch",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "OriginalPainting",
+              "Type": "VARCHAR(200)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "VoiceActors",
+              "Type": "VARCHAR(200)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 5,
+              "Name": "Play",
+              "Type": "VARCHAR(200)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 6,
+              "Name": "Music",
+              "Type": "VARCHAR(200)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 7,
+              "Name": "Singers",
+              "Type": "VARCHAR(200)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 8,
+              "Name": "Plot",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 9,
+              "Name": "Outline",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 10,
+              "Name": "ExtraName",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 11,
+              "Name": "Studio",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 12,
+              "Name": "Publisher",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 13,
+              "Name": "WebType",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 14,
+              "Name": "WebUrl",
+              "Type": "VARCHAR(2000)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 15,
+              "Name": "ExtraInfo",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "metadata_game_idx_DataID_GID",
+              "Unique": false,
+              "Columns": [
+                "DataID",
+                "GID"
+              ]
+            },
+            {
+              "Name": "sqlite_autoindex_metadata_game_1",
+              "Unique": true,
+              "Columns": [
+                "DataID",
+                "GID"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "metadata_picture",
+          "RowCount": 0,
+          "CreateSql": "CREATE TABLE metadata_picture( PID INTEGER PRIMARY KEY autoincrement, DataID INTEGER, Director VARCHAR(100), Studio TEXT, Publisher TEXT, Plot TEXT, Outline TEXT, PicCount INTEGER DEFAULT 0, PicPaths TEXT, VideoPaths TEXT, ExtraInfo TEXT, unique(DataID,PID) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "PID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "DataID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "Director",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "Studio",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "Publisher",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 5,
+              "Name": "Plot",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 6,
+              "Name": "Outline",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 7,
+              "Name": "PicCount",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 8,
+              "Name": "PicPaths",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 9,
+              "Name": "VideoPaths",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 10,
+              "Name": "ExtraInfo",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "metadata_picture_idx_DataID_PID",
+              "Unique": false,
+              "Columns": [
+                "DataID",
+                "PID"
+              ]
+            },
+            {
+              "Name": "sqlite_autoindex_metadata_picture_1",
+              "Unique": true,
+              "Columns": [
+                "DataID",
+                "PID"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "metadata_to_actor",
+          "RowCount": 1572,
+          "CreateSql": "CREATE TABLE metadata_to_actor( ID INTEGER PRIMARY KEY autoincrement, ActorID INTEGER, DataID INT, unique(ActorID,DataID) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "ID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "ActorID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "DataID",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "metadata_to_actor_idx_DataID_ActorID",
+              "Unique": false,
+              "Columns": [
+                "DataID",
+                "ActorID"
+              ]
+            },
+            {
+              "Name": "metadata_to_actor_idx_ActorID_DataID",
+              "Unique": false,
+              "Columns": [
+                "ActorID",
+                "DataID"
+              ]
+            },
+            {
+              "Name": "metadata_to_actor_idx_DataID",
+              "Unique": false,
+              "Columns": [
+                "DataID",
+                "ActorID"
+              ]
+            },
+            {
+              "Name": "metadata_to_actor_idx_ActorID",
+              "Unique": false,
+              "Columns": [
+                "ActorID",
+                "DataID"
+              ]
+            },
+            {
+              "Name": "sqlite_autoindex_metadata_to_actor_1",
+              "Unique": true,
+              "Columns": [
+                "ActorID",
+                "DataID"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "metadata_to_label",
+          "RowCount": 1372,
+          "CreateSql": "CREATE TABLE metadata_to_label( id INTEGER PRIMARY KEY autoincrement, DataID INTEGER, LabelName VARCHAR(200), unique(DataID,LabelName) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "id",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "DataID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "LabelName",
+              "Type": "VARCHAR(200)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "metadata_to_label_idx_LabelName",
+              "Unique": false,
+              "Columns": [
+                "LabelName"
+              ]
+            },
+            {
+              "Name": "metadata_to_label_idx_DataID",
+              "Unique": false,
+              "Columns": [
+                "DataID"
+              ]
+            },
+            {
+              "Name": "sqlite_autoindex_metadata_to_label_1",
+              "Unique": true,
+              "Columns": [
+                "DataID",
+                "LabelName"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "metadata_to_tagstamp",
+          "RowCount": 2343,
+          "CreateSql": "CREATE TABLE metadata_to_tagstamp( id INTEGER PRIMARY KEY autoincrement, DataID INTEGER, TagID INTEGER, unique(DataID,TagID) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "id",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "DataID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "TagID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "metadata_to_tagstamp_idx_TagID",
+              "Unique": false,
+              "Columns": [
+                "TagID"
+              ]
+            },
+            {
+              "Name": "metadata_to_tagstamp_idx_DataID",
+              "Unique": false,
+              "Columns": [
+                "DataID"
+              ]
+            },
+            {
+              "Name": "sqlite_autoindex_metadata_to_tagstamp_1",
+              "Unique": true,
+              "Columns": [
+                "DataID",
+                "TagID"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "metadata_to_translation",
+          "RowCount": 0,
+          "CreateSql": "CREATE TABLE metadata_to_translation( id INTEGER PRIMARY KEY autoincrement, DataID INTEGER, FieldType VARCHAR(100), TransaltionID INTEGER, unique(DataID,FieldType,TransaltionID) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "id",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "DataID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "FieldType",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "TransaltionID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "metadata_to_translation_idx_DataID_FieldType",
+              "Unique": false,
+              "Columns": [
+                "DataID",
+                "FieldType"
+              ]
+            },
+            {
+              "Name": "sqlite_autoindex_metadata_to_translation_1",
+              "Unique": true,
+              "Columns": [
+                "DataID",
+                "FieldType",
+                "TransaltionID"
+              ]
+            }
+          ]
+        },
+        {
+          "Name": "metadata_video",
+          "RowCount": 2500,
+          "CreateSql": "CREATE TABLE metadata_video( MVID INTEGER PRIMARY KEY autoincrement, DataID INTEGER, VID VARCHAR(500), VideoType INT DEFAULT 0, Series TEXT, Director VARCHAR(100), Studio TEXT, Publisher TEXT, Plot TEXT, Outline TEXT, Duration INT DEFAULT 0, SubSection TEXT, ImageUrls TEXT DEFAULT \u0027\u0027, WebType  VARCHAR(100), WebUrl  VARCHAR(2000), ExtraInfo TEXT, unique(DataID,VID) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "MVID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "DataID",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "VID",
+              "Type": "VARCHAR(500)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 1078
+            },
+            {
+              "Ordinal": 3,
+              "Name": "VideoType",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "Series",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 1762
+            },
+            {
+              "Ordinal": 5,
+              "Name": "Director",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 1881
+            },
+            {
+              "Ordinal": 6,
+              "Name": "Studio",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 1297
+            },
+            {
+              "Ordinal": 7,
+              "Name": "Publisher",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 2070
+            },
+            {
+              "Ordinal": 8,
+              "Name": "Plot",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 1711
+            },
+            {
+              "Ordinal": 9,
+              "Name": "Outline",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 2140
+            },
+            {
+              "Ordinal": 10,
+              "Name": "Duration",
+              "Type": "INT",
+              "NotNull": false,
+              "DefaultValue": "0",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 11,
+              "Name": "SubSection",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 2447
+            },
+            {
+              "Ordinal": 12,
+              "Name": "ImageUrls",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": "\u0027\u0027",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 1082
+            },
+            {
+              "Ordinal": 13,
+              "Name": "WebType",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 1082
+            },
+            {
+              "Ordinal": 14,
+              "Name": "WebUrl",
+              "Type": "VARCHAR(2000)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 1081
+            },
+            {
+              "Ordinal": 15,
+              "Name": "ExtraInfo",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 2500
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "metadata_video_idx_DataID",
+              "Unique": false,
+              "Columns": [
+                "DataID"
+              ]
+            },
+            {
+              "Name": "metadata_video_idx_VideoType",
+              "Unique": false,
+              "Columns": [
+                "VideoType"
+              ]
+            },
+            {
+              "Name": "metadata_video_idx_VID",
+              "Unique": false,
+              "Columns": [
+                "VID"
+              ]
+            },
+            {
+              "Name": "metadata_video_idx_DataID_VID",
+              "Unique": false,
+              "Columns": [
+                "DataID",
+                "VID"
+              ]
+            },
+            {
+              "Name": "sqlite_autoindex_metadata_video_1",
+              "Unique": true,
+              "Columns": [
+                "DataID",
+                "VID"
+              ]
+            }
+          ]
+        }
+      ],
+      "Warnings": []
+    },
+    {
+      "Name": "configuration",
+      "Path": "D:\\Jvedio\\Jvedio5.0\\data\\Administrator\\app_configs.sqlite",
+      "Sha256": "f746898825504d4b0d0e92f00003aec9aef5231ff64236eb7e71efbbf4072b6a",
+      "Size": 57344,
+      "Tables": [
+        {
+          "Name": "app_configs",
+          "RowCount": 19,
+          "CreateSql": "CREATE TABLE app_configs ( ConfigId INTEGER PRIMARY KEY autoincrement, ConfigName VARCHAR(100), ConfigValue TEXT DEFAULT \u0027\u0027, CreateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), UpdateDate VARCHAR(30) DEFAULT(STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)), unique(ConfigName) )",
+          "Columns": [
+            {
+              "Ordinal": 0,
+              "Name": "ConfigId",
+              "Type": "INTEGER",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": true,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 1,
+              "Name": "ConfigName",
+              "Type": "VARCHAR(100)",
+              "NotNull": false,
+              "DefaultValue": null,
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 2,
+              "Name": "ConfigValue",
+              "Type": "TEXT",
+              "NotNull": false,
+              "DefaultValue": "\u0027\u0027",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 3,
+              "Name": "CreateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            },
+            {
+              "Ordinal": 4,
+              "Name": "UpdateDate",
+              "Type": "VARCHAR(30)",
+              "NotNull": false,
+              "DefaultValue": "STRFTIME(\u0027%Y-%m-%d %H:%M:%S\u0027, \u0027NOW\u0027, \u0027localtime\u0027)",
+              "PrimaryKey": false,
+              "NullCount": 0,
+              "EmptyCount": 0
+            }
+          ],
+          "ForeignKeys": [],
+          "Indexes": [
+            {
+              "Name": "app_configs_idx_ConfigName",
+              "Unique": false,
+              "Columns": [
+                "ConfigName"
+              ]
+            },
+            {
+              "Name": "sqlite_autoindex_app_configs_1",
+              "Unique": true,
+              "Columns": [
+                "ConfigName"
+              ]
+            }
+          ]
+        }
+      ],
+      "Warnings": []
+    }
+  ]
+}

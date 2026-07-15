@@ -1,9 +1,8 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-import { CssBaseline, ThemeProvider } from '@mui/material'
 import { RouterProvider } from 'react-router'
 import { router } from '@/app/router'
-import { createLmmTheme } from '@/themes/theme'
+import { LmmThemeProvider } from '@/themes/ThemeContext'
 import './styles.css'
 
 const root = document.getElementById('root')
@@ -11,10 +10,8 @@ if (!root) throw new Error('Missing root element')
 
 createRoot(root).render(
   <React.StrictMode>
-    <ThemeProvider theme={createLmmTheme('dark')}>
-      <CssBaseline />
+    <LmmThemeProvider>
       <RouterProvider router={router} />
-    </ThemeProvider>
+    </LmmThemeProvider>
   </React.StrictMode>,
 )
-

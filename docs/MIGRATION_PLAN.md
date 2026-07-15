@@ -1,28 +1,30 @@
 # Migration plan
 
-## Completed in phase 0/1 prototype
+## Completed through Database v1 / settings read phase
 
 - Independent Git branch and worktree.
 - Upstream source baseline and GPL attribution retained.
 - Tauri/React/MUI shell with dark theme, navigation, routing, loading, empty/error feedback, and toast feedback.
-- .NET Backend Bridge with read-only SQLite access.
-- Real library count and bounded media list.
-- Existing cover lookup and player-launch endpoint.
-- Debug and Windows package scripts.
+- Real legacy schema/sample analysis and data dictionary.
+- Independent, checksummed Database v1 schema migration and full migration tool.
+- Legacy ID mapping, cleaning warnings, backups, reports, integrity/foreign-key checks, and sample verification.
+- 2,500 movies plus user state, people, tags, relationships, history, and images migrated into the independent database.
+- Bridge switched to Database v1 with pagination, search, sorting, details, covers, and player launch.
+- Seven-category read-only settings DTO and shared Material UI settings pages, including light/dark preview.
+- Debug, Release, NSIS package, and independent installed smoke deployment.
 
-## Next phase: settings
+## Next phase: validated writes and core management
 
-1. Define versioned Bridge DTOs for all seven settings categories.
-2. Read legacy configuration without changing field names.
-3. Add authenticated write operations with validation, atomic file replacement, backup, and rollback.
-4. Implement General, Library, Playback, Metadata, Appearance, Shortcuts, and Advanced pages with shared Material UI setting rows.
-5. Verify each setting against the legacy behavior before marking it migrated.
+1. Add authenticated settings writes to a separate `settings.json` with validation, atomic replacement, backup, reread comparison, and rollback.
+2. Complete movie details/editing, libraries, tags, actors, favorites, and history through versioned Bridge DTOs.
+3. Introduce the single-writer task service and validated write transactions.
+4. Add database backup/restore UI and regression tests before considering WPF replacement.
 
 ## Later phases
 
-- Media browsing: card/list views, search, filters, sorting, pagination.
-- Media management: libraries, tags, actors, favorites, and history.
+- Media browsing refinement: card/list density, filters, and cached details.
+- Media management: libraries, tags, actors, favorites, ratings, and history.
 - Details/editing: metadata, ratings, people, images, path, player, previous/next prefetch.
-- Advanced: scraping, synchronization, tasks, plugins, server resources, database tools, logs.
+- Advanced: scraping, synchronization, plugins, server resources, database tools, and logs.
+- AI begins only after the database, writes, settings, details, task system, and rollback are stable; no speculative AI tables or page code are part of this phase.
 - Replacement decision only after full regression testing; the WPF baseline stays available until then.
-

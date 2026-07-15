@@ -16,10 +16,16 @@ export interface MediaItem {
   coverUrl?: string
 }
 
+export interface MediaPageResult {
+  items: MediaItem[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export interface BridgeHealth {
   status: string
   databaseAvailable: boolean
   databasePath: string
   readOnly: boolean
 }
-

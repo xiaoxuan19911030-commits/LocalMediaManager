@@ -1,7 +1,7 @@
 {
   "name": "local-media-manager-next",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "GPL-3.0-only",
   "type": "module",
   "packageManager": "pnpm@11.3.0",
@@ -13,7 +13,8 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "bridge:dev": "dotnet run --project backend/LocalMediaManager.Bridge/LocalMediaManager.Bridge.csproj",
-    "bridge:publish": "dotnet publish backend/LocalMediaManager.Bridge/LocalMediaManager.Bridge.csproj -c Release -r win-x64 --self-contained false -o src-tauri/resources/bridge"
+    "bridge:publish": "dotnet publish backend/LocalMediaManager.Bridge/LocalMediaManager.Bridge.csproj -c Release -r win-x64 --self-contained false -o src-tauri/resources/bridge",
+    "migration:publish": "dotnet publish backend/LocalMediaManager.Migration/LocalMediaManager.Migration.csproj -c Release -r win-x64 --self-contained false -o src-tauri/resources/migration"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

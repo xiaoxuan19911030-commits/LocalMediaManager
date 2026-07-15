@@ -4,7 +4,10 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/resources/bridge/*
 !src-tauri/resources/bridge/.gitkeep
+src-tauri/resources/migration/*
+!src-tauri/resources/migration/.gitkeep
 backend/**/bin/
 backend/**/obj/
+docs/database/generated/
 *.log
 .env.local

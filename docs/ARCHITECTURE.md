@@ -8,7 +8,7 @@ Proxy-specific frontend pages, Mihomo APIs, proxy profiles, rules, connections, 
 
 ## Selected Bridge boundary
 
-Phase 1 uses an independent .NET 8 loopback HTTP process.
+Next uses an independent .NET 8 loopback HTTP process.
 
 ```text
 Tauri 2 / React / Material UI
@@ -19,12 +19,12 @@ LocalMediaManager.Bridge (.NET 8)
           |
           | SQLite Mode=ReadOnly
           v
-existing app_datas.sqlite + existing media/image paths
+LocalMediaManager.db + existing media/image paths
 ```
 
-HTTP was selected over Named Pipes for the first prototype because it provides a debuggable, typed JSON boundary that can be exercised independently from Tauri and does not require duplicating a pipe client in Rust and TypeScript. It binds only to loopback. Authentication and per-session tokens are required before any write endpoint is introduced.
+HTTP provides a debuggable, typed JSON boundary that can be exercised independently from Tauri and does not require duplicating a pipe client in Rust and TypeScript. It binds only to loopback. Authentication and per-session tokens are required before any write endpoint is introduced.
 
-The Bridge currently exposes health, library summary, a bounded video list, cover streaming, and player launch. No database migration or write statement exists in the prototype.
+The Bridge exposes health, library summary, paged/searchable/sortable media DTOs, movie details, cover streaming, player launch, and the seven-category legacy settings DTO. React never accesses SQLite directly. Runtime media access uses only Database v1; legacy configuration is read-only and temporary until validated `settings.json` persistence is implemented.
 
 ## Existing C# reuse assessment
 
@@ -35,8 +35,8 @@ The Bridge currently exposes health, library summary, a bounded video list, cove
 
 ## Safety
 
-- The existing database is opened with `SqliteOpenMode.ReadOnly`.
+- Legacy databases are opened with `SqliteOpenMode.ReadOnly`; their hashes are checked before and after migration.
 - The stable WPF installation is never overwritten by the Next build.
-- The default Next deployment root is `D:\Jvedio\LocalMediaManagerNext`.
-- Any future schema migration requires a copied database, an explicit migration tool, verification, and rollback.
-
+- The Next deployment root is `D:\Local Media Manager Next`; Database v1 and its reports/backups are in `D:\Local Media Manager Next Data`.
+- Schema changes are formal, checksummed migrations. Full import uses a new temporary database, integrity and foreign-key checks, sampling, a report, and an explicit confirmed switch.
+- AI remains an architecture-only future module; see `AI_ARCHITECTURE.md`.
