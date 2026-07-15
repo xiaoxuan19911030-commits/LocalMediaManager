@@ -87,6 +87,11 @@ export interface TaskItem {
   createdAt: string
   startedAt?: string
   completedAt?: string
+  stage?: string
+  provider?: string
+  retryCount: number
+  currentMovieId?: number
+  resultSummary?: string
 }
 export interface TaskLogItem { id: number; level: string; message: string; createdAt: string }
 export interface TaskMutationResult { taskId: number; status: string; message: string }

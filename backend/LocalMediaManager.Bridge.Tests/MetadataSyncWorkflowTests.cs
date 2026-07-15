@@ -1,0 +1,93 @@
+using System.Net;
+using System.Text;
+using LocalMediaManager.Bridge;
+using Microsoft.Data.Sqlite;
+using Xunit;
+
+namespace LocalMediaManager.Bridge.Tests;
+
+public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
+{
+    private readonly string root = Path.Combine(Path.GetTempPath(), "lmm-sync-tests", Guid.NewGuid().ToString("N"));
+    private string Database => Path.Combine(root, "test.db");
+
+    public async Task InitializeAsync()
+    {
+        Directory.CreateDirectory(root);
+        await using var connection = new SqliteConnection($"Data Source={Database}");
+        await connection.OpenAsync();
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql" }) {
+            await using var command = connection.CreateCommand();
+            command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
+            await command.ExecuteNonQueryAsync();
+        }
+    }
+
+    [Fact]
+    public async Task MetaTubeUsesExactCodeAndLegacyProviderPreference()
+    {
+        var factory = new FakeHttpClientFactory(request => {
+            string body = request.RequestUri!.AbsolutePath.Contains("search")
+                ? """{"data":[{"provider":"AVBASE","id":"a","number":"ABP-001","title":"A"},{"provider":"FANZA","id":"f","number":"ABP-001","title":"F"}]}"""
+                : """{"data":{"provider":"FANZA","id":"f","number":"ABP-001","title":"Remote title","summary":"Plot","runtime":120,"release_date":"2026-01-02","maker":"Maker","actors":["Actor A"],"genres":["Genre A"],"preview_images":["https://img.example/1.jpg"]}}""";
+            return new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+        });
+        var provider = new MetaTubeProvider(factory);
+        var settings = new MetaTubeSettingsDto(true, "http://127.0.0.1:8080/", 30, true, false, true, true);
+        IReadOnlyList<MetadataSearchResult> results = await provider.SearchAsync("abp_001", settings, CancellationToken.None);
+        Assert.Equal("FANZA", results[0].Provider);
+        ProviderMetadata? metadata = await provider.GetMetadataAsync(results[0], settings, CancellationToken.None);
+        Assert.NotNull(metadata);
+        Assert.Equal("ABP-001", metadata.Code);
+        Assert.Equal(7200, metadata.DurationSeconds);
+        Assert.Contains(metadata.Images, image => image.Type == "Poster" && image.Url.Contains("/v1/images/primary/FANZA/f"));
+    }
+
+    [Fact]
+    public async Task MetadataWriteFillsEmptyFieldsAndPreservesManualData()
+    {
+        await using var connection = await Open();
+        string at = DateTimeOffset.UtcNow.ToString("O");
+        await Execute(connection, "INSERT INTO Movies(Id,Code,Title,Description,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES(1,'ABP-001','Manual title',NULL,0,0,'pending','Test',$at,$at)", ("$at", at));
+        await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Progress,TotalItems,CompletedItems,CreatedAt,CurrentMovieId) VALUES(1,'Sync','WritingMetadata',80,1,0,$at,1)", ("$at", at));
+        await Execute(connection, "INSERT INTO Tags(Id,Name,NormalizedName,Source,CreatedAt,UpdatedAt) VALUES(1,'My tag','MY TAG','User',$at,$at)", ("$at", at));
+        await Execute(connection, "INSERT INTO MovieTags(MovieId,TagId,CreatedAt) VALUES(1,1,$at)", ("$at", at));
+        var movie = new SyncMovie(1, "ABP-001", "Manual title", null, null, 0, null, null);
+        var metadata = new ProviderMetadata("FANZA", "remote-1", "ABP-001", "Remote title", "Remote plot", null,
+            "Remote maker", null, "Remote series", 7200, "2026-01-02", null, ["Remote genre"], ["Remote actor"], []);
+        await new MetadataWriteService(Database).ApplyAsync(1, movie, metadata, new([], null, []), CancellationToken.None);
+        Assert.Equal("Manual title", await Text(connection, "SELECT Title FROM Movies WHERE Id=1"));
+        Assert.Equal("Remote plot", await Text(connection, "SELECT Description FROM Movies WHERE Id=1"));
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieTags WHERE MovieId=1"));
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieActors WHERE MovieId=1"));
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MetadataSyncSnapshots WHERE TaskId=1 AND AppliedAt IS NOT NULL"));
+    }
+
+    [Fact]
+    public async Task ProviderSettingsPersistThroughUnifiedSettingsService()
+    {
+        var service = new MetadataProviderSettingsService(Database);
+        MetaTubeSettingsDto saved = await service.SaveMetaTubeAsync(new(false, "http://localhost:8080", 500, false, true, false, false));
+        MetaTubeSettingsDto read = await service.ReadMetaTubeAsync();
+        Assert.False(read.Enabled);
+        Assert.Equal("http://localhost:8080/", read.BaseUrl);
+        Assert.Equal(180, read.TimeoutSeconds);
+        Assert.True(read.NonDestructive);
+        Assert.Equal(saved, read);
+    }
+
+    public Task DisposeAsync() { try { Directory.Delete(root, true); } catch { } return Task.CompletedTask; }
+    private async Task<SqliteConnection> Open() { var c = new SqliteConnection($"Data Source={Database}"); await c.OpenAsync(); return c; }
+    private static async Task Execute(SqliteConnection c, string sql, params (string,object?)[] values) { await using var x=c.CreateCommand();x.CommandText=sql;foreach(var(n,v)in values)x.Parameters.AddWithValue(n,v??DBNull.Value);await x.ExecuteNonQueryAsync(); }
+    private static async Task<long> Scalar(SqliteConnection c,string sql){await using var x=c.CreateCommand();x.CommandText=sql;return Convert.ToInt64(await x.ExecuteScalarAsync()??0L);}
+    private static async Task<string?> Text(SqliteConnection c,string sql){await using var x=c.CreateCommand();x.CommandText=sql;return(await x.ExecuteScalarAsync())?.ToString();}
+
+    private sealed class FakeHttpClientFactory(Func<HttpRequestMessage,HttpResponseMessage> response) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new(new Handler(response), disposeHandler: true);
+        private sealed class Handler(Func<HttpRequestMessage,HttpResponseMessage> response) : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(response(request));
+        }
+    }
+}

@@ -101,6 +101,8 @@ Planning → Design → Develop → Self Test → Smoke Test → Freeze → Rele
 - 文件整理与重命名
 - 所有长操作接入 Tasks
 
+当前开发证据：扫描导入第一批与真实 MetaTube 同步执行器已完成代码和自动化测试；Migration `0005_MetadataSyncWorkflow` 已加入。真实 MetaTube 服务对照烟测、安装版部署验收、NFO 导入和文件整理仍未完成，因此 0.4.2 保持 `Develop`。
+
 ## 0.4.3 — Stability Update
 
 **状态：Planning**

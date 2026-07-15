@@ -14,7 +14,8 @@ public sealed record LibraryFolderDto(long Id, string Path, bool Enabled, bool I
 public sealed record LibraryDto(long Id, string Name, string? Description, bool Enabled, long MovieCount,
     long MissingCount, IReadOnlyList<LibraryFolderDto> Folders);
 public sealed record TaskDto(long Id, string Type, string Status, string Name, double Progress, long TotalItems,
-    long CompletedItems, string? ErrorMessage, string CreatedAt, string? StartedAt, string? CompletedAt);
+    long CompletedItems, string? ErrorMessage, string CreatedAt, string? StartedAt, string? CompletedAt,
+    string? Stage, string? Provider, long RetryCount, long? CurrentMovieId, string? ResultSummary);
 public sealed record TaskLogDto(long Id, string Level, string Message, string CreatedAt);
 public sealed record NamedDto(long Id, string Name);
 public sealed record MediaFileDto(long Id, string Path, string FileName, string? Extension, long FileSize,
@@ -45,7 +46,7 @@ public static class ProductReader
         long played = await ScalarAsync(connection, "SELECT COUNT(*) FROM UserMovieState WHERE PlayCount>0");
         long missing = await ScalarAsync(connection, "SELECT COUNT(DISTINCT MovieId) FROM MediaFiles WHERE ExistsState='Missing'");
         long libraries = await ScalarAsync(connection, "SELECT COUNT(*) FROM Libraries WHERE IsEnabled=1");
-        long tasks = await ScalarAsync(connection, "SELECT COUNT(*) FROM Tasks WHERE Status IN ('Pending','Running','Paused')");
+        long tasks = await ScalarAsync(connection, "SELECT COUNT(*) FROM Tasks WHERE Status NOT IN ('Completed','Failed','Cancelled')");
         var recentImports = await ReadCardsAsync(connection, bridgeUrl, "m.ImportedAt DESC, m.Id DESC", 8, false);
         var recentPlays = await ReadCardsAsync(connection, bridgeUrl, "s.LastPlayedAt DESC, m.Id DESC", 8, true);
         return new(movies, favorites, played, missing, libraries, tasks, recentImports, recentPlays);
@@ -122,7 +123,7 @@ public static class ProductReader
             while (await libraryReader.ReadAsync()) libraryNames[libraryReader.GetInt64(0)] = libraryReader.GetString(1);
         }
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id,TaskType,Status,Progress,TotalItems,CompletedItems,ErrorMessage,CreatedAt,StartedAt,CompletedAt,PayloadJson FROM Tasks ORDER BY Id DESC LIMIT $limit";
+        command.CommandText = "SELECT Id,TaskType,Status,Progress,TotalItems,CompletedItems,ErrorMessage,CreatedAt,StartedAt,CompletedAt,PayloadJson,Stage,Provider,RetryCount,CurrentMovieId,ResultSummary FROM Tasks ORDER BY Id DESC LIMIT $limit";
         command.Parameters.AddWithValue("$limit", limit);
         var tasks = new List<TaskDto>();
         await using var reader = await command.ExecuteReaderAsync();
@@ -130,7 +131,8 @@ public static class ProductReader
             string type = reader.GetString(1);
             string? payload = Text(reader, 10);
             tasks.Add(new(reader.GetInt64(0),type,reader.GetString(2),TaskName(type,payload,libraryNames),reader.GetDouble(3),
-                reader.GetInt64(4),reader.GetInt64(5),Text(reader,6),reader.GetString(7),Text(reader,8),Text(reader,9)));
+                reader.GetInt64(4),reader.GetInt64(5),Text(reader,6),reader.GetString(7),Text(reader,8),Text(reader,9),
+                Text(reader,11),Text(reader,12),reader.GetInt64(13),reader.IsDBNull(14)?null:reader.GetInt64(14),Text(reader,15)));
         }
         return tasks;
     }

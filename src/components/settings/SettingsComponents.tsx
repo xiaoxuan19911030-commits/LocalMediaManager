@@ -27,7 +27,7 @@ export function SettingsLayout({ category, onCategoryChange, children }: {
 
 export function SettingsStatusBanner({ errors, mapped, unmapped }: { errors: string[]; mapped: number; unmapped: number }) {
   return <Stack spacing={1} sx={{ mb: 2 }}>
-    <Alert severity="info">当前为只读迁移验证。所有值来自旧配置，控件不会写回旧程序。</Alert>
+    <Alert severity="info">旧版兼容字段保持只读；Next 原生设置（例如 MetaTube Provider）通过统一 Settings Service 保存。</Alert>
     {errors.length > 0 && <Alert severity="error">{errors.join('；')}</Alert>}
     <Typography variant="caption" color="text.secondary">已准确映射 {mapped} 项；兼容字段 {unmapped} 项。缺失值会明确标注，不使用默认值冒充。</Typography>
   </Stack>
@@ -77,7 +77,7 @@ export function SettingsItem({ field }: { field: SettingField }) {
 export function SettingsSaveBar() {
   return <Paper variant="outlined" sx={{ position: 'sticky', bottom: 0, mt: 2, px: 2, py: 1.25, zIndex: 2,
     display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
-    <Box><Typography sx={{ fontWeight: 650 }}>只读模式</Typography><Typography variant="caption" color="text.secondary">保存接口尚未启用，旧配置不会发生变化。</Typography></Box>
-    <Chip label="无写入权限" color="info" variant="outlined" />
+    <Box><Typography sx={{ fontWeight: 650 }}>分层设置</Typography><Typography variant="caption" color="text.secondary">旧配置只读；Next 原生设置由各功能区显式保存。</Typography></Box>
+    <Chip label="Settings Service" color="info" variant="outlined" />
   </Paper>
 }

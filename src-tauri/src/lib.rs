@@ -17,6 +17,7 @@ fn bridge_candidates(app: &tauri::App) -> Vec<PathBuf> {
     }
     if let Ok(resources) = app.path().resource_dir() {
         candidates.push(resources.join("bridge").join("LocalMediaManager.Bridge.exe"));
+        candidates.push(resources.join("resources").join("bridge").join("LocalMediaManager.Bridge.exe"));
     }
     candidates.push(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -40,7 +41,10 @@ fn bridge_candidates(app: &tauri::App) -> Vec<PathBuf> {
 fn migration_candidates(app: &tauri::App) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(path) = std::env::var_os("LMM_MIGRATION_PATH") { candidates.push(PathBuf::from(path)); }
-    if let Ok(resources) = app.path().resource_dir() { candidates.push(resources.join("migration").join("LocalMediaManager.Migration.exe")); }
+    if let Ok(resources) = app.path().resource_dir() {
+        candidates.push(resources.join("migration").join("LocalMediaManager.Migration.exe"));
+        candidates.push(resources.join("resources").join("migration").join("LocalMediaManager.Migration.exe"));
+    }
     candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources").join("migration").join("LocalMediaManager.Migration.exe"));
     candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("backend").join("LocalMediaManager.Migration").join("bin").join("Debug").join("net8.0").join("LocalMediaManager.Migration.exe"));
     candidates

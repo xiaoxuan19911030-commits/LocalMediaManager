@@ -160,7 +160,10 @@
 - [ ] 手工同步入口始终保留，自动同步是附加能力。
 - [ ] 默认补空字段，不覆盖用户标题、标签、评分、收藏和图片锁定。
 - [ ] MetaTube 结果按番号选择，来源、演员图和预览图分别记录。
+- [ ] 精确番号结果优先，并按 `FANZA/MGS/JavBus/JAV321/AVBASE` 旧版顺序选择 Provider。
+- [ ] Provider 地址、超时、图片、NFO 和自动执行设置经 Settings Service 保存，连接测试不隐式保存。
 - [ ] 网络失败、无结果、部分字段失败不破坏旧数据。
+- [ ] 图片使用临时文件原子落盘；失败只清理本次新文件，不删除已有图片/NFO。
 - [ ] 批量同步进入 Tasks，可取消、重试并查看日志。
 
 ### TP-NFO NFO
@@ -188,10 +191,11 @@
 
 ### TP-TASKS 任务中心
 
-- [ ] `Pending/Running/Paused/Completed/Failed/Cancelled` 状态转换有效。
+- [ ] `Pending/Preparing/FetchingMetadata/DownloadingImages/WritingMetadata/WritingNfo/Retrying/Paused/Completed/Failed/Cancelled` 状态转换有效。
 - [ ] 显示行为、状态、名称、进度和日期。
 - [ ] 暂停、继续、取消、重试和日志工作正常。
 - [ ] 应用重启后持久任务状态可恢复。
+- [ ] 异常退出的同步任务记录“上次异常中断”并进入可重试队列，不永久卡在运行阶段。
 
 ## 6. 体验与扩展
 

@@ -11,6 +11,7 @@ import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded'
 import FolderRoundedIcon from '@mui/icons-material/FolderRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import VisibilityRoundedIcon from '@mui/icons-material/VisibilityRounded'
+import SyncRoundedIcon from '@mui/icons-material/SyncRounded'
 import { Alert, Autocomplete, Box, Button, Card, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Divider, IconButton, Paper, Rating, Snackbar, Stack, TextField, Tooltip, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import type { ReactNode } from 'react'
@@ -62,6 +63,7 @@ export default function MovieDetailPage() {
   const go = (movieId?: number) => movieId && navigate(`/movies/${movieId}`, { state: { context }, replace: true })
   const previewDelete = () => movie && bridge.previewDeleteMovie(movie.id).then(setDeletePreview).catch((reason: Error) => setNotice(reason.message))
   const confirmDelete = () => deletePreview && bridge.deleteMovie(deletePreview.movieId, deletePreview.confirmationToken).then((result) => { setDeletePreview(undefined); navigate('/media', { replace: true }); window.setTimeout(() => setNotice(result.message), 0) }).catch((reason: Error) => setNotice(reason.message))
+  const syncMetadata = () => movie && bridge.syncMovie(movie.id).then(result => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message))
 
   return <Box sx={{ '@keyframes detailIn': { from: { opacity: 0, transform: 'translateY(10px)' }, to: { opacity: 1, transform: 'translateY(0)' } } }}>
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: 2 }}>
@@ -94,7 +96,7 @@ export default function MovieDetailPage() {
             </Stack>
             <Stack direction="row" spacing={1.25} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap', mt: 2 }}><Rating value={movie.userRatingSet ? movie.userRating : null} precision={.5} disabled={busy} onChange={(_, value) => value !== null && mutate(bridge.setUserState(movie.id, { rating: value }))}/><Typography variant="body2" color="text.secondary">个人评分 {movie.userRatingSet ? movie.userRating.toFixed(1) : '未评分'}</Typography>{movie.userRatingSet && <Button size="small" color="inherit" onClick={() => mutate(bridge.setUserState(movie.id, { clearRating: true }))}>清除评分</Button>}</Stack>
             <Typography color="text.secondary" sx={{ mt: 2.25, lineHeight: 1.8, whiteSpace: 'pre-wrap', maxWidth: 960, display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{movie.description || '暂无影片简介。'}</Typography>
-            <Stack direction="row" spacing={1.25} useFlexGap sx={{ mt: 'auto', pt: 3, flexWrap: 'wrap' }}><Button size="large" variant="contained" startIcon={<PlayArrowRoundedIcon/>} onClick={play} sx={{ minWidth: 150 }}>播放影片</Button><Button size="large" variant="outlined" color={movie.favorite ? 'error' : 'primary'} startIcon={movie.favorite ? <FavoriteRoundedIcon/> : <FavoriteBorderRoundedIcon/>} disabled={busy} onClick={() => mutate(bridge.setUserState(movie.id, { favorite: !movie.favorite }))}>{movie.favorite ? '取消收藏' : '收藏'}</Button><Button size="large" variant="outlined" startIcon={<SellRoundedIcon/>} onClick={openTags}>编辑标签</Button><Button size="large" variant="outlined" onClick={openActors}>编辑演员</Button><Button size="large" variant="text" color="error" startIcon={<DeleteOutlineRoundedIcon/>} onClick={previewDelete}>从资料库移除</Button></Stack>
+            <Stack direction="row" spacing={1.25} useFlexGap sx={{ mt: 'auto', pt: 3, flexWrap: 'wrap' }}><Button size="large" variant="contained" startIcon={<PlayArrowRoundedIcon/>} onClick={play} sx={{ minWidth: 150 }}>播放影片</Button><Button size="large" variant="outlined" startIcon={<SyncRoundedIcon/>} onClick={syncMetadata}>同步元数据</Button><Button size="large" variant="outlined" color={movie.favorite ? 'error' : 'primary'} startIcon={movie.favorite ? <FavoriteRoundedIcon/> : <FavoriteBorderRoundedIcon/>} disabled={busy} onClick={() => mutate(bridge.setUserState(movie.id, { favorite: !movie.favorite }))}>{movie.favorite ? '取消收藏' : '收藏'}</Button><Button size="large" variant="outlined" startIcon={<SellRoundedIcon/>} onClick={openTags}>编辑标签</Button><Button size="large" variant="outlined" onClick={openActors}>编辑演员</Button><Button size="large" variant="text" color="error" startIcon={<DeleteOutlineRoundedIcon/>} onClick={previewDelete}>从资料库移除</Button></Stack>
           </Box>
         </Box>
       </Paper>

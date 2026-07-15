@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, EntityPageResult, GlobalSearchResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, ScanLaunchResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
-import type { SettingsSnapshot } from '@/types/settings'
+import type { MetaTubeSettings, ProviderConnectionResult, SettingsSnapshot } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
 
@@ -32,7 +32,10 @@ export const bridge = {
     return request<MediaPageResult>(`/api/videos?${query}`)
   },
   settings: () => request<SettingsSnapshot>('/api/settings'),
+  saveMetaTubeSettings: (value: MetaTubeSettings) => request<MetaTubeSettings>('/api/settings/providers/metatube', { method: 'PUT', body: JSON.stringify(value) }),
+  testMetaTube: (value: MetaTubeSettings) => request<ProviderConnectionResult>('/api/settings/providers/metatube/test', { method: 'POST', body: JSON.stringify(value) }),
   movie: (id: number) => request<MovieDetail>(`/api/videos/${id}`),
+  syncMovie: (id: number) => request<ScanLaunchResult>(`/api/videos/${id}/sync`, { method: 'POST' }),
   neighbors: (id: number, search = '', sort = 'newest') => request<NeighborResult>(`/api/videos/${id}/neighbors?${new URLSearchParams({ search, sort })}`),
   search: (query: string, limit = 12) => request<GlobalSearchResult>(`/api/search?${new URLSearchParams({ q: query, limit: String(limit) })}`),
   libraries: () => request<MediaLibrary[]>('/api/libraries'),

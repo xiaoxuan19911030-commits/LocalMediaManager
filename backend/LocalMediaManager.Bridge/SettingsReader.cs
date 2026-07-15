@@ -52,6 +52,7 @@ internal sealed record SettingsSnapshotDto(
     IReadOnlyList<SettingsSourceDto> Sources,
     IReadOnlyList<SettingFieldDto> Fields,
     IReadOnlyList<CrawlerServerDto> Servers,
+    MetaTubeSettingsDto MetaTube,
     int MappedCount,
     int UnmappedCount,
     IReadOnlyList<string> Errors);
@@ -174,7 +175,7 @@ internal static class SettingsReader
         D("PluginConfig", "DeleteList", "advanced", "插件", "插件删除清单", "json", null, nullable: true, dangerous: true),
     ];
 
-    public static async Task<SettingsSnapshotDto> ReadAsync(string configDatabasePath)
+    public static async Task<SettingsSnapshotDto> ReadAsync(string configDatabasePath, MetaTubeSettingsDto metaTube)
     {
         var errors = new List<string>();
         var sources = new List<SettingsSourceDto>();
@@ -251,7 +252,7 @@ internal static class SettingsReader
 
         int mappedCount = fields.Count(field => field.Mapped && field.ReadStatus == "ok");
         int unmappedCount = fields.Count(field => !field.Mapped);
-        return new SettingsSnapshotDto(true, "只读迁移验证", DateTime.Now, sources, fields, servers,
+        return new SettingsSnapshotDto(false, "统一设置服务", DateTime.Now, sources, fields, servers, metaTube,
             mappedCount, unmappedCount, errors);
     }
 

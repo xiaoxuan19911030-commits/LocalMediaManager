@@ -15,7 +15,12 @@ import { bridge } from '@/services/bridge'
 import type { TaskItem, TaskLogItem } from '@/types/media'
 
 const taskNames: Record<string, string> = { Download: '下载任务', Screenshot: '截图任务', Scan: '扫描任务', Sync: '同步任务', Crop: '裁切任务', AI: 'AI 任务', ActorRepair: '演员修复' }
-const statusNames: Record<string, string> = { Pending: '等待中', Running: '进行中', Paused: '已暂停', Completed: '已完成', Failed: '失败', Cancelled: '已取消' }
+const statusNames: Record<string, string> = {
+  Pending: '等待中', Preparing: '准备中', FetchingMetadata: '获取元数据', DownloadingImages: '下载图片',
+  WritingMetadata: '写入元数据', WritingNfo: '写入 NFO', Retrying: '等待重试', Running: '进行中',
+  Paused: '已暂停', Completed: '已完成', Failed: '失败', Cancelled: '已取消',
+}
+const activeStates = ['Pending', 'Preparing', 'FetchingMetadata', 'DownloadingImages', 'WritingMetadata', 'WritingNfo', 'Retrying', 'Running', 'Paused']
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<TaskItem[]>()
@@ -34,7 +39,7 @@ export default function TasksPage() {
   useEffect(() => { void load(true) }, [load])
 
   const visible = useMemo(() => tasks?.filter(item => filter === 'all' || item.status === filter) ?? [], [tasks, filter])
-  const active = tasks?.filter(item => ['Pending', 'Running', 'Paused'].includes(item.status)).length ?? 0
+  const active = tasks?.filter(item => activeStates.includes(item.status)).length ?? 0
   const completed = tasks?.filter(item => item.status === 'Completed').length ?? 0
   const failed = tasks?.filter(item => item.status === 'Failed').length ?? 0
 
@@ -74,14 +79,14 @@ export default function TasksPage() {
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1.5 }}><TextField select size="small" label="状态" value={filter} onChange={event => setFilter(event.target.value)} sx={{ width: 150 }}><MenuItem value="all">全部</MenuItem>{Object.entries(statusNames).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}</TextField></Box>
       {visible.length === 0 ? <EmptyState title="暂无任务" description={filter === 'all' ? '扫描、同步等长任务会显示在这里。' : '当前筛选状态下没有任务。'}/> : <Stack spacing={1.25}>{visible.map(task => {
         const complete = task.status === 'Completed'; const failedTask = task.status === 'Failed'; const Icon = complete ? CheckCircleRoundedIcon : failedTask ? ErrorRoundedIcon : HourglassTopRoundedIcon
-        const canPause = task.type === 'Scan' && ['Pending', 'Running'].includes(task.status)
-        const canResume = task.type === 'Scan' && task.status === 'Paused'
-        const canCancel = ['Pending', 'Running', 'Paused'].includes(task.status)
-        const canRetry = task.type === 'Scan' && ['Failed', 'Cancelled'].includes(task.status)
+        const canPause = ['Scan', 'Sync'].includes(task.type) && activeStates.includes(task.status) && task.status !== 'Paused'
+        const canResume = ['Scan', 'Sync'].includes(task.type) && task.status === 'Paused'
+        const canCancel = activeStates.includes(task.status)
+        const canRetry = ['Scan', 'Sync'].includes(task.type) && ['Failed', 'Cancelled'].includes(task.status)
         return <Card key={task.id} sx={{ p: 2 }}><Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '160px 105px minmax(130px,1fr) minmax(170px,1.2fr) 155px auto' }, gap: 2, alignItems: 'center' }}>
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}><Icon color={complete ? 'success' : failedTask ? 'error' : 'primary'}/><Typography sx={{ fontWeight: 750 }}>{taskNames[task.type] || task.type}</Typography></Box>
           <Chip size="small" color={complete ? 'success' : failedTask ? 'error' : task.status === 'Cancelled' ? 'default' : 'primary'} variant="outlined" label={statusNames[task.status] || task.status}/>
-          <Typography noWrap title={task.name}>{task.name}</Typography>
+          <Box sx={{ minWidth: 0 }}><Typography noWrap title={task.name}>{task.name}</Typography>{task.provider && <Typography variant="caption" color="text.secondary">{task.provider}{task.retryCount ? ` · 重试 ${task.retryCount}` : ''}</Typography>}</Box>
           <Box><LinearProgress variant="determinate" value={Math.max(0, Math.min(100, task.progress))}/><Typography variant="caption" color="text.secondary">{task.completedItems}/{task.totalItems} · {task.progress.toFixed(0)}%</Typography></Box>
           <Typography variant="body2" color="text.secondary">{task.createdAt.slice(0, 19).replace('T', ' ')}</Typography>
           <Stack direction="row" spacing={0.25}>
@@ -91,7 +96,7 @@ export default function TasksPage() {
             {canCancel && <Tooltip title="取消"><span><IconButton size="small" aria-label="取消任务" color="error" disabled={busy === task.id} onClick={() => setCancelTarget(task)}><CancelRoundedIcon/></IconButton></span></Tooltip>}
             <Tooltip title="查看日志"><IconButton size="small" aria-label="查看任务日志" onClick={() => void openLogs(task)}><ListAltRoundedIcon/></IconButton></Tooltip>
           </Stack>
-        </Box>{task.errorMessage && <Alert severity="error" sx={{ mt: 1.5 }}>{task.errorMessage}</Alert>}</Card>
+        </Box>{task.resultSummary && !task.errorMessage && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>{task.resultSummary}</Typography>}{task.errorMessage && <Alert severity="error" sx={{ mt: 1.5 }}>{task.errorMessage}</Alert>}</Card>
       })}</Stack>}
     </>}
 

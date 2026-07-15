@@ -20,4 +20,12 @@ export interface SettingsSnapshot {
   readOnly: boolean; mode: string; readAt: string; sources: SettingsSource[]
   fields: SettingField[]; servers: CrawlerServer[]; mappedCount: number
   unmappedCount: number; errors: string[]
+  metaTube: MetaTubeSettings
 }
+
+export interface MetaTubeSettings {
+  enabled: boolean; baseUrl: string; timeoutSeconds: number; downloadImages: boolean
+  writeNfo: boolean; autoExecute: boolean; nonDestructive: boolean
+}
+
+export interface ProviderConnectionResult { success: boolean; provider: string; message: string; elapsedMilliseconds: number }

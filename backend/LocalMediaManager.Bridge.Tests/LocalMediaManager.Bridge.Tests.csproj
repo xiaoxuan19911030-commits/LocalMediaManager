@@ -15,5 +15,6 @@
     <Content Include="..\LocalMediaManager.Migration\migrations\0001_InitialSchema.sql" Link="migrations\0001_InitialSchema.sql" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\LocalMediaManager.Migration\migrations\0003_UserStateAuditAndRatingMemory.sql" Link="migrations\0003_UserStateAuditAndRatingMemory.sql" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\LocalMediaManager.Migration\migrations\0004_LibraryScanWorkflow.sql" Link="migrations\0004_LibraryScanWorkflow.sql" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\LocalMediaManager.Migration\migrations\0005_MetadataSyncWorkflow.sql" Link="migrations\0005_MetadataSyncWorkflow.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

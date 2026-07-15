@@ -322,9 +322,9 @@ public sealed class LibraryWorkflowService(string databasePath)
         bool restored = await RestoreDeletedRatingAsync(connection, transaction, movieId, file.Name, at);
         if (autoSync) {
             long syncTaskId = await InsertIdAsync(connection, transaction, """
-                INSERT INTO Tasks(TaskType,Status,Progress,TotalItems,CompletedItems,PayloadJson,CreatedAt)
-                VALUES('Sync','Pending',0,1,0,$payload,$at); SELECT last_insert_rowid();
-                """, ("$payload", JsonSerializer.Serialize(new { MovieId = movieId, Trigger = "ScanImport" })), ("$at", at));
+                INSERT INTO Tasks(TaskType,Status,Stage,Provider,Progress,TotalItems,CompletedItems,PayloadJson,CreatedAt,UpdatedAt,CurrentMovieId)
+                VALUES('Sync','Pending','Pending','MetaTube',0,1,0,$payload,$at,$at,$movie); SELECT last_insert_rowid();
+                """, ("$payload", JsonSerializer.Serialize(new { MovieId = movieId, Trigger = "ScanImport" })), ("$at", at), ("$movie", movieId));
             await LogAsync(connection, transaction, syncTaskId, "Info", "影片导入完成，等待元数据同步执行器处理。");
         }
         await transaction.CommitAsync();

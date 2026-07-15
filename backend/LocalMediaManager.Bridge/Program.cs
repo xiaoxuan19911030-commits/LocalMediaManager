@@ -21,7 +21,25 @@ builder.WebHost.UseUrls(bridgeUrl);
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddSingleton(new ProductWriter(databasePath));
+builder.Services.AddHttpClient();
 builder.Services.AddSingleton(new LibraryWorkflowService(databasePath));
+builder.Services.AddSingleton(new MetadataProviderSettingsService(databasePath));
+builder.Services.AddSingleton(new MetadataWriteService(databasePath));
+builder.Services.AddSingleton(new TaskLogService(databasePath));
+builder.Services.AddSingleton<ImageDownloadService>();
+builder.Services.AddSingleton<NfoService>();
+builder.Services.AddSingleton<IMetadataProvider, MetaTubeProvider>();
+builder.Services.AddSingleton(serviceProvider => new MetadataSyncExecutor(
+    databasePath, imageRoot,
+    serviceProvider.GetRequiredService<MetadataProviderSettingsService>(),
+    serviceProvider.GetRequiredService<IMetadataProvider>(),
+    serviceProvider.GetRequiredService<MetadataWriteService>(),
+    serviceProvider.GetRequiredService<ImageDownloadService>(),
+    serviceProvider.GetRequiredService<NfoService>(),
+    serviceProvider.GetRequiredService<TaskLogService>()));
+builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<MetadataSyncExecutor>());
+builder.Services.AddSingleton(serviceProvider => new TaskCommandService(databasePath,
+    serviceProvider.GetRequiredService<LibraryWorkflowService>(), serviceProvider.GetRequiredService<MetadataSyncExecutor>()));
 
 var app = builder.Build();
 app.UseCors();
@@ -75,7 +93,12 @@ app.MapGet("/health", () => Results.Ok(new {
     legacyDatabaseUsedForRuntime = false,
 }));
 
-app.MapGet("/api/settings", async () => Results.Ok(await SettingsReader.ReadAsync(configDatabasePath)));
+app.MapGet("/api/settings", async (MetadataProviderSettingsService settings) =>
+    Results.Ok(await SettingsReader.ReadAsync(configDatabasePath, await settings.ReadMetaTubeAsync())));
+app.MapPut("/api/settings/providers/metatube", async (MetaTubeSettingsDto input, MetadataProviderSettingsService settings) =>
+    Results.Ok(await settings.SaveMetaTubeAsync(input)));
+app.MapPost("/api/settings/providers/metatube/test", async (MetaTubeSettingsDto input, IMetadataProvider provider) =>
+    Results.Ok(await provider.TestConnectionAsync(input with { BaseUrl = input.BaseUrl.Trim().TrimEnd('/') + "/" }, CancellationToken.None)));
 
 app.MapGet("/api/dashboard", async () => File.Exists(databasePath)
     ? Results.Ok(await ProductReader.ReadDashboardAsync(databasePath, bridgeUrl))
@@ -106,14 +129,11 @@ app.MapGet("/api/tasks", async (int? limit) => File.Exists(databasePath)
 app.MapGet("/api/tasks/{taskId:long}/logs", async (long taskId, int? limit) => File.Exists(databasePath)
     ? Results.Ok(await ProductReader.ReadTaskLogsAsync(databasePath, taskId, Math.Clamp(limit ?? 200, 1, 1000)))
     : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
-app.MapPost("/api/tasks/{taskId:long}/pause", async (long taskId, LibraryWorkflowService service) =>
-    Results.Ok(await service.PauseTaskAsync(taskId)));
-app.MapPost("/api/tasks/{taskId:long}/resume", async (long taskId, LibraryWorkflowService service) =>
-    Results.Ok(await service.ResumeTaskAsync(taskId)));
-app.MapPost("/api/tasks/{taskId:long}/cancel", async (long taskId, LibraryWorkflowService service) =>
-    Results.Ok(await service.CancelTaskAsync(taskId)));
-app.MapPost("/api/tasks/{taskId:long}/retry", async (long taskId, LibraryWorkflowService service) =>
-    Results.Ok(await service.RetryTaskAsync(taskId)));
+app.MapPost("/api/tasks/{taskId:long}/pause", async (long taskId, TaskCommandService service) => Results.Ok(await service.PauseAsync(taskId)));
+app.MapPost("/api/tasks/{taskId:long}/resume", async (long taskId, TaskCommandService service) => Results.Ok(await service.ResumeAsync(taskId)));
+app.MapPost("/api/tasks/{taskId:long}/cancel", async (long taskId, TaskCommandService service) => Results.Ok(await service.CancelAsync(taskId)));
+app.MapPost("/api/tasks/{taskId:long}/retry", async (long taskId, TaskCommandService service) => Results.Ok(await service.RetryAsync(taskId)));
+app.MapPost("/api/videos/{movieId:long}/sync", async (long movieId, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Manual")));
 
 app.MapGet("/api/entities/{entityType}", async (string entityType, string? search, string? sort, int? limit, int? offset) => {
     if (!File.Exists(databasePath)) return Results.Problem($"找不到数据库：{databasePath}", statusCode: 503);

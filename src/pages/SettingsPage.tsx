@@ -1,14 +1,14 @@
 import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded'
 import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded'
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, CircularProgress,
-  Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, Typography } from '@mui/material'
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, CircularProgress, FormControlLabel,
+  Paper, Stack, Switch, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from '@mui/material'
 import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded'
 import { useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '@/components/PageHeader'
 import { SettingsItem, SettingsLayout, SettingsSaveBar, SettingsSection, SettingsStatusBanner, settingsCategories } from '@/components/settings/SettingsComponents'
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
-import type { SettingsSnapshot } from '@/types/settings'
+import type { MetaTubeSettings, SettingsSnapshot } from '@/types/settings'
 import { BrandMark } from '@/components/BrandMark'
 
 const descriptions: Record<string, string> = {
@@ -22,8 +22,11 @@ export default function SettingsPage() {
   const [category, setCategory] = useState('general')
   const [snapshot, setSnapshot] = useState<SettingsSnapshot | null>(null)
   const [error, setError] = useState('')
+  const [providerNotice, setProviderNotice] = useState<{ severity: 'success' | 'error' | 'info'; text: string }>()
+  const [providerBusy, setProviderBusy] = useState(false)
+  const [metaTube, setMetaTube] = useState<MetaTubeSettings>()
   const { mode, setMode } = useColorMode()
-  useEffect(() => { bridge.settings().then(setSnapshot).catch((reason: Error) => setError(reason.message)) }, [])
+  useEffect(() => { bridge.settings().then(value => { setSnapshot(value); setMetaTube(value.metaTube) }).catch((reason: Error) => setError(reason.message)) }, [])
   const title = settingsCategories.find(([key]) => key === category)?.[1] ?? '设置'
   const fields = useMemo(() => snapshot?.fields.filter(field => field.category === category) ?? [], [snapshot, category])
   const mapped = fields.filter(field => field.mapped)
@@ -38,6 +41,26 @@ export default function SettingsPage() {
         <Typography variant="h5" sx={{ fontWeight: 800 }}>{title}</Typography>
         <Typography color="text.secondary" sx={{ mt: 0.5, mb: 2 }}>{descriptions[category]}</Typography>
         <SettingsStatusBanner errors={snapshot.errors} mapped={snapshot.mappedCount} unmapped={snapshot.unmappedCount} />
+        {category === 'metadata' && metaTube && <SettingsSection title="MetaTube Provider" description="复用旧版已验证的 MetaTube v1 接口。同步始终只补全空字段，不覆盖用户手工数据和已有文件。">
+          <Box sx={{ p: 2 }}>
+            {providerNotice && <Alert severity={providerNotice.severity} onClose={() => setProviderNotice(undefined)} sx={{ mb: 2 }}>{providerNotice.text}</Alert>}
+            <Stack spacing={1.5}>
+              <FormControlLabel control={<Switch checked={metaTube.enabled} onChange={event => setMetaTube({ ...metaTube, enabled: event.target.checked })}/>} label="启用 MetaTube"/>
+              <TextField size="small" label="服务地址" value={metaTube.baseUrl} onChange={event => setMetaTube({ ...metaTube, baseUrl: event.target.value })} helperText="默认 http://127.0.0.1:8080/；仅允许 HTTP/HTTPS。"/>
+              <TextField size="small" type="number" label="请求超时（秒）" value={metaTube.timeoutSeconds} onChange={event => setMetaTube({ ...metaTube, timeoutSeconds: Number(event.target.value) || 30 })} slotProps={{ htmlInput: { min: 15, max: 180 } }}/>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <FormControlLabel control={<Switch checked={metaTube.autoExecute} onChange={event => setMetaTube({ ...metaTube, autoExecute: event.target.checked })}/>} label="自动执行 Pending 同步任务"/>
+                <FormControlLabel control={<Switch checked={metaTube.downloadImages} onChange={event => setMetaTube({ ...metaTube, downloadImages: event.target.checked })}/>} label="下载海报与预览图"/>
+                <FormControlLabel control={<Switch checked={metaTube.writeNfo} onChange={event => setMetaTube({ ...metaTube, writeNfo: event.target.checked })}/>} label="生成 NFO（不覆盖）"/>
+              </Stack>
+              <Alert severity="info">非破坏合并已强制开启：已有标题、简介、日期、时长、标签、演员关系、图片和 NFO 不会被覆盖或删除。</Alert>
+              <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
+                <Button disabled={providerBusy} variant="outlined" onClick={() => { setProviderBusy(true); bridge.testMetaTube(metaTube).then(result => setProviderNotice({ severity: result.success ? 'success' : 'error', text: `${result.message}（${result.elapsedMilliseconds} ms）` })).catch((reason: Error) => setProviderNotice({ severity: 'error', text: reason.message })).finally(() => setProviderBusy(false)) }}>测试连接</Button>
+                <Button disabled={providerBusy} variant="contained" onClick={() => { setProviderBusy(true); bridge.saveMetaTubeSettings(metaTube).then(value => { setMetaTube(value); setProviderNotice({ severity: 'success', text: 'MetaTube 设置已保存并立即生效。' }) }).catch((reason: Error) => setProviderNotice({ severity: 'error', text: reason.message })).finally(() => setProviderBusy(false)) }}>保存 Provider 设置</Button>
+              </Stack>
+            </Stack>
+          </Box>
+        </SettingsSection>}
         {category === 'appearance' && <SettingsSection title="主题预览" description="即时预览只修改当前窗口，不会写回旧主题设置。">
           <Stack direction="row" spacing={1} sx={{ p: 2 }}>
             <Button variant={mode === 'light' ? 'contained' : 'outlined'} startIcon={<LightModeRoundedIcon />} onClick={() => setMode('light')}>浅色</Button>
