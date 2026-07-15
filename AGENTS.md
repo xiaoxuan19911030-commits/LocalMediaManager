@@ -14,6 +14,7 @@ Before planning or implementing product work, read:
 - `docs/ROADMAP.md` is the formal version-scope authority.
 - Unfinished work belongs in `docs/TODO.md`.
 - Released behavior belongs in `docs/CHANGELOG.md`.
+- `docs/migration/FEATURE_PARITY_MATRIX.md` is the only authority for legacy feature status, priority, dependencies, risk, and completion evidence.
 - Do not introduce a new product direction solely from conversation context without updating these documents.
 
 ## Architecture rules
@@ -36,3 +37,5 @@ Before planning or implementing product work, read:
 ## Version completion
 
 Before completing a version, update Roadmap, Changelog, and TODO; run Web, Bridge, Migration, Tauri Debug/Release and NSIS validation; back up and deploy the independent Next installation; smoke test; create a commit, version tag, and rollback tag; and record the verification result.
+
+Never mark a legacy feature as fully migrated unless the matrix contains its real UI operation, Bridge execution, persistence/restart result, error handling, required backup/rollback, automated test, manual smoke test, Git commit, and acceptance record.
