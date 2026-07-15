@@ -22,7 +22,7 @@ if (command == "migrate") {
         Directory.CreateDirectory(reportDirectory);
         string officialDatabase = Path.Combine(dataRoot, "data", "LocalMediaManager.db");
         var failure = new {
-            ToolVersion = "0.3.0",
+            ToolVersion = "0.4.0",
             Status = "Failed",
             FailedAt = DateTimeOffset.Now,
             LegacyBusinessDatabase = businessDb,
@@ -55,7 +55,7 @@ if (command != "analyze") {
 
 Directory.CreateDirectory(output);
 var report = new LegacyAnalysisReport(
-    ToolVersion: "0.3.0",
+    ToolVersion: "0.4.0",
     GeneratedAt: DateTimeOffset.Now,
     Databases: [await AnalyzeAsync("business", businessDb), await AnalyzeAsync("configuration", configDb)]);
 

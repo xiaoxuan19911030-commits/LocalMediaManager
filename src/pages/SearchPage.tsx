@@ -2,7 +2,7 @@ import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import { Alert, Box, Button, Chip, CircularProgress, InputAdornment, Snackbar, Stack, TextField } from '@mui/material'
 import { FormEvent, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
-import { MediaCard } from '@/components/MediaCard'
+import { MediaCard, MediaCardGrid } from '@/components/MediaCard'
 import { EmptyState, SectionTitle } from '@/components/ProductComponents'
 import { PageHeader } from '@/components/PageHeader'
 import { bridge } from '@/services/bridge'
@@ -21,7 +21,7 @@ export default function SearchPage() {
     {error && <Alert severity="error">{error}</Alert>}{loading && <Box sx={{ minHeight:260,display:'grid',placeItems:'center' }}><CircularProgress/></Box>}
     {!query && !loading && <EmptyState title="搜索你的媒体库" description="输入番号、影片标题、演员或标签开始查找。"/>}
     {result && !loading && <Stack spacing={3}>
-      <Box><SectionTitle title={`影片（${result.movies.length}）`}/>{result.movies.length ? <Box sx={{ display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(142px,1fr))',gap:1.5 }}>{result.movies.map(item=><MediaCard key={item.dataId} item={item} onPlay={play} onOpen={()=>navigate(`/movies/${item.dataId}`)}/>)}</Box> : <EmptyState title="没有匹配影片" description="可以尝试更短的关键词。"/>}</Box>
+      <Box><SectionTitle title={`影片（${result.movies.length}）`}/>{result.movies.length ? <MediaCardGrid>{result.movies.map(item=><MediaCard key={item.dataId} item={item} onPlay={play} onOpen={()=>navigate(`/movies/${item.dataId}`)}/>)}</MediaCardGrid> : <EmptyState title="没有匹配影片" description="可以尝试更短的关键词。"/>}</Box>
       {(result.actors.length>0||result.tags.length>0)&&<Box sx={{ display:'grid',gridTemplateColumns:{xs:'1fr',md:'1fr 1fr'},gap:2 }}>
         <Box><SectionTitle title="演员"/><Stack direction="row" useFlexGap spacing={1} sx={{flexWrap:'wrap'}}>{result.actors.map(item=><Chip key={item.id} label={`${item.name} · ${item.movieCount}`}/>)}</Stack></Box>
         <Box><SectionTitle title="标签"/><Stack direction="row" useFlexGap spacing={1} sx={{flexWrap:'wrap'}}>{result.tags.map(item=><Chip key={item.id} color="primary" variant="outlined" label={`${item.name} · ${item.movieCount}`}/>)}</Stack></Box>

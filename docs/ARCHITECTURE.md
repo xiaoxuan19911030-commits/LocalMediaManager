@@ -30,6 +30,8 @@ The Bridge exposes health, dashboard, global search, libraries, tasks, paged/sea
 
 Version 0.3.0 adds product-facing routes without changing the foundation: Dashboard, movie wall, movie details, global search, media libraries, and task center. Pages contain presentation and interaction only; SQL remains in the Bridge product reader. Database corrections and upgrades remain checksummed migrations.
 
+Version 0.4.0 treats Bridge, Database, Migration, Material UI, and Tauri as stable infrastructure. Experience work is implemented through shared React presentation components and existing DTOs; it does not introduce page-level persistence or alternate business paths.
+
 The official brand is Local Media Manager (LMM). Brand SVG sources live under `assets/brand`, while generated PNG, ICO, application, and NSIS assets are derived from those sources.
 
 ## Existing C# reuse assessment

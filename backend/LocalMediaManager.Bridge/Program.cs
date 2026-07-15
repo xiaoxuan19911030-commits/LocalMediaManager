@@ -25,7 +25,7 @@ app.UseCors();
 app.MapGet("/health", () => Results.Ok(new {
     product = "Local Media Manager",
     abbreviation = "LMM",
-    version = "0.3.0",
+    version = "0.4.0",
     status = "ok",
     databaseAvailable = File.Exists(databasePath),
     databasePath,

@@ -3,7 +3,7 @@ import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import { Alert, Box, Button, CircularProgress, InputAdornment, MenuItem, Pagination, Snackbar, TextField } from '@mui/material'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { MediaCard } from '@/components/MediaCard'
+import { MediaCard, MediaCardGrid } from '@/components/MediaCard'
 import { PageHeader } from '@/components/PageHeader'
 import { bridge } from '@/services/bridge'
 import type { MediaItem } from '@/types/media'
@@ -55,9 +55,9 @@ export default function MediaPage() {
       </Box>
       {error && <Alert severity="error">{error}</Alert>}
       {loading ? <Box sx={{ display: 'grid', placeItems: 'center', minHeight: 300 }}><CircularProgress /></Box> :
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(142px, 1fr))', gap: 1.5 }}>
+        <MediaCardGrid>
           {items.map((item) => <MediaCard key={item.dataId} item={item} onPlay={play} onOpen={() => navigate(`/movies/${item.dataId}`)} />)}
-        </Box>}
+        </MediaCardGrid>}
       {total > pageSize && <Box sx={{ display: 'flex', justifyContent: 'center', pt: 3 }}>
         <Pagination count={Math.ceil(total / pageSize)} page={page} onChange={(_, value) => setPage(value)} color="primary" />
       </Box>}

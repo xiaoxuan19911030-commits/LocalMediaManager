@@ -4,7 +4,7 @@
 
 Local Media Manager (LMM) is a modern, local-first desktop media manager built with Tauri 2, React, TypeScript, Material UI, Emotion, and a .NET 8 Bridge. The stable legacy WPF application remains independently installed and continues to use its own databases during the migration period.
 
-Version 0.3.0 starts the product-function phase while preserving the established architecture boundaries:
+Version 0.4.0 focuses on the modern media experience while preserving the established architecture boundaries:
 
 1. The Tauri desktop shell starts independently of the WPF application.
 2. The independent migration tool reads the legacy databases in SQLite `ReadOnly` mode, creates backups, builds Database v1 in a temporary file, validates it, and only then performs an atomic switch.
@@ -12,6 +12,8 @@ Version 0.3.0 starts the product-function phase while preserving the established
 4. Dashboard, the modern movie wall, movie details, global search, media libraries, and the task center all consume typed Bridge DTOs.
 5. Cover streaming, details DTOs, and player launch operate through the Bridge rather than direct frontend database access.
 6. The LMM brand source is maintained as SVG, generated in standard PNG/ICO sizes, and reused by the application and NSIS installer.
+
+The first 0.4.0 experience stage introduces an information-first movie details layout, a shared animated movie card across Dashboard, Media, and Search, and a Dashboard with library health and task-oriented shortcuts. Motion respects the operating system reduced-motion preference and all colors come from the shared light/dark Material UI theme.
 
 ## Development
 
