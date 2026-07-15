@@ -8,6 +8,8 @@ Restore the daily user workflows for favorites, ratings, user tags, actor relati
 
 `Planning → Design → Develop → Self Test → Smoke Test → Freeze → Release → Archive`
 
+Status: `Release / Frozen` on 2026-07-15. Evidence: `docs/releases/0.4.1-VERIFICATION.md`.
+
 ## Design decisions
 
 - React remains presentation-only and calls typed Bridge commands.
@@ -33,3 +35,11 @@ Restore the daily user workflows for favorites, ratings, user tags, actor relati
 
 AI, NAS, plugin installation, scanning/import UI, metadata providers, NFO and image/file organization remain outside this Sprint.
 
+## Delivery evidence
+
+- Bridge APIs: authenticated state, tag, actor, playback, neighbor, delete-preview/delete and rollback commands.
+- Migration: `0003_UserStateAuditAndRatingMemory`.
+- Automated: 6 Bridge writer tests passed in Release.
+- Smoke: real database copy plus installed Next UI; production data restored after toggle test.
+- Feature commit: `da9fcdf`; safety test commit: `cc99a9f`.
+- Verification: `docs/releases/0.4.1-VERIFICATION.md`.

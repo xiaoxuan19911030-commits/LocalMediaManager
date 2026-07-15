@@ -42,7 +42,8 @@ Planning → Design → Develop → Self Test → Smoke Test → Freeze → Rele
 
 ## 0.4.1 — Legacy Feature Migration Part 1
 
-**状态：Planning（当前规划版本）**
+**状态：Release / Frozen**
+**发布日期：2026-07-15**
 
 目标是恢复最高频用户写操作与用户状态兼容，不恢复旧 UI。
 
@@ -79,9 +80,17 @@ Planning → Design → Develop → Self Test → Smoke Test → Freeze → Rele
 - 打开文件夹、文件信息与用户状态
 - 全部复用 Next Information Layout 与公共组件
 
+### 发布结论
+
+- 收藏、评分、自定义标签、演员资料与影片演员关系已恢复真实写入。
+- 删除影片记录具备影响预览、数据库备份和文件名评分记忆；不删除媒体文件。
+- ActorID=0 修复具备预览、确认、任务记录、自动化测试和操作前数据库备份。
+- 播放正常退出后写入播放次数与历史；上一部/下一部保持影片墙搜索和排序上下文。
+- 同名评分恢复 Bridge 能力已完成；与扫描导入流程的自动触发在 0.4.2 接入，不提前伪装为完整导入迁移。
+
 ## 0.4.2 — Legacy Feature Migration Part 2
 
-**状态：Planning**
+**状态：Planning（下一规划版本）**
 
 - 媒体扫描与导入
 - 新增后自动同步
