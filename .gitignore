@@ -9,5 +9,9 @@ src-tauri/resources/migration/*
 backend/**/bin/
 backend/**/obj/
 docs/database/generated/
+docs/database/legacy-database-analysis.json
+docs/database/LEGACY_DATABASE_DICTIONARY.md
+docs/database/LEGACY_RELATIONSHIP_AND_DATA_QUALITY.md
+docs/database/KNOWN_MIGRATION_FINDINGS.md
 *.log
 .env.local

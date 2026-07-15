@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Local Media Manager — modern, local-first media management for Windows.">
+  <meta name="theme-color" content="#0b1020">
+  <title>Local Media Manager</title>
+  <link rel="icon" href="assets/lmm-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+  <header class="site-header">
+    <a class="brand" href="#top" aria-label="Local Media Manager 首页">
+      <img src="assets/lmm-mark.svg" alt="" width="34" height="34">
+      <span>Local Media Manager</span>
+    </a>
+    <nav aria-label="主导航">
+      <a href="#features">功能</a>
+      <a href="#architecture">架构</a>
+      <a href="#roadmap">路线图</a>
+      <a data-repo-link href="https://github.com/xiaoxuan19911030-commits/LocalMediaManager">GitHub</a>
+    </nav>
+    <button class="theme-toggle" type="button" aria-label="切换明暗主题" title="切换明暗主题">
+      <span aria-hidden="true">◐</span>
+    </button>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="hero-copy reveal">
+        <div class="eyebrow"><span></span> LOCAL-FIRST · WINDOWS · OPEN SOURCE</div>
+        <h1>你的媒体库，<br><em>由你掌控。</em></h1>
+        <p>Local Media Manager 是一个现代化、本地优先的 Windows 媒体管理平台。它让浏览、整理、元数据与用户状态始终清晰、安全、可追踪。</p>
+        <div class="hero-actions">
+          <a class="button primary" data-release-link href="https://github.com/xiaoxuan19911030-commits/LocalMediaManager/releases/latest">获取最新版</a>
+          <a class="button secondary" data-repo-link href="https://github.com/xiaoxuan19911030-commits/LocalMediaManager">查看源码 <span>↗</span></a>
+        </div>
+        <div class="release-note"><span class="pulse"></span> 当前版本 0.4.1 · Sprint 0.4.1 Frozen</div>
+      </div>
+
+      <div class="product-window reveal" aria-label="Local Media Manager 界面示意">
+        <div class="window-bar">
+          <div class="window-brand"><img src="assets/lmm-mark.svg" alt="" width="22" height="22"> LMM</div>
+          <div class="window-controls"><i></i><i></i><i></i></div>
+        </div>
+        <div class="app-shell">
+          <aside>
+            <div class="nav-item active"><b>⌂</b><span>首页</span></div>
+            <div class="nav-item"><b>▣</b><span>所有影片</span></div>
+            <div class="nav-item"><b>⌕</b><span>搜索</span></div>
+            <div class="nav-item"><b>♡</b><span>收藏</span></div>
+            <div class="nav-spacer"></div>
+            <div class="nav-item"><b>⚙</b><span>设置</span></div>
+          </aside>
+          <div class="dashboard">
+            <div class="dash-heading"><div><small>媒体中心</small><strong>晚上好</strong></div><span class="search-pill">⌕ 搜索影片</span></div>
+            <div class="stats"><div><small>所有影片</small><strong>2,500</strong></div><div><small>我的收藏</small><strong>494</strong></div><div><small>影片演员</small><strong>1,667</strong></div></div>
+            <div class="section-title"><strong>最近加入</strong><small>查看全部 →</small></div>
+            <div class="poster-grid" aria-hidden="true">
+              <div class="poster p1"><span>ABP-101</span></div><div class="poster p2"><span>STAR-208</span></div><div class="poster p3"><span>MIDV-315</span></div><div class="poster p4"><span>SONE-042</span></div><div class="poster p5"><span>IPX-725</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="principles" aria-label="产品原则">
+      <div><strong>本地优先</strong><span>核心数据留在本地</span></div>
+      <div><strong>用户数据优先</strong><span>手工修改永不被静默覆盖</span></div>
+      <div><strong>安全可控</strong><span>危险操作预览、确认、回滚</span></div>
+      <div><strong>长期可维护</strong><span>Bridge · Migration · Tasks</span></div>
+    </section>
+
+    <section class="section" id="features">
+      <div class="section-heading reveal"><span>MODERN MEDIA EXPERIENCE</span><h2>专注于真正的媒体管理体验</h2><p>不是给旧界面换皮，而是从信息组织、操作反馈和数据安全重新构建。</p></div>
+      <div class="feature-grid">
+        <article class="feature-card wide reveal"><div class="icon">▦</div><h3>现代影片墙</h3><p>清晰的海报、番号、用户状态与评分层级，支持搜索、分页和稳定排序。</p><div class="mini-wall"><i></i><i></i><i></i><i></i><i></i><i></i></div></article>
+        <article class="feature-card reveal"><div class="icon">◎</div><h3>Information Layout</h3><p>详情、元数据、人物关系和用户操作在同一信息架构中自然组织。</p></article>
+        <article class="feature-card reveal"><div class="icon">⌕</div><h3>全局搜索</h3><p>影片、演员与标签统一查找，普通本地搜索永远不依赖 AI。</p></article>
+        <article class="feature-card reveal"><div class="icon">✓</div><h3>真实写入</h3><p>收藏、评分、标签、演员关系和播放记录全部通过 Bridge 真实持久化。</p></article>
+        <article class="feature-card wide reveal"><div class="icon">↻</div><h3>可追踪的数据演进</h3><p>Checksummed Migration、完整性检查、备份和明确回滚点，让升级不再是一场赌博。</p><div class="migration-flow"><span>Backup</span><b>→</b><span>Migrate</span><b>→</b><span>Validate</span><b>→</b><span>Switch</span></div></article>
+      </div>
+    </section>
+
+    <section class="architecture section" id="architecture">
+      <div class="section-heading reveal"><span>CLEAR BOUNDARIES</span><h2>为长期演进设计的架构</h2><p>页面只负责体验，业务和数据各守边界。</p></div>
+      <div class="architecture-stack reveal">
+        <div class="layer"><small>DESKTOP EXPERIENCE</small><strong>Tauri 2 · React · Material UI</strong><span>路由、交互、主题与公共组件</span></div>
+        <div class="connector"><i></i><span>Typed DTO · Authenticated Loopback API</span><i></i></div>
+        <div class="layer bridge"><small>BUSINESS BOUNDARY</small><strong>.NET 8 Bridge</strong><span>校验、事务、路径解析、播放器与任务</span></div>
+        <div class="connector"><i></i><span>Checksummed Schema Migration</span><i></i></div>
+        <div class="layer database"><small>LOCAL DATA</small><strong>SQLite Database v1</strong><span>独立数据库、完整性校验与备份</span></div>
+      </div>
+    </section>
+
+    <section class="section roadmap" id="roadmap">
+      <div class="section-heading reveal"><span>ROADMAP</span><h2>稳定地走向完整产品</h2></div>
+      <div class="timeline reveal">
+        <article class="done"><small>0.4.0</small><h3>Modern Experience</h3><p>现代 UI、Dashboard、Media、Details、Search、Settings、Tasks。</p><span>RELEASED</span></article>
+        <article class="done current"><small>0.4.1</small><h3>Core User Workflows</h3><p>收藏、评分、标签、演员关系、播放历史和数据安全。</p><span>RELEASED</span></article>
+        <article><small>0.4.2</small><h3>Import & Metadata</h3><p>扫描、导入、同步、NFO、图片与文件整理工作流。</p><span>PLANNED</span></article>
+        <article><small>0.5.5</small><h3>LTS Stability</h3><p>性能、内存、大型媒体库、自动化测试与长期稳定。</p><span>FUTURE</span></article>
+      </div>
+    </section>
+
+    <section class="cta reveal">
+      <img src="assets/lmm-mark.svg" alt="" width="72" height="72">
+      <div><small>LOCAL MEDIA MANAGER</small><h2>构建属于自己的媒体中心</h2><p>开源、本地优先，并以用户数据安全为第一原则。</p></div>
+      <a class="button primary" data-repo-link href="https://github.com/xiaoxuan19911030-commits/LocalMediaManager">在 GitHub 查看</a>
+    </section>
+  </main>
+
+  <footer><div><strong>Local Media Manager</strong><span>Modern · Local-first · Extensible</span></div><div><a data-repo-link href="https://github.com/xiaoxuan19911030-commits/LocalMediaManager">GitHub</a><a href="https://github.com/xiaoxuan19911030-commits/LocalMediaManager/blob/main/LICENSE">GPL-3.0</a><span>© 2026 LMM</span></div></footer>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+name: Bug report
+description: Report a reproducible problem in Local Media Manager
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Please remove private paths, filenames, media images and credentials before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: LMM version
+      placeholder: 0.4.1
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Startup, Media wall, Movie details, Search, Tags, Actors, Tasks, Settings, Migration, Installer, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: Describe the smallest reliable sequence.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Include Windows version and display scaling if relevant. Do not attach a real database.
+

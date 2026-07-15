@@ -1,6 +1,6 @@
 # Legacy settings field mapping
 
-The authoritative settings source is `D:\Jvedio\Jvedio5.0\data\Administrator\app_configs.sqlite`, table `app_configs`. `ConfigName` identifies a configuration group and `ConfigValue` contains JSON. The Bridge opens this database read-only.
+The authoritative legacy settings source is `<legacy-root>\data\<profile>\app_configs.sqlite`, table `app_configs`. `ConfigName` identifies a configuration group and `ConfigValue` contains JSON. The Bridge opens this database read-only.
 
 The settings DTO records category, section, UI label, exact `ConfigName.Property`, source, type, current value, default metadata, nullability, restart/immediate flags, danger flag, legacy compatibility, safe-write status, sensitivity, and read status.
 

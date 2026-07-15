@@ -1,76 +1,110 @@
-<p align="center"><img src="assets/brand/lmm-logo-light.svg" width="560" alt="Local Media Manager"></p>
+<p align="center">
+  <img src="assets/brand/lmm-logo-light.svg" width="560" alt="Local Media Manager">
+</p>
 
-# Local Media Manager
+<p align="center">
+  A modern, local-first desktop media manager for Windows.
+</p>
 
-Local Media Manager (LMM) is a modern, local-first desktop media manager built with Tauri 2, React, TypeScript, Material UI, Emotion, and a .NET 8 Bridge. The stable legacy WPF application remains independently installed and continues to use its own databases during the migration period.
+<p align="center">
+  <a href="https://github.com/xiaoxuan19911030-commits/LocalMediaManager/releases"><img alt="Release" src="https://img.shields.io/github/v/release/xiaoxuan19911030-commits/LocalMediaManager?include_prereleases&style=flat-square"></a>
+  <a href="https://github.com/xiaoxuan19911030-commits/LocalMediaManager/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/xiaoxuan19911030-commits/LocalMediaManager/ci.yml?branch=main&style=flat-square&label=build"></a>
+  <img alt="Windows" src="https://img.shields.io/badge/platform-Windows-2563eb?style=flat-square">
+  <a href="LICENSE"><img alt="GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-7c3aed?style=flat-square"></a>
+</p>
 
-Version 0.4.1 restores the first group of legacy daily-use workflows while preserving the established architecture boundaries:
+## About
 
-1. The Tauri desktop shell starts independently of the WPF application.
-2. The independent migration tool reads the legacy databases in SQLite `ReadOnly` mode, creates backups, builds Database v1 in a temporary file, validates it, and only then performs an atomic switch.
-3. LMM reads only `D:\Local Media Manager Next Data\data\LocalMediaManager.db`; it does not use the WPF business database at runtime. The existing directory name is retained for upgrade compatibility.
-4. Dashboard, the modern movie wall, movie details, global search, media libraries, and the task center all consume typed Bridge DTOs.
-5. Cover streaming, details DTOs, and player launch operate through the Bridge rather than direct frontend database access.
-6. The LMM brand source is maintained as SVG, generated in standard PNG/ICO sizes, and reused by the application and NSIS installer.
+Local Media Manager (LMM) is an independent desktop product for organizing and exploring local media libraries. It combines a Tauri 2 desktop shell, React and Material UI presentation, a typed .NET 8 Bridge, and a checksummed SQLite migration system.
 
-Version 0.4.1 adds authenticated Bridge writes for favorites, ratings, user tags, actor relationships and playback history on top of the 0.4.0 information-first experience. Motion respects the operating system reduced-motion preference and all colors come from the shared light/dark Material UI theme.
+The product is local-first: media files, metadata, ratings, favorites, tags and playback history stay under the user's control. React never accesses SQLite or the filesystem directly; all business operations pass through authenticated Bridge APIs.
 
-## Product documentation
+> Current release: **0.4.1 — Legacy Feature Migration Part 1**
+> Development status: Sprint 0.4.2 is paused while the public repository is prepared.
+
+## Highlights
+
+- Modern movie wall, dashboard, global search and information-focused detail pages.
+- Favorites, ratings, custom tags, actor relationships and playback history with restart persistence.
+- Independent Database v1 with checksummed migrations, integrity validation and backups.
+- Authenticated loopback Bridge boundary with typed DTOs and consistent errors.
+- Shared Material UI design system with light/dark themes and responsive desktop layouts.
+- Unified Tasks foundation for scanning, metadata, images and future long-running work.
+- Provider-neutral AI architecture reserved for a later release; AI is not part of the current runtime.
+
+## Architecture
 
 ```text
-Product Vision
-      ↓
-Roadmap
-      ↓
-Architecture
-      ↓
-UI Design
-      ↓
-Development Rules
-      ↓
-Feature Matrix
-      ↓
-TODO
-      ↓
-Development & Test Plan
+Tauri 2 / React / Material UI
+              │
+              │ typed authenticated Bridge API
+              ▼
+LocalMediaManager.Bridge (.NET 8)
+              │
+              │ migrations + transactional services
+              ▼
+       SQLite Database v1
 ```
+
+The legacy WPF project is a compatibility and business-rule reference only. Its UI is not copied into LMM, and the stable legacy installation is never overwritten by Next builds.
+
+## Documentation
 
 - [Product vision](docs/PRODUCT_VISION.md)
 - [Roadmap](docs/ROADMAP.md)
-- [Changelog](docs/CHANGELOG.md)
-- [TODO](docs/TODO.md)
-- [UI design specification](docs/UI_DESIGN_SPEC.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [UI design specification](docs/UI_DESIGN_SPEC.md)
 - [Feature parity matrix](docs/migration/FEATURE_PARITY_MATRIX.md)
 - [Test plan](docs/TEST_PLAN.md)
-
-The Roadmap is the formal version-scope authority. Unfinished work belongs in TODO, released behavior belongs in Changelog, and legacy migration status belongs in the feature parity matrix.
+- [Changelog](docs/CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
 
 ## Development
 
+### Requirements
+
+- Windows 10/11 x64
+- Node.js and pnpm 11
+- .NET 8 SDK
+- Rust stable toolchain
+- WebView2 Runtime
+
+### Start locally
+
 ```powershell
-pnpm install
-dotnet build backend/LocalMediaManager.Bridge/LocalMediaManager.Bridge.csproj
+pnpm install --frozen-lockfile
 pnpm bridge:publish
 pnpm migration:publish
 pnpm tauri:dev
 ```
 
-Create the complete Windows brand asset set with:
+### Validate
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\generate-brand-assets.ps1
+pnpm build:web
+dotnet test backend/LocalMediaManager.Bridge.Tests/LocalMediaManager.Bridge.Tests.csproj -c Release
+cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-Environment overrides:
+### Build the Windows installer
 
-- `LMM_LEGACY_ROOT`: legacy installed root, default `D:\Jvedio\Jvedio5.0`.
-- `LMM_DATABASE_PATH`: LMM Database v1 path; default `D:\Local Media Manager Next Data\data\LocalMediaManager.db` in the Bridge.
-- `LMM_CONFIG_DATABASE_PATH`: legacy settings source opened read-only during the settings migration phase.
-- `LMM_NEXT_DATA_ROOT`: independent migration data root, default `D:\Local Media Manager Next Data`.
-- `LMM_LEGACY_DATABASE_PATH` / `LMM_LEGACY_CONFIG_DATABASE_PATH`: optional source overrides used only by the independent migration tool.
-- `LMM_IMAGE_ROOT`: image directory containing `CardCovers` and `SmallPic`.
-- `LMM_PLAYER_PATH`: optional external player executable.
-- `LMM_BRIDGE_PATH`: optional Bridge executable used by the Tauri host.
+```powershell
+pnpm bridge:publish
+pnpm migration:publish
+pnpm tauri:build
+```
 
-The stable WPF project and installation remain available and are not overwritten by LMM. Application binaries remain deployed to `D:\Local Media Manager Next` for upgrade compatibility; data, backups, and migration reports stay outside that installation directory.
+The NSIS installer is generated under `src-tauri/target/release/bundle/nsis/`.
+
+## Data safety
+
+- Database schema changes use ordered, checksummed Migration files.
+- Dangerous operations require impact preview and confirmation.
+- User-authored ratings, favorites, tags, notes and selected images take priority over automated sources.
+- Source media is never deleted by metadata or UI operations.
+- Cloud AI and external providers are disabled unless deliberately implemented and enabled in a future release.
+
+## License and attribution
+
+Local Media Manager is licensed under [GPL-3.0-only](LICENSE). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for upstream architecture attribution and dependency notices.
