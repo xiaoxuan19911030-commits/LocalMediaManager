@@ -37,9 +37,8 @@
       }
     },
     "resources": [
-      "resources/bridge/*",
-      "resources/migration/*",
-      "resources/migration/migrations/*.sql"
+      "resources/bridge",
+      "resources/migration"
     ]
   }
 }
