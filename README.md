@@ -13,7 +13,19 @@ Version 0.4.0 focuses on the modern media experience while preserving the establ
 5. Cover streaming, details DTOs, and player launch operate through the Bridge rather than direct frontend database access.
 6. The LMM brand source is maintained as SVG, generated in standard PNG/ICO sizes, and reused by the application and NSIS installer.
 
-The first 0.4.0 experience stage introduces an information-first movie details layout, a shared animated movie card across Dashboard, Media, and Search, and a Dashboard with library health and task-oriented shortcuts. Motion respects the operating system reduced-motion preference and all colors come from the shared light/dark Material UI theme.
+Version 0.4.0 introduces an information-first movie details layout, a shared animated movie card, Dashboard health and shortcuts, Search 2.0, Library, Actors, Tags, Metadata, Diagnostics, Tasks, Plugin foundations, and the AI Provider architecture placeholder. Motion respects the operating system reduced-motion preference and all colors come from the shared light/dark Material UI theme.
+
+## Product documentation
+
+- [Product vision](docs/PRODUCT_VISION.md)
+- [Roadmap](docs/ROADMAP.md)
+- [Changelog](docs/CHANGELOG.md)
+- [TODO](docs/TODO.md)
+- [UI design specification](docs/UI_DESIGN_SPEC.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Feature parity matrix](docs/migration/FEATURE_PARITY_MATRIX.md)
+
+The Roadmap is the formal version-scope authority. Unfinished work belongs in TODO, released behavior belongs in Changelog, and legacy migration status belongs in the feature parity matrix.
 
 ## Development
 
