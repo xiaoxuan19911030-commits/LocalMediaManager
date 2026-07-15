@@ -2,10 +2,29 @@
 
 > 本文档是版本范围的唯一正式入口。范围调整必须同时更新 Roadmap、TODO 和 Changelog；聊天中的临时想法未进入本文档前不视为正式版本承诺。
 
+## 版本生命周期
+
+所有版本统一经过以下阶段：
+
+```text
+Planning → Design → Develop → Self Test → Smoke Test → Freeze → Release → Archive
+```
+
+- **Planning**：确定目标、优先级、依赖、风险与验收方式。
+- **Design**：完成 Bridge/DTO/Migration/Tasks/UI 设计，不先做孤立页面按钮。
+- **Develop**：按架构和 UI 规范实施，持续更新功能矩阵证据。
+- **Self Test**：开发者执行自动化测试、静态检查和目标功能自测。
+- **Smoke Test**：在真实数据库与独立安装目录执行关键用户路径。
+- **Freeze**：停止新增功能，只处理阻塞发布的缺陷。
+- **Release**：完成全量构建、安装包、备份部署、标签和发布记录。
+- **Archive**：冻结发布证据、迁移状态和遗留事项，后续不移动版本标签。
+
 ## 0.4.0 — Modern Media Experience
 
-**状态：Completed**  
+**状态：Release / Frozen**
 **发布日期：2026-07-15**
+
+`v0.4.0` 标签已经冻结。该版本不再增加功能；必要缺陷修复必须单独记录，功能开发进入 0.4.1。
 
 - Modern UI Experience
 - Dashboard
@@ -94,6 +113,21 @@
 - Library CRUD
 - 完整 Task Manager
 - 达到主要旧版媒体管理功能等价
+
+## 0.5.5 — LTS Stability
+
+**状态：Future**
+
+0.5.0 功能等价完成后，先建立长期稳定基线，再进入 AI：
+
+- 集中修复 Bug 和迁移边界问题
+- 优化启动速度、内存和图片生命周期
+- 优化数据库查询、索引和 Bridge 并发
+- 验证 5 万至 10 万影片的大媒体库体验
+- 扩充自动化测试、安装升级和回滚测试
+- 建立性能基准、长期运行和故障恢复报告
+
+0.5.5 不引入新的大型产品功能；通过 LTS 验收后才允许开始 0.6.0 AI。
 
 ## 0.6.0 — AI
 

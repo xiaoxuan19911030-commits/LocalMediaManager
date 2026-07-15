@@ -7,7 +7,8 @@ Before planning or implementing product work, read:
 3. `docs/TODO.md`
 4. `docs/ARCHITECTURE.md`
 5. `docs/UI_DESIGN_SPEC.md`
-6. `docs/migration/FEATURE_PARITY_MATRIX.md` when legacy behavior is involved
+6. `docs/TEST_PLAN.md`
+7. `docs/migration/FEATURE_PARITY_MATRIX.md` when legacy behavior is involved
 
 ## Scope authority
 
@@ -39,3 +40,5 @@ Before planning or implementing product work, read:
 Before completing a version, update Roadmap, Changelog, and TODO; run Web, Bridge, Migration, Tauri Debug/Release and NSIS validation; back up and deploy the independent Next installation; smoke test; create a commit, version tag, and rollback tag; and record the verification result.
 
 Never mark a legacy feature as fully migrated unless the matrix contains its real UI operation, Bridge execution, persistence/restart result, error handling, required backup/rollback, automated test, manual smoke test, Git commit, and acceptance record.
+
+Every version follows `Planning → Design → Develop → Self Test → Smoke Test → Freeze → Release → Archive`. Run the applicable cases from `docs/TEST_PLAN.md`; do not skip directly from implementation to release.

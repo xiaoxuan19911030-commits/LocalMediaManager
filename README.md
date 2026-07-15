@@ -17,6 +17,24 @@ Version 0.4.0 introduces an information-first movie details layout, a shared ani
 
 ## Product documentation
 
+```text
+Product Vision
+      ↓
+Roadmap
+      ↓
+Architecture
+      ↓
+UI Design
+      ↓
+Development Rules
+      ↓
+Feature Matrix
+      ↓
+TODO
+      ↓
+Development & Test Plan
+```
+
 - [Product vision](docs/PRODUCT_VISION.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Changelog](docs/CHANGELOG.md)
@@ -24,6 +42,7 @@ Version 0.4.0 introduces an information-first movie details layout, a shared ani
 - [UI design specification](docs/UI_DESIGN_SPEC.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Feature parity matrix](docs/migration/FEATURE_PARITY_MATRIX.md)
+- [Test plan](docs/TEST_PLAN.md)
 
 The Roadmap is the formal version-scope authority. Unfinished work belongs in TODO, released behavior belongs in Changelog, and legacy migration status belongs in the feature parity matrix.
 
