@@ -126,3 +126,16 @@ export interface MovieDetail {
   studios: NamedItem[]
   series: NamedItem[]
 }
+
+export interface EntityCard { id: number; name: string; movieCount: number; imageUrl?: string }
+export interface EntityPageResult { items: EntityCard[]; total: number; limit: number; offset: number }
+export interface AdvancedSearchFilters {
+  query: string; actorId?: number; tagId?: number; favorite?: boolean; ratingMin?: number
+  metadata?: string; fileStatus?: string; libraryId?: number; sort?: string; limit?: number; offset?: number
+}
+export interface MetadataOverview {
+  totalMovies: number; scrapedMovies: number; missingTitle: number; missingCover: number
+  missingActors: number; missingTags: number; missingNfo: number; missingFiles: number
+}
+export interface DiagnosticItem { severity: 'error' | 'warning' | 'info'; code: string; title: string; detail: string; count: number }
+export interface DiagnosticsResult { integrity: string; foreignKeyErrors: number; items: DiagnosticItem[] }

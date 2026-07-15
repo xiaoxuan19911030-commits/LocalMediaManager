@@ -23,6 +23,13 @@ public sealed record MovieDetailDto(long Id, string? Code, string? Title, string
     string? LastPlayedAt, long LastPositionSeconds, string? Notes, string? CoverUrl,
     IReadOnlyList<MediaFileDto> MediaFiles, IReadOnlyList<NamedDto> Actors, IReadOnlyList<NamedDto> Tags,
     IReadOnlyList<NamedDto> Genres, IReadOnlyList<NamedDto> Studios, IReadOnlyList<NamedDto> Series);
+public sealed record EntityCardDto(long Id, string Name, long MovieCount, string? ImageUrl);
+public sealed record EntityPageDto(IReadOnlyList<EntityCardDto> Items, long Total, int Limit, int Offset);
+public sealed record MediaPageDto(IReadOnlyList<MediaCardDto> Items, long Total, int Limit, int Offset);
+public sealed record MetadataOverviewDto(long TotalMovies, long ScrapedMovies, long MissingTitle, long MissingCover,
+    long MissingActors, long MissingTags, long MissingNfo, long MissingFiles);
+public sealed record DiagnosticItemDto(string Severity, string Code, string Title, string Detail, long Count);
+public sealed record DiagnosticsDto(string Integrity, long ForeignKeyErrors, IReadOnlyList<DiagnosticItemDto> Items);
 
 public static class ProductReader
 {
@@ -108,6 +115,109 @@ public static class ProductReader
         return tasks;
     }
 
+    public static async Task<EntityPageDto> ReadEntitiesPageAsync(string databasePath, string bridgeUrl,
+        string entityType, string search, string sort, int limit, int offset)
+    {
+        bool actors = entityType.Equals("actors", StringComparison.OrdinalIgnoreCase);
+        string table = actors ? "Actors" : "Tags";
+        string relation = actors ? "MovieActors" : "MovieTags";
+        string key = actors ? "ActorId" : "TagId";
+        string like = $"%{EscapeLike(search.Trim())}%";
+        string orderBy = sort.Equals("name", StringComparison.OrdinalIgnoreCase) ? "e.Name COLLATE NOCASE" : "MovieCount DESC,e.Name COLLATE NOCASE";
+        await using var connection = await OpenAsync(databasePath);
+        await using var count = connection.CreateCommand();
+        count.CommandText = $"SELECT COUNT(*) FROM {table} e WHERE $search='' OR e.Name LIKE $like ESCAPE '\\'";
+        count.Parameters.AddWithValue("$search", search.Trim()); count.Parameters.AddWithValue("$like", like);
+        long total = Convert.ToInt64(await count.ExecuteScalarAsync() ?? 0L);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT e.Id,e.Name,COUNT(DISTINCT r.MovieId) AS MovieCount
+              FROM {table} e LEFT JOIN {relation} r ON r.{key}=e.Id
+             WHERE $search='' OR e.Name LIKE $like ESCAPE '\'
+             GROUP BY e.Id ORDER BY {orderBy} LIMIT $limit OFFSET $offset
+            """;
+        command.Parameters.AddWithValue("$search", search.Trim()); command.Parameters.AddWithValue("$like", like);
+        command.Parameters.AddWithValue("$limit", limit); command.Parameters.AddWithValue("$offset", offset);
+        var items = new List<EntityCardDto>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) {
+            long id = reader.GetInt64(0);
+            items.Add(new(id, reader.GetString(1), reader.GetInt64(2), actors ? $"{bridgeUrl}/api/actors/{id}/image" : null));
+        }
+        return new(items, total, limit, offset);
+    }
+
+    public static async Task<MediaPageDto> ReadEntityMoviesAsync(string databasePath, string bridgeUrl,
+        string entityType, long entityId, int limit, int offset)
+    {
+        bool actors = entityType.Equals("actors", StringComparison.OrdinalIgnoreCase);
+        string relation = actors ? "MovieActors" : "MovieTags";
+        string key = actors ? "ActorId" : "TagId";
+        return await ReadFilteredCardsAsync(databasePath, bridgeUrl,
+            $"EXISTS(SELECT 1 FROM {relation} er WHERE er.MovieId=m.Id AND er.{key}=$entity)",
+            [("$entity", entityId)], "m.ImportedAt DESC,m.Id DESC", limit, offset);
+    }
+
+    public static async Task<MediaPageDto> ReadCollectionAsync(string databasePath, string bridgeUrl,
+        string kind, int limit, int offset)
+    {
+        string condition = kind.Equals("favorites", StringComparison.OrdinalIgnoreCase) ? "COALESCE(s.IsFavorite,0)=1" : "COALESCE(s.PlayCount,0)>0";
+        string order = kind.Equals("favorites", StringComparison.OrdinalIgnoreCase) ? "s.UpdatedAt DESC,m.Id DESC" : "s.LastPlayedAt DESC,m.Id DESC";
+        return await ReadFilteredCardsAsync(databasePath, bridgeUrl, condition, [], order, limit, offset);
+    }
+
+    public static async Task<MediaPageDto> AdvancedSearchAsync(string databasePath, string bridgeUrl,
+        string query, long? actorId, long? tagId, bool? favorite, double ratingMin, string metadata,
+        string fileStatus, long? libraryId, string sort, int limit, int offset)
+    {
+        var conditions = new List<string>(); var parameters = new List<(string,object)>();
+        string trimmed = query.Trim();
+        if (trimmed.Length > 0) {
+            conditions.Add("""(m.Code LIKE $like ESCAPE '\' OR m.Title LIKE $like ESCAPE '\' OR m.OriginalTitle LIKE $like ESCAPE '\' OR f.FilePath LIKE $like ESCAPE '\' OR EXISTS(SELECT 1 FROM MovieActors ma JOIN Actors a ON a.Id=ma.ActorId WHERE ma.MovieId=m.Id AND a.Name LIKE $like ESCAPE '\') OR EXISTS(SELECT 1 FROM MovieTags mt JOIN Tags t ON t.Id=mt.TagId WHERE mt.MovieId=m.Id AND t.Name LIKE $like ESCAPE '\') OR EXISTS(SELECT 1 FROM MovieStudios ms JOIN Studios st ON st.Id=ms.StudioId WHERE ms.MovieId=m.Id AND st.Name LIKE $like ESCAPE '\') OR EXISTS(SELECT 1 FROM MovieSeries mse JOIN Series se ON se.Id=mse.SeriesId WHERE mse.MovieId=m.Id AND se.Name LIKE $like ESCAPE '\'))""");
+            parameters.Add(("$like", $"%{EscapeLike(trimmed)}%"));
+        }
+        if (actorId.HasValue) { conditions.Add("EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id AND ma.ActorId=$actor)"); parameters.Add(("$actor", actorId.Value)); }
+        if (tagId.HasValue) { conditions.Add("EXISTS(SELECT 1 FROM MovieTags mt WHERE mt.MovieId=m.Id AND mt.TagId=$tag)"); parameters.Add(("$tag", tagId.Value)); }
+        if (favorite.HasValue) { conditions.Add("COALESCE(s.IsFavorite,0)=$favorite"); parameters.Add(("$favorite", favorite.Value ? 1 : 0)); }
+        if (ratingMin > 0) { conditions.Add("COALESCE(s.UserRating,0)>=$rating"); parameters.Add(("$rating", ratingMin)); }
+        if (metadata == "complete") conditions.Add("m.IsScraped=1"); else if (metadata == "missing") conditions.Add("m.IsScraped=0");
+        if (fileStatus == "missing") conditions.Add("f.ExistsState='Missing'"); else if (fileStatus == "available") conditions.Add("f.ExistsState<>'Missing'");
+        if (libraryId.HasValue) { conditions.Add("f.LibraryId=$library"); parameters.Add(("$library", libraryId.Value)); }
+        string order = sort switch { "code" => "m.Code COLLATE NOCASE,m.Id", "rating" => "s.UserRating DESC,m.Id DESC", "release" => "m.ReleaseDate DESC,m.Id DESC", _ => "m.ImportedAt DESC,m.Id DESC" };
+        return await ReadFilteredCardsAsync(databasePath, bridgeUrl, conditions.Count == 0 ? "1=1" : string.Join(" AND ", conditions), parameters, order, limit, offset);
+    }
+
+    public static async Task<MetadataOverviewDto> ReadMetadataOverviewAsync(string databasePath)
+    {
+        await using var connection = await OpenAsync(databasePath);
+        return new(
+            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies"),
+            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies WHERE IsScraped=1"),
+            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies WHERE trim(COALESCE(Title,''))=''"),
+            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id)"),
+            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id)"),
+            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieTags mt WHERE mt.MovieId=m.Id)"),
+            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies WHERE trim(COALESCE(NfoPath,''))=''"),
+            await ScalarAsync(connection, "SELECT COUNT(DISTINCT MovieId) FROM MediaFiles WHERE ExistsState='Missing'"));
+    }
+
+    public static async Task<DiagnosticsDto> ReadDiagnosticsAsync(string databasePath)
+    {
+        await using var connection = await OpenAsync(databasePath);
+        await using var integrityCommand = connection.CreateCommand(); integrityCommand.CommandText = "PRAGMA integrity_check";
+        string integrity = Convert.ToString(await integrityCommand.ExecuteScalarAsync()) ?? "unknown";
+        long foreignKeys = await CountRowsAsync(connection, "PRAGMA foreign_key_check");
+        var items = new List<DiagnosticItemDto> {
+            new("error","MISSING_FILE","缺失媒体文件","数据库记录存在，但对应文件当前不可用。",await ScalarAsync(connection,"SELECT COUNT(*) FROM MediaFiles WHERE ExistsState='Missing'")),
+            new("warning","DUPLICATE_CODE","重复番号","多个影片使用相同的非空番号。",await ScalarAsync(connection,"SELECT COUNT(*) FROM (SELECT upper(trim(Code)) c FROM Movies WHERE trim(COALESCE(Code,''))<>'' GROUP BY c HAVING COUNT(*)>1)")),
+            new("warning","CORRUPT_TEXT","损坏文本","标题、演员或标签包含 Unicode 替换字符。",await ScalarAsync(connection,"SELECT (SELECT COUNT(*) FROM Movies WHERE instr(COALESCE(Title,''),'�')>0)+(SELECT COUNT(*) FROM Actors WHERE instr(Name,'�')>0)+(SELECT COUNT(*) FROM Tags WHERE instr(Name,'�')>0)")),
+            new("warning","MIGRATION_WARNING","迁移警告","旧数据迁移时保留的兼容性警告。",await ScalarAsync(connection,"SELECT COUNT(*) FROM MigrationWarnings")),
+            new("info","MISSING_COVER","缺少图片","尚未关联任何图片资源的影片。",await ScalarAsync(connection,"SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id)")),
+            new("info","MISSING_ACTOR","缺少演员","尚未关联演员的影片。",await ScalarAsync(connection,"SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id)"))
+        };
+        return new(integrity, foreignKeys, items);
+    }
+
     public static async Task<MovieDetailDto?> ReadMovieAsync(string databasePath, string bridgeUrl, long movieId)
     {
         await using var connection = await OpenAsync(databasePath);
@@ -146,6 +256,27 @@ public static class ProductReader
             """; command.Parameters.AddWithValue("$limit",limit);
         var items=new List<MediaCardDto>(); await using var reader=await command.ExecuteReaderAsync(); while(await reader.ReadAsync()) items.Add(Card(reader,bridgeUrl)); return items;
     }
+    private static async Task<MediaPageDto> ReadFilteredCardsAsync(string databasePath, string bridgeUrl,
+        string condition, IReadOnlyList<(string Name,object Value)> parameters, string orderBy, int limit, int offset)
+    {
+        await using var connection = await OpenAsync(databasePath);
+        await using var count = connection.CreateCommand();
+        count.CommandText = $"SELECT COUNT(DISTINCT m.Id) FROM Movies m LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video' LEFT JOIN UserMovieState s ON s.MovieId=m.Id WHERE {condition}";
+        foreach (var parameter in parameters) count.Parameters.AddWithValue(parameter.Name, parameter.Value);
+        long total = Convert.ToInt64(await count.ExecuteScalarAsync() ?? 0L);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT m.Id,COALESCE(NULLIF(m.Code,''),NULLIF(m.Title,''),CAST(m.Id AS TEXT)),COALESCE(m.Title,''),COALESCE(f.FilePath,''),
+                   COALESCE(s.UserRating,0),COALESCE(s.IsFavorite,0),COALESCE(m.ReleaseDate,''),COALESCE(m.ImportedAt,m.CreatedAt,''),EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id)
+              FROM Movies m LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video' LEFT JOIN UserMovieState s ON s.MovieId=m.Id
+             WHERE {condition} ORDER BY {orderBy} LIMIT $limit OFFSET $offset
+            """;
+        foreach (var parameter in parameters) command.Parameters.AddWithValue(parameter.Name, parameter.Value);
+        command.Parameters.AddWithValue("$limit", limit); command.Parameters.AddWithValue("$offset", offset);
+        var items = new List<MediaCardDto>(); await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) items.Add(Card(reader, bridgeUrl));
+        return new(items, total, limit, offset);
+    }
     private static MediaCardDto Card(SqliteDataReader reader,string bridgeUrl)=>new(reader.GetInt64(0),reader.GetString(1),reader.GetString(2),reader.GetString(3),reader.GetDouble(4),reader.GetInt64(5)==1,reader.GetString(6),reader.GetString(7),reader.GetInt64(8)==1?$"{bridgeUrl}/api/images/{reader.GetInt64(0)}/primary":null);
     private static async Task<IReadOnlyList<SearchEntityDto>> ReadEntitiesAsync(SqliteConnection connection,string table,string relation,string key,string like,int limit){
         await using var command=connection.CreateCommand();command.CommandText=$"SELECT e.Id,e.Name,COUNT(r.MovieId) FROM {table} e LEFT JOIN {relation} r ON r.{key}=e.Id WHERE e.Name LIKE $like ESCAPE '\\' GROUP BY e.Id ORDER BY COUNT(r.MovieId) DESC,e.Name LIMIT $limit";command.Parameters.AddWithValue("$like",like);command.Parameters.AddWithValue("$limit",limit);
@@ -156,6 +287,7 @@ public static class ProductReader
         var result=new List<NamedDto>();await using var reader=await command.ExecuteReaderAsync();while(await reader.ReadAsync())result.Add(new(reader.GetInt64(0),reader.GetString(1)));return result;
     }
     private static async Task<long> ScalarAsync(SqliteConnection connection,string sql){await using var command=connection.CreateCommand();command.CommandText=sql;return Convert.ToInt64(await command.ExecuteScalarAsync()??0);}
+    private static async Task<long> CountRowsAsync(SqliteConnection connection,string sql){await using var command=connection.CreateCommand();command.CommandText=sql;await using var reader=await command.ExecuteReaderAsync();long count=0;while(await reader.ReadAsync())count++;return count;}
     private static async Task<SqliteConnection> OpenAsync(string path){var connection=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=path,Mode=SqliteOpenMode.ReadOnly,Cache=SqliteCacheMode.Shared}.ToString());await connection.OpenAsync();return connection;}
     private static string EscapeLike(string value)=>value.Replace("\\","\\\\").Replace("%","\\%").Replace("_","\\_");
     private static string? Text(SqliteDataReader reader,int index)=>reader.IsDBNull(index)?null:reader.GetString(index);

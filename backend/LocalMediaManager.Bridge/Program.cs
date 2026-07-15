@@ -54,6 +54,39 @@ app.MapGet("/api/tasks", async (int? limit) => File.Exists(databasePath)
     ? Results.Ok(await ProductReader.ReadTasksAsync(databasePath, Math.Clamp(limit ?? 50, 1, 200)))
     : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
 
+app.MapGet("/api/entities/{entityType}", async (string entityType, string? search, string? sort, int? limit, int? offset) => {
+    if (!File.Exists(databasePath)) return Results.Problem($"找不到数据库：{databasePath}", statusCode: 503);
+    if (entityType is not ("actors" or "tags")) return Results.BadRequest("仅支持 actors 或 tags。");
+    return Results.Ok(await ProductReader.ReadEntitiesPageAsync(databasePath, bridgeUrl, entityType, search ?? "", sort ?? "count", Math.Clamp(limit ?? 48, 1, 96), Math.Max(offset ?? 0, 0)));
+});
+
+app.MapGet("/api/entities/{entityType}/{entityId:long}/movies", async (string entityType, long entityId, int? limit, int? offset) => {
+    if (!File.Exists(databasePath)) return Results.Problem($"找不到数据库：{databasePath}", statusCode: 503);
+    if (entityType is not ("actors" or "tags")) return Results.BadRequest("仅支持 actors 或 tags。");
+    return Results.Ok(await ProductReader.ReadEntityMoviesAsync(databasePath, bridgeUrl, entityType, entityId, Math.Clamp(limit ?? 48, 1, 96), Math.Max(offset ?? 0, 0)));
+});
+
+app.MapGet("/api/collections/{kind}", async (string kind, int? limit, int? offset) => {
+    if (!File.Exists(databasePath)) return Results.Problem($"找不到数据库：{databasePath}", statusCode: 503);
+    if (kind is not ("favorites" or "history")) return Results.BadRequest("仅支持 favorites 或 history。");
+    return Results.Ok(await ProductReader.ReadCollectionAsync(databasePath, bridgeUrl, kind, Math.Clamp(limit ?? 48, 1, 96), Math.Max(offset ?? 0, 0)));
+});
+
+app.MapGet("/api/search/advanced", async (string? q, long? actorId, long? tagId, bool? favorite, double? ratingMin,
+    string? metadata, string? fileStatus, long? libraryId, string? sort, int? limit, int? offset) => File.Exists(databasePath)
+    ? Results.Ok(await ProductReader.AdvancedSearchAsync(databasePath, bridgeUrl, q ?? "", actorId, tagId, favorite,
+        Math.Clamp(ratingMin ?? 0, 0, 5), metadata ?? "all", fileStatus ?? "all", libraryId, sort ?? "newest",
+        Math.Clamp(limit ?? 48, 1, 96), Math.Max(offset ?? 0, 0)))
+    : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
+
+app.MapGet("/api/metadata/overview", async () => File.Exists(databasePath)
+    ? Results.Ok(await ProductReader.ReadMetadataOverviewAsync(databasePath))
+    : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
+
+app.MapGet("/api/diagnostics", async () => File.Exists(databasePath)
+    ? Results.Ok(await ProductReader.ReadDiagnosticsAsync(databasePath))
+    : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
+
 app.MapGet("/api/library/summary", async () => {
     if (!File.Exists(databasePath))
         return Results.Problem($"找不到数据库：{databasePath}", statusCode: 503);
@@ -161,6 +194,16 @@ app.MapGet("/api/images/{movieId:long}/primary", async (long movieId) => {
     return string.IsNullOrWhiteSpace(path) || !File.Exists(path)
         ? Results.NotFound()
         : Results.File(path, ContentType(path), enableRangeProcessing: true);
+});
+
+app.MapGet("/api/actors/{actorId:long}/image", async (long actorId) => {
+    if (!File.Exists(databasePath)) return Results.NotFound();
+    await using var connection = await OpenReadOnlyAsync(databasePath);
+    await using var command = connection.CreateCommand();
+    command.CommandText = "SELECT FilePath FROM Images WHERE ActorId=$id AND FilePath IS NOT NULL ORDER BY IsPrimary DESC,Id LIMIT 1";
+    command.Parameters.AddWithValue("$id", actorId);
+    string? path = (string?)await command.ExecuteScalarAsync();
+    return string.IsNullOrWhiteSpace(path) || !File.Exists(path) ? Results.NotFound() : Results.File(path, ContentType(path), enableRangeProcessing: true);
 });
 
 app.MapPost("/api/videos/{dataId:long}/play", async (long dataId) => {

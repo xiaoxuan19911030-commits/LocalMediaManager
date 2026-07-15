@@ -2,12 +2,17 @@ import { createHashRouter } from 'react-router'
 import AppShell from '@/layouts/AppShell'
 import HomePage from '@/pages/HomePage'
 import MediaPage from '@/pages/MediaPage'
-import PlaceholderPage from '@/pages/PlaceholderPage'
 import SettingsPage from '@/pages/SettingsPage'
 import LibrariesPage from '@/pages/LibrariesPage'
 import MovieDetailPage from '@/pages/MovieDetailPage'
 import SearchPage from '@/pages/SearchPage'
 import TasksPage from '@/pages/TasksPage'
+import EntityPage from '@/pages/EntityPage'
+import CollectionPage from '@/pages/CollectionPage'
+import MetadataPage from '@/pages/MetadataPage'
+import DiagnosticsPage from '@/pages/DiagnosticsPage'
+import PluginsPage from '@/pages/PluginsPage'
+import AiProvidersPage from '@/pages/AiProvidersPage'
 
 export const router = createHashRouter([{ path: '/', Component: AppShell, children: [
   { index: true, Component: HomePage },
@@ -15,10 +20,14 @@ export const router = createHashRouter([{ path: '/', Component: AppShell, childr
   { path: 'movies/:id', Component: MovieDetailPage },
   { path: 'search', Component: SearchPage },
   { path: 'libraries', Component: LibrariesPage },
+  { path: 'tags', element: <EntityPage type="tags" /> },
+  { path: 'actors', element: <EntityPage type="actors" /> },
+  { path: 'favorites', element: <CollectionPage kind="favorites" /> },
+  { path: 'history', element: <CollectionPage kind="history" /> },
+  { path: 'metadata', Component: MetadataPage },
+  { path: 'diagnostics', Component: DiagnosticsPage },
   { path: 'tasks', Component: TasksPage },
+  { path: 'plugins', Component: PluginsPage },
+  { path: 'ai-providers', Component: AiProvidersPage },
   { path: 'settings', Component: SettingsPage },
-  ...['tags', 'actors', 'favorites', 'history', 'plugins'].map((path) => ({
-    path,
-    element: <PlaceholderPage title={({ libraries: '媒体库', tags: '标签', actors: '演员', favorites: '收藏', history: '最近播放', tasks: '任务', plugins: '插件', settings: '设置' } as Record<string,string>)[path]} />,
-  })),
 ]}])

@@ -9,6 +9,9 @@ import MovieRoundedIcon from '@mui/icons-material/MovieRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded'
 import TaskRoundedIcon from '@mui/icons-material/TaskRounded'
+import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded'
+import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded'
+import TroubleshootRoundedIcon from '@mui/icons-material/TroubleshootRounded'
 import { Box, Divider, InputAdornment, List, ListItemButton, ListItemIcon, ListItemText, Paper, TextField, Typography } from '@mui/material'
 import { FormEvent, ReactNode, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router'
@@ -16,7 +19,7 @@ import { BrandMark } from '@/components/BrandMark'
 
 type NavItem = readonly [string,string,ReactNode]
 const primary:NavItem[]=[['首页','/',<HomeRoundedIcon/>],['影片墙','/media',<MovieRoundedIcon/>],['媒体库','/libraries',<FolderRoundedIcon/>],['标签','/tags',<LocalOfferRoundedIcon/>],['演员','/actors',<ActorsRoundedIcon/>],['收藏','/favorites',<FavoriteRoundedIcon/>],['最近播放','/history',<HistoryRoundedIcon/>]]
-const utility:NavItem[]=[['任务中心','/tasks',<TaskRoundedIcon/>],['插件','/plugins',<ExtensionRoundedIcon/>],['设置','/settings',<SettingsRoundedIcon/>]]
+const utility:NavItem[]=[['元数据中心','/metadata',<FactCheckRoundedIcon/>],['诊断中心','/diagnostics',<TroubleshootRoundedIcon/>],['任务中心','/tasks',<TaskRoundedIcon/>],['插件中心','/plugins',<ExtensionRoundedIcon/>],['AI Provider','/ai-providers',<AutoAwesomeRoundedIcon/>],['设置','/settings',<SettingsRoundedIcon/>]]
 
 export default function AppShell(){
   const navigate=useNavigate();const{pathname}=useLocation();const[search,setSearch]=useState('')
@@ -27,8 +30,8 @@ export default function AppShell(){
       <Box sx={{px:2,py:2}}><BrandMark/></Box><Divider/>
       <Box component="form" onSubmit={submit} sx={{px:1.25,pt:1.25}}><TextField size="small" fullWidth value={search} onChange={(event)=>setSearch(event.target.value)} placeholder="全局搜索"
         slotProps={{input:{startAdornment:<InputAdornment position="start"><SearchRoundedIcon fontSize="small"/></InputAdornment>}}}/></Box>
-      <List sx={{px:1,py:1,overflowY:'auto'}}>{nav(primary)}</List>
-      <Box sx={{mt:'auto'}}><Divider/><List sx={{px:1,py:1}}>{nav(utility)}</List><Box sx={{px:2,py:1.25}}><Typography variant="caption" color="text.secondary">LMM 0.4.0 · Bridge 已连接</Typography></Box></Box>
+      <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}><List sx={{px:1,py:1}}>{nav(primary)}</List><Divider sx={{mx:1}}/><List sx={{px:1,py:1}}>{nav(utility)}</List></Box>
+      <Box><Divider/><Box sx={{px:2,py:1.25}}><Typography variant="caption" color="text.secondary">LMM 0.4.0 · Bridge 已连接</Typography></Box></Box>
     </Paper>
     <Box component="main" sx={{overflowY:'auto',p:{xs:2,md:3},minWidth:0}}><Outlet/></Box>
   </Box>
