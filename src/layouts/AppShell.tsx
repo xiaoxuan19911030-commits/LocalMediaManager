@@ -31,7 +31,7 @@ export default function AppShell(){
       <Box component="form" onSubmit={submit} sx={{px:1.25,pt:1.25}}><TextField size="small" fullWidth value={search} onChange={(event)=>setSearch(event.target.value)} placeholder="全局搜索"
         slotProps={{input:{startAdornment:<InputAdornment position="start"><SearchRoundedIcon fontSize="small"/></InputAdornment>}}}/></Box>
       <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}><List sx={{px:1,py:1}}>{nav(primary)}</List><Divider sx={{mx:1}}/><List sx={{px:1,py:1}}>{nav(utility)}</List></Box>
-      <Box><Divider/><Box sx={{px:2,py:1.25}}><Typography variant="caption" color="text.secondary">LMM 0.4.0 · Bridge 已连接</Typography></Box></Box>
+      <Box><Divider/><Box sx={{px:2,py:1.25}}><Typography variant="caption" color="text.secondary">LMM 0.4.1 · Bridge 已连接</Typography></Box></Box>
     </Paper>
     <Box component="main" sx={{overflowY:'auto',p:{xs:2,md:3},minWidth:0}}><Outlet/></Box>
   </Box>

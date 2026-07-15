@@ -19,17 +19,19 @@ public sealed record MediaFileDto(long Id, string Path, string FileName, string?
     string SourceType, string ExistsState, bool Primary);
 public sealed record MovieDetailDto(long Id, string? Code, string? Title, string? OriginalTitle, string? ReleaseDate,
     long DurationSeconds, string? Description, double ProviderRating, bool Scraped, string ScrapeStatus,
-    string? NfoPath, string? ImportedAt, string UpdatedAt, bool Favorite, double UserRating, long PlayCount,
+    string? NfoPath, string? ImportedAt, string UpdatedAt, bool Favorite, double UserRating, bool UserRatingSet, long PlayCount,
     string? LastPlayedAt, long LastPositionSeconds, string? Notes, string? CoverUrl,
     IReadOnlyList<MediaFileDto> MediaFiles, IReadOnlyList<NamedDto> Actors, IReadOnlyList<NamedDto> Tags,
     IReadOnlyList<NamedDto> Genres, IReadOnlyList<NamedDto> Studios, IReadOnlyList<NamedDto> Series);
 public sealed record EntityCardDto(long Id, string Name, long MovieCount, string? ImageUrl);
+public sealed record ActorDetailDto(long Id, string Name, string? Alias, int? Gender, string? BirthDate, string? Description);
 public sealed record EntityPageDto(IReadOnlyList<EntityCardDto> Items, long Total, int Limit, int Offset);
 public sealed record MediaPageDto(IReadOnlyList<MediaCardDto> Items, long Total, int Limit, int Offset);
 public sealed record MetadataOverviewDto(long TotalMovies, long ScrapedMovies, long MissingTitle, long MissingCover,
     long MissingActors, long MissingTags, long MissingNfo, long MissingFiles);
 public sealed record DiagnosticItemDto(string Severity, string Code, string Title, string Detail, long Count);
 public sealed record DiagnosticsDto(string Integrity, long ForeignKeyErrors, IReadOnlyList<DiagnosticItemDto> Items);
+public sealed record NeighborsDto(long? PreviousId, long? NextId);
 
 public static class ProductReader
 {
@@ -221,17 +223,17 @@ public static class ProductReader
     public static async Task<MovieDetailDto?> ReadMovieAsync(string databasePath, string bridgeUrl, long movieId)
     {
         await using var connection = await OpenAsync(databasePath);
-        (long Id,string? Code,string? Title,string? Original,string? Release,long Duration,string? Description,double Provider,bool Scraped,string Status,string? Nfo,string? Imported,string Updated,bool Favorite,double Rating,long Plays,string? LastPlayed,long Position,string? Notes,bool HasCover)? movie = null;
+        (long Id,string? Code,string? Title,string? Original,string? Release,long Duration,string? Description,double Provider,bool Scraped,string Status,string? Nfo,string? Imported,string Updated,bool Favorite,double Rating,bool RatingSet,long Plays,string? LastPlayed,long Position,string? Notes,bool HasCover)? movie = null;
         await using (var command = connection.CreateCommand()) {
             command.CommandText = """
                 SELECT m.Id,m.Code,m.Title,m.OriginalTitle,m.ReleaseDate,m.DurationSeconds,m.Description,COALESCE(m.ProviderRating,0),m.IsScraped,m.ScrapeStatus,m.NfoPath,m.ImportedAt,m.UpdatedAt,
-                       COALESCE(s.IsFavorite,0),COALESCE(s.UserRating,0),COALESCE(s.PlayCount,0),s.LastPlayedAt,COALESCE(s.LastPositionSeconds,0),s.Notes,
+                       COALESCE(s.IsFavorite,0),COALESCE(s.UserRating,0),COALESCE(s.HasUserRating,0),COALESCE(s.PlayCount,0),s.LastPlayedAt,COALESCE(s.LastPositionSeconds,0),s.Notes,
                        EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id)
                   FROM Movies m LEFT JOIN UserMovieState s ON s.MovieId=m.Id WHERE m.Id=$id
                 """;
             command.Parameters.AddWithValue("$id", movieId);
             await using var reader = await command.ExecuteReaderAsync();
-            if (await reader.ReadAsync()) movie=(reader.GetInt64(0),Text(reader,1),Text(reader,2),Text(reader,3),Text(reader,4),reader.GetInt64(5),Text(reader,6),reader.GetDouble(7),reader.GetInt64(8)==1,reader.GetString(9),Text(reader,10),Text(reader,11),reader.GetString(12),reader.GetInt64(13)==1,reader.GetDouble(14),reader.GetInt64(15),Text(reader,16),reader.GetInt64(17),Text(reader,18),reader.GetInt64(19)==1);
+            if (await reader.ReadAsync()) movie=(reader.GetInt64(0),Text(reader,1),Text(reader,2),Text(reader,3),Text(reader,4),reader.GetInt64(5),Text(reader,6),reader.GetDouble(7),reader.GetInt64(8)==1,reader.GetString(9),Text(reader,10),Text(reader,11),reader.GetString(12),reader.GetInt64(13)==1,reader.GetDouble(14),reader.GetInt64(15)==1,reader.GetInt64(16),Text(reader,17),reader.GetInt64(18),Text(reader,19),reader.GetInt64(20)==1);
         }
         if (movie is null) return null;
         var value = movie.Value;
@@ -240,9 +242,50 @@ public static class ProductReader
             command.CommandText="SELECT Id,FilePath,FileName,Extension,FileSize,SourceType,ExistsState,IsPrimary FROM MediaFiles WHERE MovieId=$id ORDER BY IsPrimary DESC,Id"; command.Parameters.AddWithValue("$id",movieId);
             await using var reader=await command.ExecuteReaderAsync(); while(await reader.ReadAsync()) files.Add(new(reader.GetInt64(0),reader.GetString(1),reader.GetString(2),Text(reader,3),reader.GetInt64(4),reader.GetString(5),reader.GetString(6),reader.GetInt64(7)==1));
         }
-        return new(value.Id,value.Code,value.Title,value.Original,value.Release,value.Duration,value.Description,value.Provider,value.Scraped,value.Status,value.Nfo,value.Imported,value.Updated,value.Favorite,value.Rating,value.Plays,value.LastPlayed,value.Position,value.Notes,value.HasCover?$"{bridgeUrl}/api/images/{movieId}/primary":null,
+        return new(value.Id,value.Code,value.Title,value.Original,value.Release,value.Duration,value.Description,value.Provider,value.Scraped,value.Status,value.Nfo,value.Imported,value.Updated,value.Favorite,value.Rating,value.RatingSet,value.Plays,value.LastPlayed,value.Position,value.Notes,value.HasCover?$"{bridgeUrl}/api/images/{movieId}/primary":null,
             files,await ReadNamesAsync(connection,"Actors","MovieActors","ActorId",movieId),await ReadNamesAsync(connection,"Tags","MovieTags","TagId",movieId),
             await ReadNamesAsync(connection,"Genres","MovieGenres","GenreId",movieId),await ReadNamesAsync(connection,"Studios","MovieStudios","StudioId",movieId),await ReadNamesAsync(connection,"Series","MovieSeries","SeriesId",movieId));
+    }
+
+    public static async Task<ActorDetailDto?> ReadActorAsync(string databasePath, long actorId)
+    {
+        await using var connection = await OpenAsync(databasePath);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id,Name,Alias,Gender,BirthDate,Description FROM Actors WHERE Id=$id";
+        command.Parameters.AddWithValue("$id", actorId);
+        await using var reader = await command.ExecuteReaderAsync();
+        return await reader.ReadAsync()
+            ? new(reader.GetInt64(0), reader.GetString(1), Text(reader, 2), reader.IsDBNull(3) ? null : reader.GetInt32(3), Text(reader, 4), Text(reader, 5))
+            : null;
+    }
+
+    public static async Task<NeighborsDto> ReadNeighborsAsync(string databasePath, long movieId, string search, string sort)
+    {
+        string orderBy = sort.ToLowerInvariant() switch {
+            "code" => "m.Code COLLATE NOCASE, m.Id",
+            "title" => "m.Title COLLATE NOCASE, m.Id",
+            "release" => "m.ReleaseDate DESC, m.Id DESC",
+            "rating" => "COALESCE(s.UserRating,0) DESC, m.Id DESC",
+            _ => "m.Id DESC",
+        };
+        await using var connection = await OpenAsync(databasePath);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            WITH ordered AS (
+                SELECT m.Id, ROW_NUMBER() OVER (ORDER BY {orderBy}) AS rn
+                FROM Movies m LEFT JOIN UserMovieState s ON s.MovieId=m.Id
+                WHERE $search='' OR m.Code LIKE $like ESCAPE '\' OR m.Title LIKE $like ESCAPE '\'
+            ), current AS (SELECT rn FROM ordered WHERE Id=$id)
+            SELECT
+                (SELECT Id FROM ordered WHERE rn=(SELECT rn-1 FROM current)),
+                (SELECT Id FROM ordered WHERE rn=(SELECT rn+1 FROM current))
+            """;
+        command.Parameters.AddWithValue("$id", movieId);
+        command.Parameters.AddWithValue("$search", search.Trim());
+        command.Parameters.AddWithValue("$like", $"%{EscapeLike(search.Trim())}%");
+        await using var reader = await command.ExecuteReaderAsync();
+        if (!await reader.ReadAsync()) return new(null, null);
+        return new(reader.IsDBNull(0) ? null : reader.GetInt64(0), reader.IsDBNull(1) ? null : reader.GetInt64(1));
     }
 
     private static async Task<List<MediaCardDto>> ReadCardsAsync(SqliteConnection connection, string bridgeUrl, string orderBy, int limit, bool playedOnly)

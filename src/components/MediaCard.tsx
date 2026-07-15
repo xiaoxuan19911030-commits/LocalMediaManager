@@ -1,7 +1,7 @@
 import FavoriteRoundedIcon from '@mui/icons-material/FavoriteRounded'
 import NewReleasesRoundedIcon from '@mui/icons-material/NewReleasesRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
-import { Box, Card, CardContent, Chip, IconButton, Rating, Tooltip, Typography } from '@mui/material'
+import { Box, Card, CardContent, Checkbox, Chip, IconButton, Rating, Tooltip, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import type { ReactNode } from 'react'
 import type { MediaItem } from '@/types/media'
@@ -16,13 +16,13 @@ export function MediaCardGrid({ children, minWidth = 148 }: { children: ReactNod
   return <Box sx={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${minWidth}px, 1fr))`, gap: { xs: 1.25, md: 1.5 } }}>{children}</Box>
 }
 
-export function MediaCard({ item, onPlay, onOpen }: { item: MediaItem; onPlay: (item: MediaItem) => void; onOpen?: (item: MediaItem) => void }) {
+export function MediaCard({ item, onPlay, onOpen, selected, onSelect }: { item: MediaItem; onPlay: (item: MediaItem) => void; onOpen?: (item: MediaItem) => void; selected?: boolean; onSelect?: (item: MediaItem, selected: boolean) => void }) {
   const recent = isRecent(item.importedAt)
   const displayTitle = item.title && !item.title.includes('\uFFFD') ? item.title : ''
   const primaryText = item.code || displayTitle || `影片 ${item.dataId}`
   return (
     <Card role={onOpen ? 'button' : undefined} tabIndex={onOpen ? 0 : undefined} onKeyDown={(event) => { if (onOpen && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(item) } }}
-      onClick={() => onOpen?.(item)} sx={{ overflow: 'hidden', minWidth: 0, cursor: onOpen ? 'pointer' : 'default', position: 'relative',
+      onClick={() => onOpen?.(item)} sx={{ overflow: 'hidden', minWidth: 0, cursor: onOpen ? 'pointer' : 'default', position: 'relative', borderColor: selected ? 'primary.main' : undefined,
         transition: 'transform .22s cubic-bezier(.2,.8,.2,1), border-color .22s ease, box-shadow .22s ease',
         '&:hover': onOpen ? { transform: 'translateY(-5px)', borderColor: 'primary.main', boxShadow: (theme) => `0 14px 32px ${alpha(theme.palette.common.black, theme.palette.mode === 'dark' ? .32 : .14)}` } : undefined,
         '&:hover .media-play': { opacity: 1, transform: 'translate(-50%,-50%) scale(1)' }, '&:hover .media-image': { transform: 'scale(1.025)' },
@@ -36,6 +36,9 @@ export function MediaCard({ item, onPlay, onOpen }: { item: MediaItem; onPlay: (
         )}
         <Box sx={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(5,8,14,.08) 45%, rgba(5,8,14,.78) 100%)', pointerEvents: 'none' }}/>
         <Box sx={{ position: 'absolute', top: 8, left: 8, right: 8, display: 'flex', gap: .75, alignItems: 'start', flexWrap: 'wrap' }}>
+          {onSelect && (
+            <Checkbox checked={Boolean(selected)} onClick={(event) => event.stopPropagation()} onChange={(_, checked) => onSelect(item, checked)} slotProps={{ input: { 'aria-label': `选择 ${primaryText}` } }} sx={{ p: .5, bgcolor: 'rgba(10,13,20,.72)', borderRadius: 1.5, color: 'common.white', '&.Mui-checked': { color: 'primary.light' } }}/>
+          )}
           {recent && (
             <Chip size="small" color="success" icon={<NewReleasesRoundedIcon/>} label="新加入" sx={{ fontWeight: 750 }}/>
           )}

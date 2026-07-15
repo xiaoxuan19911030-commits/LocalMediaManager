@@ -3,17 +3,22 @@ import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded'
 import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded'
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded'
 import FavoriteRoundedIcon from '@mui/icons-material/FavoriteRounded'
+import FavoriteBorderRoundedIcon from '@mui/icons-material/FavoriteBorderRounded'
+import NavigateBeforeRoundedIcon from '@mui/icons-material/NavigateBeforeRounded'
+import NavigateNextRoundedIcon from '@mui/icons-material/NavigateNextRounded'
+import SellRoundedIcon from '@mui/icons-material/SellRounded'
+import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded'
 import FolderRoundedIcon from '@mui/icons-material/FolderRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import VisibilityRoundedIcon from '@mui/icons-material/VisibilityRounded'
-import { Alert, Box, Button, Card, Chip, CircularProgress, Divider, IconButton, Paper, Rating, Snackbar, Stack, Tooltip, Typography } from '@mui/material'
+import { Alert, Autocomplete, Box, Button, Card, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Divider, IconButton, Paper, Rating, Snackbar, Stack, TextField, Tooltip, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { useLocation, useNavigate, useParams } from 'react-router'
 import { SurfaceSection } from '@/components/ProductComponents'
 import { bridge } from '@/services/bridge'
-import type { MovieDetail, NamedItem } from '@/types/media'
+import type { MovieDeletePreview, MovieDetail, NamedItem } from '@/types/media'
 
 const formatDuration = (seconds: number) => {
   if (!seconds) return '时长未知'
@@ -36,11 +41,27 @@ function Relation({ label, items }: { label: string; items: NamedItem[] }) {
 }
 
 export default function MovieDetailPage() {
-  const { id } = useParams(); const navigate = useNavigate()
+  const { id } = useParams(); const navigate = useNavigate(); const location = useLocation()
   const [movie, setMovie] = useState<MovieDetail>(); const [error, setError] = useState(''); const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState(false); const [tagDialog, setTagDialog] = useState(false); const [actorDialog, setActorDialog] = useState(false)
+  const [tagOptions, setTagOptions] = useState<NamedItem[]>([]); const [selectedTags, setSelectedTags] = useState<NamedItem[]>([])
+  const [actorOptions, setActorOptions] = useState<NamedItem[]>([]); const [selectedActors, setSelectedActors] = useState<NamedItem[]>([]); const [actorSearch, setActorSearch] = useState('')
+  const [neighbors, setNeighbors] = useState<{ previousId?: number; nextId?: number }>({})
+  const [deletePreview, setDeletePreview] = useState<MovieDeletePreview>()
+  const context = (location.state as { context?: { search?: string; sort?: string } } | null)?.context
+  const loadMovie = (movieId: number) => bridge.movie(movieId).then(setMovie)
   useEffect(() => { const movieId = Number(id); if (!Number.isFinite(movieId)) { setError('无效影片编号'); return }
-    setMovie(undefined); setError(''); bridge.movie(movieId).then(setMovie).catch((reason: Error) => setError(reason.message)) }, [id])
+    setMovie(undefined); setError(''); loadMovie(movieId).catch((reason: Error) => setError(reason.message)); bridge.neighbors(movieId, context?.search, context?.sort).then(setNeighbors).catch(() => setNeighbors({})) }, [id])
+  useEffect(() => { if (!actorDialog) return; const timer = window.setTimeout(() => bridge.entities('actors', actorSearch, 'name', 48, 0).then((result) => setActorOptions([...selectedActors, ...result.items.filter((item) => !selectedActors.some((selected) => selected.id === item.id))])).catch((reason: Error) => setNotice(reason.message)), 200); return () => window.clearTimeout(timer) }, [actorDialog, actorSearch, selectedActors])
   const play = () => movie && bridge.play(movie.id).then(() => setNotice(`正在打开：${movie.code || movie.title}`)).catch((reason: Error) => setNotice(reason.message))
+  const mutate = (action: Promise<unknown>) => { if (!movie) return; setBusy(true); action.then(() => loadMovie(movie.id)).then(() => setNotice('已保存')).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false)) }
+  const openTags = () => { if (!movie) return; setSelectedTags(movie.tags); setTagDialog(true); bridge.entities('tags', '', 'name', 96, 0).then((result) => setTagOptions(result.items)).catch((reason: Error) => setNotice(reason.message)) }
+  const saveTags = () => { if (!movie) return; const current = new Set(movie.tags.map((item) => item.id)); const selected = new Set(selectedTags.map((item) => item.id)); mutate(bridge.updateMovieTags(movie.id, [...selected].filter((tag) => !current.has(tag)), [...current].filter((tag) => !selected.has(tag)))); setTagDialog(false) }
+  const openActors = () => { if (!movie) return; setSelectedActors(movie.actors); setActorOptions(movie.actors); setActorDialog(true) }
+  const saveActors = () => { if (!movie) return; mutate(bridge.setMovieActors(movie.id, selectedActors.map((item) => item.id))); setActorDialog(false) }
+  const go = (movieId?: number) => movieId && navigate(`/movies/${movieId}`, { state: { context }, replace: true })
+  const previewDelete = () => movie && bridge.previewDeleteMovie(movie.id).then(setDeletePreview).catch((reason: Error) => setNotice(reason.message))
+  const confirmDelete = () => deletePreview && bridge.deleteMovie(deletePreview.movieId, deletePreview.confirmationToken).then((result) => { setDeletePreview(undefined); navigate('/media', { replace: true }); window.setTimeout(() => setNotice(result.message), 0) }).catch((reason: Error) => setNotice(reason.message))
 
   return <Box sx={{ '@keyframes detailIn': { from: { opacity: 0, transform: 'translateY(10px)' }, to: { opacity: 1, transform: 'translateY(0)' } } }}>
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: 2 }}>
@@ -71,9 +92,9 @@ export default function MovieDetailPage() {
               <Fact icon={<AccessTimeRoundedIcon fontSize="small"/>} label={formatDuration(movie.durationSeconds)}/>
               <Fact icon={<VisibilityRoundedIcon fontSize="small"/>} label={`播放 ${movie.playCount} 次`}/>
             </Stack>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mt: 2 }}><Rating value={movie.userRating} readOnly precision={.5}/><Typography variant="body2" color="text.secondary">个人评分 {movie.userRating ? movie.userRating.toFixed(1) : '未评分'}</Typography></Box>
+            <Stack direction="row" spacing={1.25} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap', mt: 2 }}><Rating value={movie.userRatingSet ? movie.userRating : null} precision={.5} disabled={busy} onChange={(_, value) => value !== null && mutate(bridge.setUserState(movie.id, { rating: value }))}/><Typography variant="body2" color="text.secondary">个人评分 {movie.userRatingSet ? movie.userRating.toFixed(1) : '未评分'}</Typography>{movie.userRatingSet && <Button size="small" color="inherit" onClick={() => mutate(bridge.setUserState(movie.id, { clearRating: true }))}>清除评分</Button>}</Stack>
             <Typography color="text.secondary" sx={{ mt: 2.25, lineHeight: 1.8, whiteSpace: 'pre-wrap', maxWidth: 960, display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{movie.description || '暂无影片简介。'}</Typography>
-            <Stack direction="row" spacing={1.25} sx={{ mt: 'auto', pt: 3 }}><Button size="large" variant="contained" startIcon={<PlayArrowRoundedIcon/>} onClick={play} sx={{ minWidth: 150 }}>播放影片</Button><Button size="large" variant="outlined" onClick={() => navigate('/media')}>返回影片墙</Button></Stack>
+            <Stack direction="row" spacing={1.25} useFlexGap sx={{ mt: 'auto', pt: 3, flexWrap: 'wrap' }}><Button size="large" variant="contained" startIcon={<PlayArrowRoundedIcon/>} onClick={play} sx={{ minWidth: 150 }}>播放影片</Button><Button size="large" variant="outlined" color={movie.favorite ? 'error' : 'primary'} startIcon={movie.favorite ? <FavoriteRoundedIcon/> : <FavoriteBorderRoundedIcon/>} disabled={busy} onClick={() => mutate(bridge.setUserState(movie.id, { favorite: !movie.favorite }))}>{movie.favorite ? '取消收藏' : '收藏'}</Button><Button size="large" variant="outlined" startIcon={<SellRoundedIcon/>} onClick={openTags}>编辑标签</Button><Button size="large" variant="outlined" onClick={openActors}>编辑演员</Button><Button size="large" variant="text" color="error" startIcon={<DeleteOutlineRoundedIcon/>} onClick={previewDelete}>从资料库移除</Button></Stack>
           </Box>
         </Box>
       </Paper>
@@ -95,7 +116,11 @@ export default function MovieDetailPage() {
           <Divider sx={{ my: 2 }}/><Stack spacing={1}><Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}><Typography variant="body2" color="text.secondary">刮削状态</Typography><Typography variant="body2">{movie.scrapeStatus || '未知'}</Typography></Box><Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}><Typography variant="body2" color="text.secondary">更新时间</Typography><Typography variant="body2">{date(movie.updatedAt)}</Typography></Box></Stack>
         </SurfaceSection>
       </Box>
+      <Stack direction="row" spacing={1.25} sx={{ justifyContent: 'space-between' }}><Button startIcon={<NavigateBeforeRoundedIcon/>} disabled={!neighbors.previousId} onClick={() => go(neighbors.previousId)}>上一部</Button><Button endIcon={<NavigateNextRoundedIcon/>} disabled={!neighbors.nextId} onClick={() => go(neighbors.nextId)}>下一部</Button></Stack>
     </Stack>}
+    <Dialog open={tagDialog} onClose={() => setTagDialog(false)} fullWidth maxWidth="sm"><DialogTitle>编辑影片标签</DialogTitle><DialogContent><Autocomplete multiple options={tagOptions} value={selectedTags} isOptionEqualToValue={(a, b) => a.id === b.id} getOptionLabel={(option) => option.name} onChange={(_, value) => setSelectedTags(value)} renderInput={(params) => <TextField {...params} autoFocus label="标签" margin="normal" helperText="用户手工标签不会被同步覆盖"/>}/></DialogContent><DialogActions><Button onClick={() => setTagDialog(false)}>取消</Button><Button variant="contained" onClick={saveTags}>保存</Button></DialogActions></Dialog>
+    <Dialog open={actorDialog} onClose={() => setActorDialog(false)} fullWidth maxWidth="sm"><DialogTitle>编辑演员关系</DialogTitle><DialogContent><Autocomplete multiple filterOptions={(options) => options} options={actorOptions} value={selectedActors} isOptionEqualToValue={(a, b) => a.id === b.id} getOptionLabel={(option) => option.name} onInputChange={(_, value) => setActorSearch(value)} onChange={(_, value) => setSelectedActors(value)} renderInput={(params) => <TextField {...params} autoFocus label="搜索并选择演员" margin="normal"/>}/></DialogContent><DialogActions><Button onClick={() => setActorDialog(false)}>取消</Button><Button variant="contained" onClick={saveActors}>保存</Button></DialogActions></Dialog>
+    <Dialog open={Boolean(deletePreview)} onClose={() => setDeletePreview(undefined)} maxWidth="sm" fullWidth><DialogTitle>从资料库移除影片？</DialogTitle><DialogContent><DialogContentText>将移除“{deletePreview?.code}”的数据库记录，但不会删除媒体文件。{deletePreview?.ratingWillBeRemembered ? '当前评分会按文件名记忆，重新导入同名文件时可恢复。' : '当前没有需要记忆的评分。'}</DialogContentText><Alert severity="warning" sx={{ mt: 2 }}>{deletePreview?.warnings.join(' ')}</Alert></DialogContent><DialogActions><Button onClick={() => setDeletePreview(undefined)}>取消</Button><Button variant="contained" color="error" onClick={confirmDelete}>确认移除记录</Button></DialogActions></Dialog>
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>
   </Box>
 }

@@ -28,6 +28,7 @@ export interface BridgeHealth {
   databaseAvailable: boolean
   databasePath: string
   readOnly: boolean
+  writeEnabled: boolean
 }
 
 export interface DashboardSummary {
@@ -114,6 +115,7 @@ export interface MovieDetail {
   updatedAt: string
   favorite: boolean
   userRating: number
+  userRatingSet: boolean
   playCount: number
   lastPlayedAt?: string
   lastPositionSeconds: number
@@ -128,6 +130,7 @@ export interface MovieDetail {
 }
 
 export interface EntityCard { id: number; name: string; movieCount: number; imageUrl?: string }
+export interface ActorDetail { id: number; name: string; alias?: string; gender?: number; birthDate?: string; description?: string }
 export interface EntityPageResult { items: EntityCard[]; total: number; limit: number; offset: number }
 export interface AdvancedSearchFilters {
   query: string; actorId?: number; tagId?: number; favorite?: boolean; ratingMin?: number
@@ -139,3 +142,8 @@ export interface MetadataOverview {
 }
 export interface DiagnosticItem { severity: 'error' | 'warning' | 'info'; code: string; title: string; detail: string; count: number }
 export interface DiagnosticsResult { integrity: string; foreignKeyErrors: number; items: DiagnosticItem[] }
+export interface MutationResult { changed: boolean; auditId: number; message: string }
+export interface ImpactPreview { operation: string; entityId: number; name: string; affectedMovies: number; confirmationToken: string; warnings: string[] }
+export interface ActorRepairPreview { candidateActors: number; affectedRelations: number; confirmationToken: string; warnings: string[] }
+export interface NeighborResult { previousId?: number; nextId?: number }
+export interface MovieDeletePreview { movieId: number; code: string; fileName: string; ratingWillBeRemembered: boolean; confirmationToken: string; warnings: string[] }

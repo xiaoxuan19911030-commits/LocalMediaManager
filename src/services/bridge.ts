@@ -1,13 +1,24 @@
-import type { AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, EntityPageResult, GlobalSearchResult, LibrarySummary, MediaLibrary, MediaPageResult, MetadataOverview, MovieDetail, TaskItem } from '@/types/media'
+import { invoke } from '@tauri-apps/api/core'
+import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, EntityPageResult, GlobalSearchResult, ImpactPreview, LibrarySummary, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, TaskItem } from '@/types/media'
 import type { SettingsSnapshot } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
 
+let tokenPromise: Promise<string> | undefined
+const sessionToken = () => tokenPromise ??= invoke<string>('bridge_session_token').catch(() => import.meta.env.VITE_LMM_BRIDGE_TOKEN || '')
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BRIDGE_ORIGIN}${path}`, init)
+  const headers = new Headers(init?.headers)
+  if (init?.method && init.method !== 'GET') {
+    const token = await sessionToken()
+    if (token) headers.set('X-LMM-Session', token)
+  }
+  if (init?.body) headers.set('Content-Type', 'application/json')
+  const response = await fetch(`${BRIDGE_ORIGIN}${path}`, { ...init, headers })
   if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || `Bridge request failed (${response.status})`)
+    const body = await response.text()
+    try { throw new Error((JSON.parse(body) as { message?: string }).message || body) }
+    catch (error) { if (error instanceof SyntaxError) throw new Error(body || `Bridge request failed (${response.status})`); throw error }
   }
   return response.json() as Promise<T>
 }
@@ -22,10 +33,12 @@ export const bridge = {
   },
   settings: () => request<SettingsSnapshot>('/api/settings'),
   movie: (id: number) => request<MovieDetail>(`/api/videos/${id}`),
+  neighbors: (id: number, search = '', sort = 'newest') => request<NeighborResult>(`/api/videos/${id}/neighbors?${new URLSearchParams({ search, sort })}`),
   search: (query: string, limit = 12) => request<GlobalSearchResult>(`/api/search?${new URLSearchParams({ q: query, limit: String(limit) })}`),
   libraries: () => request<MediaLibrary[]>('/api/libraries'),
   tasks: (limit = 100) => request<TaskItem[]>(`/api/tasks?limit=${limit}`),
   entities: (type: 'actors' | 'tags', search = '', sort = 'count', limit = 48, offset = 0) => request<EntityPageResult>(`/api/entities/${type}?${new URLSearchParams({ search, sort, limit: String(limit), offset: String(offset) })}`),
+  actor: (id: number) => request<ActorDetail>(`/api/actors/${id}`),
   entityMovies: (type: 'actors' | 'tags', id: number, limit = 48, offset = 0) => request<MediaPageResult>(`/api/entities/${type}/${id}/movies?${new URLSearchParams({ limit: String(limit), offset: String(offset) })}`),
   collection: (kind: 'favorites' | 'history', limit = 48, offset = 0) => request<MediaPageResult>(`/api/collections/${kind}?${new URLSearchParams({ limit: String(limit), offset: String(offset) })}`),
   advancedSearch: (filters: AdvancedSearchFilters) => {
@@ -39,4 +52,20 @@ export const bridge = {
     request<{ started: boolean; path: string }>(`/api/videos/${dataId}/play`, {
       method: 'POST',
     }),
+  setUserState: (movieId: number, value: { favorite?: boolean; rating?: number; clearRating?: boolean }) =>
+    request<MutationResult>(`/api/videos/${movieId}/state`, { method: 'PATCH', body: JSON.stringify(value) }),
+  setBatchFavorite: (movieIds: number[], favorite: boolean) => request<MutationResult>('/api/videos/batch/favorite', { method: 'POST', body: JSON.stringify({ movieIds, favorite }) }),
+  createTag: (value: { name: string; description?: string; color?: string }) => request<MutationResult & { id: number }>('/api/tags', { method: 'POST', body: JSON.stringify(value) }),
+  updateTag: (tagId: number, value: { name: string; description?: string; color?: string }) => request<MutationResult>(`/api/tags/${tagId}`, { method: 'PUT', body: JSON.stringify(value) }),
+  previewDeleteTag: (tagId: number) => request<ImpactPreview>(`/api/tags/${tagId}/delete-preview`),
+  deleteTag: (tagId: number, confirmationToken: string) => request<MutationResult>(`/api/tags/${tagId}/delete`, { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
+  updateMovieTags: (movieId: number, addTagIds: number[], removeTagIds: number[]) => request<MutationResult>(`/api/videos/${movieId}/tags`, { method: 'PATCH', body: JSON.stringify({ addTagIds, removeTagIds }) }),
+  updateBatchTags: (movieIds: number[], addTagIds: number[], removeTagIds: number[]) => request<MutationResult>('/api/videos/batch/tags', { method: 'POST', body: JSON.stringify({ movieIds, addTagIds, removeTagIds }) }),
+  updateActor: (actorId: number, value: { name: string; alias?: string; gender?: number; birthDate?: string; description?: string }) => request<MutationResult>(`/api/actors/${actorId}`, { method: 'PUT', body: JSON.stringify(value) }),
+  setMovieActors: (movieId: number, actorIds: number[]) => request<MutationResult>(`/api/videos/${movieId}/actors`, { method: 'PUT', body: JSON.stringify({ actorIds }) }),
+  previewActorRepair: () => request<ActorRepairPreview>('/api/actors/repair-preview'),
+  applyActorRepair: (confirmationToken: string) => request<MutationResult>('/api/actors/repair', { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
+  rollbackOperation: (auditId: number) => request<MutationResult>(`/api/operations/${auditId}/rollback`, { method: 'POST' }),
+  previewDeleteMovie: (movieId: number) => request<MovieDeletePreview>(`/api/videos/${movieId}/delete-preview`),
+  deleteMovie: (movieId: number, confirmationToken: string) => request<MutationResult>(`/api/videos/${movieId}/delete`, { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
 }

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using LocalMediaManager.Bridge;
 using Microsoft.Data.Sqlite;
 
@@ -13,25 +14,62 @@ string imageRoot = Environment.GetEnvironmentVariable("LMM_IMAGE_ROOT")
     ?? (Directory.Exists(@"Z:\bcbcbcbc\ca-ES\JVDIO")
         ? @"Z:\bcbcbcbc\ca-ES\JVDIO"
         : Path.Combine(installedRoot, "data", Environment.UserName, "pic"));
+string? sessionToken = Environment.GetEnvironmentVariable("LMM_BRIDGE_TOKEN");
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls(bridgeUrl);
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+builder.Services.AddSingleton(new ProductWriter(databasePath));
 
 var app = builder.Build();
 app.UseCors();
+app.Use(async (context, next) => {
+    try {
+        if (context.Request.Method is not ("GET" or "HEAD" or "OPTIONS")) {
+            if (string.IsNullOrWhiteSpace(sessionToken)) {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                await context.Response.WriteAsJsonAsync(new { code = "WRITE_SESSION_UNAVAILABLE", message = "Bridge 未由受信任的桌面会话启动，写入已禁用。" });
+                return;
+            }
+            if (!context.Request.Headers.TryGetValue("X-LMM-Session", out var supplied) || supplied != sessionToken) {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await context.Response.WriteAsJsonAsync(new { code = "INVALID_SESSION", message = "Bridge 会话凭据无效。" });
+                return;
+            }
+        }
+        await next();
+    } catch (KeyNotFoundException error) {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        await context.Response.WriteAsJsonAsync(new { code = "NOT_FOUND", message = error.Message });
+    } catch (UnauthorizedAccessException error) {
+        context.Response.StatusCode = StatusCodes.Status409Conflict;
+        await context.Response.WriteAsJsonAsync(new { code = "CONFIRMATION_REQUIRED", message = error.Message });
+    } catch (ArgumentException error) {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsJsonAsync(new { code = "INVALID_INPUT", message = error.Message });
+    } catch (InvalidOperationException error) {
+        context.Response.StatusCode = StatusCodes.Status409Conflict;
+        await context.Response.WriteAsJsonAsync(new { code = "CONFLICT", message = error.Message });
+    } catch (Exception error) {
+        Console.Error.WriteLine(error);
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        await context.Response.WriteAsJsonAsync(new { code = "INTERNAL_ERROR", message = "操作失败，数据库未提交更改。" });
+    }
+});
 
 app.MapGet("/health", () => Results.Ok(new {
     product = "Local Media Manager",
     abbreviation = "LMM",
-    version = "0.4.0",
+    version = "0.4.1",
     status = "ok",
     databaseAvailable = File.Exists(databasePath),
     databasePath,
     configDatabaseAvailable = File.Exists(configDatabasePath),
     configDatabasePath,
-    readOnly = true,
+    readOnly = false,
+    writeEnabled = !string.IsNullOrWhiteSpace(sessionToken),
+    sessionAuthentication = "X-LMM-Session",
     dataSeparated = true,
     legacyDatabaseUsedForRuntime = false,
 }));
@@ -170,6 +208,50 @@ app.MapGet("/api/videos/{movieId:long}", async (long movieId) => {
     return detail is null ? Results.NotFound() : Results.Ok(detail);
 });
 
+app.MapGet("/api/videos/{movieId:long}/neighbors", async (long movieId, string? search, string? sort) =>
+    File.Exists(databasePath)
+        ? Results.Ok(await ProductReader.ReadNeighborsAsync(databasePath, movieId, search ?? "", sort ?? "newest"))
+        : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
+
+app.MapPatch("/api/videos/{movieId:long}/state", async (long movieId, UserStateCommand command, ProductWriter writer) =>
+    Results.Ok(await writer.SetUserStateAsync(movieId, command)));
+
+app.MapPost("/api/videos/batch/favorite", async (BatchFavoriteCommand command, ProductWriter writer) =>
+    Results.Ok(await writer.SetFavoritesAsync(command)));
+
+app.MapPost("/api/tags", async (TagCommand command, ProductWriter writer) => {
+    var created = await writer.CreateTagAsync(command);
+    return Results.Ok(new { id = created.Id, created.Result.Changed, created.Result.AuditId, created.Result.Message });
+});
+app.MapPut("/api/tags/{tagId:long}", async (long tagId, TagCommand command, ProductWriter writer) =>
+    Results.Ok(await writer.UpdateTagAsync(tagId, command)));
+app.MapGet("/api/tags/{tagId:long}/delete-preview", async (long tagId, ProductWriter writer) =>
+    Results.Ok(await writer.PreviewDeleteTagAsync(tagId)));
+app.MapPost("/api/tags/{tagId:long}/delete", async (long tagId, ConfirmCommand command, ProductWriter writer) =>
+    Results.Ok(await writer.DeleteTagAsync(tagId, command)));
+app.MapPost("/api/operations/{auditId:long}/rollback", async (long auditId, ProductWriter writer) =>
+    Results.Ok(await writer.RollbackAsync(auditId)));
+app.MapPatch("/api/videos/{movieId:long}/tags", async (long movieId, MovieTagsCommand command, ProductWriter writer) =>
+    Results.Ok(await writer.UpdateMovieTagsAsync(movieId, command)));
+app.MapPost("/api/videos/batch/tags", async (BatchTagsCommand command, ProductWriter writer) =>
+    Results.Ok(await writer.UpdateBatchTagsAsync(command)));
+
+app.MapPut("/api/actors/{actorId:long}", async (long actorId, ActorCommand command, ProductWriter writer) =>
+    Results.Ok(await writer.UpdateActorAsync(actorId, command)));
+app.MapPut("/api/videos/{movieId:long}/actors", async (long movieId, MovieActorsCommand command, ProductWriter writer) =>
+    Results.Ok(await writer.SetMovieActorsAsync(movieId, command)));
+app.MapGet("/api/actors/repair-preview", async (ProductWriter writer) => Results.Ok(await writer.PreviewActorRepairAsync()));
+app.MapPost("/api/actors/repair", async (ConfirmCommand command, ProductWriter writer) => Results.Ok(await writer.ApplyActorRepairAsync(command)));
+
+app.MapPost("/api/videos/{movieId:long}/remember-rating", async (long movieId, ProductWriter writer) =>
+    Results.Ok(new { remembered = await writer.RememberDeletedRatingAsync(movieId) }));
+app.MapPost("/api/videos/{movieId:long}/restore-rating", async (long movieId, ProductWriter writer) =>
+    Results.Ok(new { restored = await writer.RestoreDeletedRatingAsync(movieId) }));
+app.MapGet("/api/videos/{movieId:long}/delete-preview", async (long movieId, ProductWriter writer) =>
+    Results.Ok(await writer.PreviewDeleteMovieAsync(movieId)));
+app.MapPost("/api/videos/{movieId:long}/delete", async (long movieId, ConfirmCommand command, ProductWriter writer) =>
+    Results.Ok(await writer.DeleteMovieAsync(movieId, command)));
+
 app.MapGet("/api/covers/{code}", (string code) => {
     string? path = FindCover(imageRoot, code);
     return path is null
@@ -206,15 +288,24 @@ app.MapGet("/api/actors/{actorId:long}/image", async (long actorId) => {
     return string.IsNullOrWhiteSpace(path) || !File.Exists(path) ? Results.NotFound() : Results.File(path, ContentType(path), enableRangeProcessing: true);
 });
 
-app.MapPost("/api/videos/{dataId:long}/play", async (long dataId) => {
+app.MapGet("/api/actors/{actorId:long}", async (long actorId) => {
+    if (!File.Exists(databasePath)) return Results.NotFound();
+    ActorDetailDto? actor = await ProductReader.ReadActorAsync(databasePath, actorId);
+    return actor is null ? Results.NotFound() : Results.Ok(actor);
+});
+
+app.MapPost("/api/videos/{dataId:long}/play", async (long dataId, ProductWriter writer) => {
     if (!File.Exists(databasePath))
         return Results.Problem($"找不到数据库：{databasePath}", statusCode: 503);
 
     await using var connection = await OpenReadOnlyAsync(databasePath);
     await using var command = connection.CreateCommand();
-    command.CommandText = "SELECT COALESCE(FilePath, '') FROM MediaFiles WHERE MovieId=$id AND IsPrimary=1 AND MediaType='Video' LIMIT 1";
+    command.CommandText = "SELECT Id,COALESCE(FilePath, '') FROM MediaFiles WHERE MovieId=$id AND IsPrimary=1 AND MediaType='Video' LIMIT 1";
     command.Parameters.AddWithValue("$id", dataId);
-    string path = (string?)(await command.ExecuteScalarAsync()) ?? string.Empty;
+    await using var reader = await command.ExecuteReaderAsync();
+    if (!await reader.ReadAsync()) return Results.NotFound("影片没有可播放的主文件。");
+    long mediaFileId = reader.GetInt64(0);
+    string path = reader.GetString(1);
     if (!File.Exists(path))
         return Results.NotFound($"影片文件不存在：{path}");
     if (!IsVideoFile(path))
@@ -228,12 +319,22 @@ app.MapPost("/api/videos/{dataId:long}/play", async (long dataId) => {
     } else {
         startInfo.FileName = path;
     }
-    Process.Start(startInfo);
-    return Results.Ok(new { started = true, path, trackingWritten = false });
+    DateTimeOffset startedAt = DateTimeOffset.UtcNow;
+    Process? player = Process.Start(startInfo);
+    if (player is null) return Results.Problem("播放器未能启动。", statusCode: 502);
+    _ = Task.Run(async () => {
+        try {
+            await player.WaitForExitAsync();
+            if (player.ExitCode == 0)
+                await writer.RecordPlaybackAsync(dataId, mediaFileId, Path.GetFileName(startInfo.FileName), startedAt, DateTimeOffset.UtcNow);
+        } catch (Exception error) { Console.Error.WriteLine($"Playback tracking failed: {error}"); }
+        finally { player.Dispose(); }
+    });
+    return Results.Ok(new { started = true, path, trackingWritten = false, trackingMode = "on-normal-exit" });
 });
 
 Console.WriteLine($"Local Media Manager Bridge: {bridgeUrl}");
-Console.WriteLine($"Database (read-only): {databasePath}");
+Console.WriteLine($"Database (read/write via authenticated commands): {databasePath}");
 await app.RunAsync();
 
 static async Task<SqliteConnection> OpenReadOnlyAsync(string databasePath)

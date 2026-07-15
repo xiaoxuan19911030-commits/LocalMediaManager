@@ -110,7 +110,7 @@ internal static class MigrationRunner
         }
 
         var report = new MigrationReport(
-            "0.4.0", started, DateTimeOffset.Now, legacyBusinessDb, legacyConfigDb, sourceBusinessHash,
+            "0.4.1", started, DateTimeOffset.Now, legacyBusinessDb, legacyConfigDb, sourceBusinessHash,
             sourceConfigHash, switched ? officialDb : tempDb, targetHash, appliedMigrations.DefaultIfEmpty(1).Max(), confirmSwitch, allowed, switched,
             integrity, foreignKeyErrors, legacyMovieCount, newMovieCount, orphanMovieActors, duplicatePaths,
             duplicateCodes, counts, maps.ToDictionary(pair => pair.Key, pair => (long)pair.Value.Count),
@@ -386,7 +386,7 @@ internal static class MigrationRunner
         string businessHash, string configHash, DateTimeOffset started)
     {
         foreach ((string key, string value) in new Dictionary<string, string> {
-            ["CreatedByVersion"]="0.4.0", ["SchemaVersion"]="1", ["LastMigrationAt"]=UtcNow(),
+            ["CreatedByVersion"]="0.4.1", ["SchemaVersion"]="1", ["LastMigrationAt"]=UtcNow(),
             ["LegacyBusinessSha256"]=businessHash, ["LegacyConfigSha256"]=configHash,
             ["MigrationStartedAt"]=started.ToString("O"), ["DataSeparationNotice"]="LMM data is independent from the legacy WPF databases."
         }) await ExecuteAsync(target, "INSERT INTO DatabaseMetadata(Key,Value) VALUES($key,$value)", tx, ("$key", key), ("$value", value));

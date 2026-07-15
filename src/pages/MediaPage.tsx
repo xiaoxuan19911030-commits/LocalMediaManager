@@ -1,12 +1,14 @@
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
-import { Alert, Box, Button, CircularProgress, InputAdornment, MenuItem, Pagination, Snackbar, TextField } from '@mui/material'
+import FavoriteBorderRoundedIcon from '@mui/icons-material/FavoriteBorderRounded'
+import FavoriteRoundedIcon from '@mui/icons-material/FavoriteRounded'
+import { Alert, Autocomplete, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, InputAdornment, MenuItem, Pagination, Snackbar, Stack, TextField, Typography } from '@mui/material'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { MediaCard, MediaCardGrid } from '@/components/MediaCard'
 import { PageHeader } from '@/components/PageHeader'
 import { bridge } from '@/services/bridge'
-import type { MediaItem } from '@/types/media'
+import type { MediaItem, NamedItem } from '@/types/media'
 
 const pageSize = 24
 
@@ -21,6 +23,7 @@ export default function MediaPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [selected, setSelected] = useState<number[]>([]); const [tagDialog, setTagDialog] = useState(false); const [tags, setTags] = useState<NamedItem[]>([]); const [addTags, setAddTags] = useState<NamedItem[]>([]); const [removeTags, setRemoveTags] = useState<NamedItem[]>([])
 
   const load = useCallback(() => {
     setLoading(true)
@@ -33,6 +36,9 @@ export default function MediaPage() {
   useEffect(load, [load])
 
   const submitSearch = () => { setPage(1); setQuery(search.trim()) }
+  const batchFavorite = (favorite: boolean) => bridge.setBatchFavorite(selected, favorite).then((result) => { setNotice(result.message); setSelected([]); load() }).catch((reason: Error) => setNotice(reason.message))
+  const openBatchTags = () => { setAddTags([]); setRemoveTags([]); setTagDialog(true); bridge.entities('tags', '', 'name', 96, 0).then((result) => setTags(result.items)).catch((reason: Error) => setNotice(reason.message)) }
+  const saveBatchTags = () => bridge.updateBatchTags(selected, addTags.map((item) => item.id), removeTags.map((item) => item.id)).then((result) => { setNotice(result.message); setTagDialog(false); setSelected([]); load() }).catch((reason: Error) => setNotice(reason.message))
   const play = (item: MediaItem) => {
     bridge.play(item.dataId)
       .then(() => setNotice(`已交给系统播放器：${item.code}`))
@@ -53,15 +59,17 @@ export default function MediaPage() {
         </TextField>
         <Button type="submit" variant="contained">搜索</Button>
       </Box>
+      {selected.length > 0 && <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2, p: 1.25, border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'action.hover' }}><Typography sx={{ fontWeight: 800 }}>已选择 {selected.length} 部</Typography><Button size="small" startIcon={<FavoriteRoundedIcon/>} onClick={() => batchFavorite(true)}>收藏</Button><Button size="small" startIcon={<FavoriteBorderRoundedIcon/>} onClick={() => batchFavorite(false)}>取消收藏</Button><Button size="small" onClick={openBatchTags}>批量添加标签</Button><Button size="small" color="inherit" onClick={() => setSelected([])}>取消选择</Button></Stack>}
       {error && <Alert severity="error">{error}</Alert>}
       {loading ? <Box sx={{ display: 'grid', placeItems: 'center', minHeight: 300 }}><CircularProgress /></Box> :
         <MediaCardGrid>
-          {items.map((item) => <MediaCard key={item.dataId} item={item} onPlay={play} onOpen={() => navigate(`/movies/${item.dataId}`)} />)}
+          {items.map((item) => <MediaCard key={item.dataId} item={item} selected={selected.includes(item.dataId)} onSelect={(value, checked) => setSelected((current) => checked ? [...current, value.dataId] : current.filter((id) => id !== value.dataId))} onPlay={play} onOpen={() => navigate(`/movies/${item.dataId}`, { state: { context: { search: query, sort } } })} />)}
         </MediaCardGrid>}
       {total > pageSize && <Box sx={{ display: 'flex', justifyContent: 'center', pt: 3 }}>
         <Pagination count={Math.ceil(total / pageSize)} page={page} onChange={(_, value) => setPage(value)} color="primary" />
       </Box>}
       <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice} />
+      <Dialog open={tagDialog} onClose={() => setTagDialog(false)} fullWidth maxWidth="sm"><DialogTitle>批量编辑标签</DialogTitle><DialogContent><Autocomplete multiple options={tags.filter((tag) => !removeTags.some((item) => item.id === tag.id))} value={addTags} isOptionEqualToValue={(a, b) => a.id === b.id} getOptionLabel={(option) => option.name} onChange={(_, value) => setAddTags(value)} renderInput={(params) => <TextField {...params} label="添加标签" margin="normal"/>}/><Autocomplete multiple options={tags.filter((tag) => !addTags.some((item) => item.id === tag.id))} value={removeTags} isOptionEqualToValue={(a, b) => a.id === b.id} getOptionLabel={(option) => option.name} onChange={(_, value) => setRemoveTags(value)} renderInput={(params) => <TextField {...params} label="解绑标签" margin="normal" helperText="只解除关系，不删除标签"/>}/></DialogContent><DialogActions><Button onClick={() => setTagDialog(false)}>取消</Button><Button variant="contained" disabled={!addTags.length && !removeTags.length} onClick={saveBatchTags}>应用到 {selected.length} 部影片</Button></DialogActions></Dialog>
     </Box>
   )
 }
