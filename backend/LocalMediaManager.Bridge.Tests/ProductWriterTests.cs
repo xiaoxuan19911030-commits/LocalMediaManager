@@ -95,6 +95,25 @@ public sealed class ProductWriterTests : IAsyncLifetime
         Assert.True(Directory.GetFiles(Path.Combine(root, "backups", "operations"), "movie-delete-*.db", SearchOption.AllDirectories).Length == 1);
     }
 
+    [Fact]
+    public async Task ActorIdZeroRepairUsesPreviewTaskAndDatabaseBackup()
+    {
+        await using (var connection = await Open()) {
+            await Execute(connection, "INSERT INTO Actors(Id,Name,NormalizedName,LegacySource,LegacyId,CreatedAt,UpdatedAt) VALUES(0,'Actor A','actor a','Test',99,'2026-01-01','2026-01-01')");
+            await Execute(connection, "INSERT INTO MovieActors(MovieId,ActorId,RoleName,SortOrder) VALUES(1,0,'',0)");
+        }
+        var preview = await writer.PreviewActorRepairAsync();
+        Assert.Equal(1, preview.CandidateActors);
+        Assert.Equal(1, preview.AffectedRelations);
+        await writer.ApplyActorRepairAsync(new(preview.ConfirmationToken));
+        await using var verify = await Open();
+        Assert.Equal(0, await Scalar(verify, "SELECT COUNT(*) FROM Actors WHERE Id=0"));
+        Assert.Equal(0, await Scalar(verify, "SELECT COUNT(*) FROM MovieActors WHERE ActorId=0"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM MovieActors WHERE MovieId=1 AND ActorId=1"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Tasks WHERE TaskType='ActorRepair' AND Status='Completed'"));
+        Assert.True(Directory.GetFiles(Path.Combine(root, "backups", "operations"), "actor-repair-*.db", SearchOption.AllDirectories).Length == 1);
+    }
+
     private async Task<(long Favorite, double Rating, long RatingSet)> State(long movieId)
     {
         await using var connection = await Open(); await using var command = connection.CreateCommand();
