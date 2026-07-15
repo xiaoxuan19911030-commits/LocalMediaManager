@@ -20,7 +20,7 @@ Local Media Manager (LMM) is an independent desktop product for organizing and e
 The product is local-first: media files, metadata, ratings, favorites, tags and playback history stay under the user's control. React never accesses SQLite or the filesystem directly; all business operations pass through authenticated Bridge APIs.
 
 > Current release: **0.4.1 — Legacy Feature Migration Part 1**
-> Development status: Sprint 0.4.2 is paused while the public repository is prepared.
+> Development status: Sprint 0.4.2 Batch 2 is implemented and under acceptance; Sprint 0.4.3 is in Planning.
 
 ## Highlights
 

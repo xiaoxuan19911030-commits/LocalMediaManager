@@ -24,3 +24,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 Pull requests should explain the user-facing outcome, Bridge/Migration impact, data risk, tests performed and rollback path.
 
+## Stable main policy
+
+Development work stays on a dedicated local Sprint branch until the complete lifecycle has passed: `Planning → Design → Develop → Self Test → Smoke Test → Freeze → Release`. Only a buildable, runnable and publishable release candidate with verification and rollback evidence may be pushed to GitHub `main`.
+

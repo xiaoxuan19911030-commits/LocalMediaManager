@@ -95,35 +95,32 @@ Planning → Design → Develop → Self Test → Smoke Test → Freeze → Rele
 - 媒体扫描与导入
 - 新增后自动同步
 - MetaTube Provider
-- NFO 导入与导出
-- poster、thumb、fanart、BigPic、ExtraPic 兼容
-- 图片缓存与智能卡图
-- 文件整理与重命名
-- 所有长操作接入 Tasks
+- 同步执行器、非破坏写入与任务恢复
+- 扫描和同步长操作接入 Tasks
 
-当前开发证据：扫描导入第一批与真实 MetaTube 同步执行器已完成代码和自动化测试；Migration `0005_MetadataSyncWorkflow` 已加入。真实 MetaTube 服务对照烟测、安装版部署验收、NFO 导入和文件整理仍未完成，因此 0.4.2 保持 `Develop`。
+当前开发证据：扫描导入第一批与 MetaTube 同步执行器已完成代码和自动化测试；Migration `0005_MetadataSyncWorkflow` 已加入。2026-07-16 已对 MetaTube `v1.4.0-c0e053f` 完成只读协议预检（搜索、详情、主图）；安装版写入烟测和发布验收仍未完成，因此 0.4.2 保持 `Develop`。
 
-## 0.4.3 — Stability Update
+## 0.4.3 — Media Assets & File Organization
 
 **状态：Planning**
 
-- Bug 修复和 UI 一致性
-- Bridge 性能、鉴权与错误模型
-- SQLite 查询、索引和连接优化
-- 内存、图片加载和路由拆包优化
-- Diagnostics 扩展与自动化回归
+- poster、thumb、fanart、BigPic、ExtraPic、演员图与安全图片缓存
+- 完整 NFO 读取、写入、所有权和覆盖策略
+- 文件整理 Dry Run、预览、确认、执行、审计与恢复
+- MetaTube 30–50 部真实样本烟测
+- Bridge Release 后台运行、日志、单实例和退出生命周期
+- 标签编辑、详情海报和播放器路径等限定交互修复
+
+正式范围和验收门槛见 [`sprints/SPRINT_0.4.3.md`](sprints/SPRINT_0.4.3.md)。原 Stability Update 中的数据库、性能、内存和大媒体库优化归入 0.5.5 LTS。
 
 ## 0.5.0 — Media Management
 
 **状态：Future**
 
-- Metadata 工作流
-- NFO 管理
-- File Organizer
-- Duplicate Manager
-- Library CRUD
-- 完整 Task Manager
-- 达到主要旧版媒体管理功能等价
+- 对 0.4.1–0.4.3 的媒体管理功能执行最终等价验收
+- 完成剩余 Duplicate Manager 与完整 Task Manager 边界
+- 关闭 Feature Parity Matrix 中必须保留功能的证据缺口
+- 发布主要旧版媒体管理功能等价版本
 
 ## 0.5.5 — LTS Stability
 

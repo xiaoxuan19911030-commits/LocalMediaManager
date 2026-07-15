@@ -42,3 +42,9 @@ Before completing a version, update Roadmap, Changelog, and TODO; run Web, Bridg
 Never mark a legacy feature as fully migrated unless the matrix contains its real UI operation, Bridge execution, persistence/restart result, error handling, required backup/rollback, automated test, manual smoke test, Git commit, and acceptance record.
 
 Every version follows `Planning → Design → Develop → Self Test → Smoke Test → Freeze → Release → Archive`. Run the applicable cases from `docs/TEST_PLAN.md`; do not skip directly from implementation to release.
+
+## GitHub publication
+
+- Keep intermediate Sprint commits local on a dedicated Sprint branch.
+- Do not push development work to GitHub `main` before Self Test, Smoke Test, Freeze and Release are complete.
+- GitHub `main` must remain buildable, runnable and publishable, with verification and rollback evidence recorded in the repository.

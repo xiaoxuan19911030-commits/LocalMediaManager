@@ -71,12 +71,12 @@
 | 11 | 播放次数 | P0 | 必须保留 | 已完整迁移 | Bridge Player Service；PlayHistory DTO；成功启动判断；事务 | 数据库写入 | 无 | 0.4.1 | 启动成功并正常退出 +1；失败不增加；重启保持 | Bridge: POST play + `RecordPlaybackAsync`；Migration: N/A；Automated: `ActorRelationsAndPlaybackHistoryAreTransactional`；Smoke: 受控测试播放器正常退出写入；Commit `da9fcdf`；Acceptance: `0.4.1-VERIFICATION.md` |
 | 12 | 播放历史 | P0 | 必须保留 | 已完整迁移 | #11；History DTO；位置/时间字段；清理规则 | 数据库写入 | 无 | 0.4.1 | 最近播放顺序、次数和位置与实际操作一致 | Bridge: POST play、GET history；Migration: N/A；Automated: playback transaction test；Smoke: 受控播放器写入后 history 回读；Commit `da9fcdf`；Acceptance: `0.4.1-VERIFICATION.md` |
 | 13 | 上一部/下一部 | P1 | 必须保留 | 已完整迁移 | 查询上下文 DTO；排序/筛选签名；详情缓存/预取 | 无写入 | 无 | 0.4.1 | 保持原筛选/排序连续切换；首尾行为明确 | Bridge: GET `/api/videos/{id}/neighbors`；Migration: N/A；Automated: SQL stable order covered by build/integration smoke；Smoke: 脱敏副本验证前后邻居与安装版按钮；Commit `da9fcdf`；Acceptance: `0.4.1-VERIFICATION.md` |
-| 14 | 外部播放器 | P1 | 必须保留 | 已部分迁移 | Bridge Player Service；Player Settings；路径校验；系统回退 | 低风险写入 | 自定义路径保存、回退和失败诊断 | 0.4.1 | 系统/自定义播放器均可启动；无效路径错误可理解 | 部分：POST play + 安装版 toast 烟测；Commit `2d52dfc`；记录 `0.4.0-VERIFICATION.md` |
-| 15 | 图片来源规则 | P1 | 必须保留 | 已部分迁移 | Image Service；Image DTO；Settings；poster/thumb/fanart 映射；人工锁定 | 数据库写入 | 三种用途选择、来源优先级、手选保护 | 0.4.2 | 各页面使用正确资源；手选图片不被自动覆盖 | 部分：GET `/api/images/{id}/primary`；主图只读烟测 |
-| 16 | BigPic/ExtraPic | P1 | 必须保留 | 数据已迁移但操作未迁移 | Path Resolver；Image Service；文件系统读取；旧目录配置 | 无写入 | 两种旧目录解析与详情画廊 | 0.4.2 | 统一目录/相对目录样本均能显示 | 数据迁移记录存在；无完整读取验收 |
-| 17 | 图片缓存 | P1 | 重要 | 已部分迁移 | Cache Service；Settings；文件系统；限额；Tasks | 文件系统写入 | 本地缓存、失效、限额和安全清理 | 0.4.2 | 离线可读；清理不删除源图；失败可恢复 | 浏览器图片缓存不等于产品缓存；无完整证据 |
-| 18 | 高清图片 | P1 | 重要 | 已部分迁移 | Image Service；缩略/原图 DTO；按需加载；缓存 | 无写入 | 原图端点、画廊和分层加载 | 0.4.2 | 列表不拉原图；详情按需加载高清图 | 部分：primary image 流；无画廊/网络测试 |
-| 19 | 智能卡图 | P1 | 重要 | 尚未迁移 | CardCover Service；Tasks；Settings；专用目录；图像分析；右键菜单 | 文件系统写入 | 自动补全、重识别、左/中/右裁切和日志 | 0.4.2 | 自动补全及四种人工修正；源图不被覆盖 | 无完整证据；旧算法已审计 |
+| 14 | 外部播放器 | P1 | 必须保留 | 已部分迁移 | Bridge Player Service；Player Settings；路径校验；系统回退 | 低风险写入 | 自定义路径保存、回退和失败诊断 | 0.4.3 | 系统/自定义播放器均可启动；无效路径错误可理解 | 部分：POST play + 安装版 toast 烟测；Commit `2d52dfc`；记录 `0.4.0-VERIFICATION.md` |
+| 15 | 图片来源规则 | P1 | 必须保留 | 已部分迁移 | Image Service；Image DTO；Settings；poster/thumb/fanart 映射；人工锁定 | 数据库写入 | 三种用途选择、来源优先级、手选保护 | 0.4.3 | 各页面使用正确资源；手选图片不被自动覆盖 | 部分：GET `/api/images/{id}/primary`；主图只读烟测 |
+| 16 | BigPic/ExtraPic | P1 | 必须保留 | 数据已迁移但操作未迁移 | Path Resolver；Image Service；文件系统读取；旧目录配置 | 无写入 | 两种旧目录解析与详情画廊 | 0.4.3 | 统一目录/相对目录样本均能显示 | 数据迁移记录存在；无完整读取验收 |
+| 17 | 图片缓存 | P1 | 重要 | 已部分迁移 | Cache Service；Settings；文件系统；限额；Tasks | 文件系统写入 | 本地缓存、失效、限额和安全清理 | 0.4.3 | 离线可读；清理不删除源图；失败可恢复 | 浏览器图片缓存不等于产品缓存；无完整证据 |
+| 18 | 高清图片 | P1 | 重要 | 已部分迁移 | Image Service；缩略/原图 DTO；按需加载；缓存 | 无写入 | 原图端点、画廊和分层加载 | 0.4.3 | 列表不拉原图；详情按需加载高清图 | 部分：primary image 流；无画廊/网络测试 |
+| 19 | 智能卡图 | P1 | 重要 | 尚未迁移 | CardCover Service；Tasks；Settings；专用目录；图像分析；右键菜单 | 文件系统写入 | 自动补全、重识别、左/中/右裁切和日志 | 0.4.3 | 自动补全及四种人工修正；源图不被覆盖 | 无完整证据；旧算法已审计 |
 | 20 | 卡片/列表 | P2 | 重要 | 已部分迁移 | View Settings；共享卡片/列表组件；状态持久化 | 低风险写入 | 列表视图与视图选择持久化 | 0.4.1 | 切换不改变筛选、排序、页码；重启保持 | 部分：共享卡片组件；无列表/持久化测试 |
 | 21 | 海报大小 | P2 | 重要 | 仅只读 | Appearance Settings；密度 DTO；分页容量；响应式布局 | 低风险写入 | 小/中/大写设置及 96/80/60 页容量 | 0.4.1 | 12/10/6 列和页容量规则；重启保持 | 部分：旧设置只读；100/125/150 视口烟测通过 |
 | 22 | 分页 | P1 | 必须保留 | 已部分迁移 | Bridge page DTO；稳定排序；Pagination 组件；自动化测试 | 无写入 | 缺自动化边界/筛选复位测试和正式验收证据 | 0.4.1 | 总页数、前后页、筛选复位、末页和空页正确 | 部分：GET `/api/videos?limit&offset`；UI/人工烟测；Commit `2d52dfc`/`83c53b5`；缺自动化测试，故不得标完整 |
@@ -88,9 +88,9 @@
 | 28 | 媒体库、扫描与导入 | P1 | 必须保留 | 已部分迁移 | Library CRUD Migration；Bridge Library/Scan Service；DTO；Tasks；文件系统；Settings | 需要备份与回滚 | 仍缺安装版真实目录烟测、跨重启任务恢复和完整同步执行器 | 0.4.2 | 创建媒体库到扫描导入完整流程；失败可恢复 | Bridge: POST/PUT/DELETE `/api/libraries*`、POST `/api/libraries/{id}/scan`；Migration: `0004_LibraryScanWorkflow`；Automated: `ScanImportsOnlyVideosRestoresRatingAndQueuesSync`、`LibraryDeleteRequiresPreviewBacksUpAndKeepsMovies`；Commit: 本次 0.4.2 开发提交待记录；尚缺 Smoke/Acceptance，故不标完整 |
 | 29 | 元数据状态 | P1 | 重要 | 仅只读 | Metadata Service；Status DTO；Diagnostics；Tasks | 无写入 | 批量修复、筛选联动和任务入口 | 0.4.2 | 状态统计与抽样 SQL 一致；修复后即时刷新 | 部分：GET `/api/metadata/overview`；脱敏样本统计与 SQL 抽样一致；Commit `83c53b5` |
 | 30 | 智能查重 | P1 | 重要 | 仅只读 | Duplicate Service；候选 DTO；文件哈希/属性；Tasks；确认/回滚 | 删除风险 | 候选详情、忽略、合并预览与安全执行 | 0.5.0 | 不自动删除；用户确认后执行且可回滚 | 部分：Diagnostics 重复番号计数 25；无管理流程 |
-| 31 | MetaTube | P1 | 重要 | 已部分迁移 | Plugin/Provider Service；Server Settings；Metadata DTO；Tasks；网络 | 数据库写入 | 真实本地服务单部结果对照、敏感 Header/Cookie 凭据与发布验收 | 0.4.2 | 单部同步与旧版结果对照；失败保留旧数据 | Bridge: Provider settings/test、POST `/api/videos/{id}/sync`、`IMetadataProvider`/`MetaTubeProvider`；Migration: `0005`；Automated: Provider 优先级/字段映射/设置持久化；本机 8080 未运行，故不标完整 |
-| 32 | NFO 导入导出 | P1 | 必须保留 | 数据已迁移但操作未迁移 | NFO Service；DTO；Settings；Tasks；文件系统；覆盖预览 | 文件系统写入 | 解析、导出、图片/演员图独立覆盖策略 | 0.4.2 | 样本往返；用户字段和图片选择不丢失 | 部分：NfoPath 数据已迁移；无读写接口/测试 |
-| 33 | 重命名与整理 | P1 | 必须保留 | 尚未迁移 | Organizer Service；Preview DTO；Tasks；文件系统；冲突检测；回滚 | 需要备份与回滚 | 预览、冲突检测、文件/数据库一致性 | 0.4.2 | 目标存在不覆盖；中途失败可回滚 | 无完整证据；旧 `RenameConfig`/规则已审计 |
+| 31 | MetaTube | P1 | 重要 | 已部分迁移 | Plugin/Provider Service；Server Settings；Metadata DTO；Tasks；网络 | 数据库写入 | 30–50 部真实写入烟测、敏感 Header/Cookie 凭据与发布验收 | 0.4.3 | 单部同步与旧版结果对照；失败保留旧数据 | Bridge: Provider settings/test、POST `/api/videos/{id}/sync`、`IMetadataProvider`/`MetaTubeProvider`；Migration: `0005`；Automated: Provider 优先级/字段映射/设置持久化；Protocol preflight: 2026-07-16 MetaTube v1.4.0 搜索/详情/主图只读通过；尚缺批量写入 Smoke/Commit/Acceptance，故不标完整 |
+| 32 | NFO 导入导出 | P1 | 必须保留 | 数据已迁移但操作未迁移 | NFO Service；DTO；Settings；Tasks；文件系统；覆盖预览 | 文件系统写入 | 解析、导出、图片/演员图独立覆盖策略 | 0.4.3 | 样本往返；用户字段和图片选择不丢失 | 部分：NfoPath 数据已迁移；无读写接口/测试 |
+| 33 | 重命名与整理 | P1 | 必须保留 | 尚未迁移 | Organizer Service；Preview DTO；Tasks；文件系统；冲突检测；回滚 | 需要备份与回滚 | 预览、冲突检测、文件/数据库一致性 | 0.4.3 | 目标存在不覆盖；中途失败可回滚 | 无完整证据；旧 `RenameConfig`/规则已审计 |
 | 34 | 缓存清理 | P2 | 重要 | 尚未迁移 | #17；Cache Service；空间估算；Tasks；确认 | 删除风险 | 缓存分类、估算、安全删除和结果报告 | 0.4.3 | 只删除派生缓存；源图/卡图不受影响 | 无完整证据 |
 | 35 | 老板键 | P3 | 一般 | 仅只读 | Shortcut Settings；Tauri global shortcut；冲突处理 | 低风险写入 | 注册、隐藏/恢复和错误提示 | 0.5.0 | 组合键可靠；冲突不覆盖旧值 | 部分：旧设置只读；无 Tauri 实现 |
 | 36 | 主题、语言、关闭行为 | P2 | 重要 | 已部分迁移 | Settings Service；Theme Context；i18n；Tauri tray/lifecycle | 低风险写入 | 语言、托盘和关闭行为写设置 | 0.4.3 | 两主题、重启项、托盘/关闭行为均通过 | 部分：深浅主题和缩放烟测；Commit `2d52dfc`/`83c53b5`；语言/关闭只读 |
@@ -115,7 +115,7 @@ Acceptance: 发布验证记录或独立验收文档
 
 ## 当前结论
 
-- 按严格门槛，矩阵中暂时没有功能标记为“已完整迁移”；这是证据标准提升后的正常结果，不代表 0.4.0 页面无效。
+- 按严格门槛，只有完成 UI、Bridge、持久化、错误处理、自动化测试、人工烟测、Commit 和验收记录的条目才标记为“已完整迁移”；其余保持部分迁移或未迁移。
 - 0.4.1 优先完成 P0 用户状态、标签、评分恢复、演员关系、播放记录与 Tasks 写入基础。
-- 0.4.2 集中处理扫描导入、自动同步、MetaTube、NFO、图片和文件整理。
+- 0.4.2 集中处理扫描导入、自动同步和 MetaTube 执行器；0.4.3 完成图片、NFO、文件整理和 MetaTube 真实批量验收。
 - 0.5.0 完成主要媒体管理功能等价；0.5.5 建立 LTS 稳定基线；0.6.0 才开始真实 AI Provider 接入。

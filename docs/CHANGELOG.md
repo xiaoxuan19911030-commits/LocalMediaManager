@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Planning
+
+- 正式建立 Sprint 0.4.3 `Media Assets & File Organization` 计划，覆盖图片、NFO、文件整理、MetaTube 真实烟测、Bridge Release 生命周期和限定交互修复。
+- GitHub `main` 增加稳定发布门槛：中间 Sprint 提交保留在本地分支，完成 Self Test、Smoke Test、Freeze 和 Release 后才允许推送。
+- 2026-07-16 对本地 MetaTube `v1.4.0-c0e053f` 完成只读搜索、详情和主图协议预检；30–50 部真实写入烟测仍是 0.4.3 发布门槛。
+
 ### Added
 
 - Migration `0005_MetadataSyncWorkflow`：同步阶段、Provider、重试次数、当前影片、结果摘要、取消标记、Next 原生设置与同步前快照。
