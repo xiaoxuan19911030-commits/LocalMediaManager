@@ -119,3 +119,12 @@ Acceptance: 发布验证记录或独立验收文档
 - 0.4.1 优先完成 P0 用户状态、标签、评分恢复、演员关系、播放记录与 Tasks 写入基础。
 - 0.4.2 集中处理扫描导入、自动同步和 MetaTube 执行器；0.4.3 完成图片、NFO、文件整理和 MetaTube 真实批量验收。
 - 0.5.0 完成主要媒体管理功能等价；0.5.5 建立 LTS 稳定基线；0.6.0 才开始真实 AI Provider 接入。
+
+## 0.5.0-02 Evidence Note
+
+- Scope: task lifecycle convergence for scan -> rating restore -> automatic sync task enqueue -> Task Center visibility.
+- Bridge: scan API now creates a persistent `Tasks` row only; `LibraryWorkflowService` runs as a hosted database-backed runner.
+- Recovery: interrupted scan tasks in `Preparing` or `Running` are restored to `Retrying`; claiming uses atomic `UPDATE ... RETURNING`.
+- Controls: scan pause/resume/cancel/retry update persistent task state and runner checkpoints read database state.
+- Idempotency: repeated scans reuse existing media rows and do not duplicate rating restore or sync queue entries.
+- Automated: `LibraryWorkflowServiceTests` covers pending claim, restart recovery, pause/resume, cancel, retry, duplicate claim protection, duplicate import protection and sync-task single creation.

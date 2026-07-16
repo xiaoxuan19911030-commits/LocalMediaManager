@@ -2,8 +2,11 @@ using System.Collections.Concurrent;
 using System.IO.Enumeration;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Hosting;
 
 namespace LocalMediaManager.Bridge;
+
+#pragma warning disable CS0162 // Legacy scan control branches are bypassed by persistent Task state handling.
 
 public sealed record LibraryFolderCommand(
     string Path,
@@ -30,7 +33,7 @@ public sealed record ScanLibraryCommand(bool FullScan = false, bool AutoSync = t
 public sealed record ScanLaunchResult(long TaskId, string Status, string Message);
 public sealed record TaskMutationResult(long TaskId, string Status, string Message);
 
-public sealed class LibraryWorkflowService(string databasePath)
+public sealed class LibraryWorkflowService(string databasePath) : BackgroundService
 {
     private static readonly HashSet<string> VideoExtensions = new(StringComparer.OrdinalIgnoreCase) {
         ".mp4", ".mkv", ".avi", ".wmv", ".mov", ".ts", ".m2ts", ".flv", ".webm",
@@ -40,6 +43,26 @@ public sealed class LibraryWorkflowService(string databasePath)
     private readonly ConcurrentDictionary<long, ScanControl> scanControls = new();
     private readonly SemaphoreSlim scanLock = new(1, 1);
     private static string Now() => DateTimeOffset.UtcNow.ToString("O");
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        await RecoverInterruptedScansAsync(stoppingToken);
+        while (!stoppingToken.IsCancellationRequested) {
+            try {
+                long? taskId = await ClaimScanAsync(stoppingToken);
+                if (taskId is null) {
+                    await Task.Delay(750, stoppingToken);
+                    continue;
+                }
+                await RunClaimedScanAsync(taskId.Value, stoppingToken);
+            } catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) {
+                break;
+            } catch (Exception error) {
+                Console.Error.WriteLine($"Library scan runner: {error}");
+                await Task.Delay(1000, stoppingToken);
+            }
+        }
+    }
 
     public async Task<LibraryMutationResult> CreateLibraryAsync(LibraryCommand input)
     {
@@ -109,18 +132,28 @@ public sealed class LibraryWorkflowService(string databasePath)
         if (exists == 0) throw new KeyNotFoundException("媒体库不存在或已停用。");
         string at = Now();
         long taskId = await InsertIdAsync(connection, null, """
-            INSERT INTO Tasks(TaskType,Status,Progress,TotalItems,CompletedItems,PayloadJson,CreatedAt)
-            VALUES('Scan','Pending',0,0,0,$payload,$at);
+            INSERT INTO Tasks(TaskType,Status,Stage,Progress,TotalItems,CompletedItems,PayloadJson,CreatedAt,UpdatedAt)
+            VALUES('Scan','Pending','Pending',0,0,0,$payload,$at,$at);
             SELECT last_insert_rowid();
             """, ("$payload", JsonSerializer.Serialize(new { LibraryId = libraryId, input.FullScan, input.AutoSync })), ("$at", at));
         await LogAsync(connection, null, taskId, "Info", "扫描任务已进入队列。");
-        scanControls[taskId] = new ScanControl();
-        _ = Task.Run(() => ExecuteScanAsync(taskId, libraryId, input));
         return new(taskId, "Pending", "扫描任务已创建，可在任务中心查看进度。");
     }
 
     public async Task<TaskMutationResult> PauseTaskAsync(long taskId)
     {
+        await using var persistentConnection = await OpenAsync();
+        if (await ScalarLongAsync(persistentConnection, null, "SELECT COUNT(*) FROM Tasks WHERE Id=$id AND TaskType='Scan'", ("$id", taskId)) == 0)
+            throw new KeyNotFoundException("任务不存在。");
+        if (scanControls.TryGetValue(taskId, out ScanControl? persistentControl)) persistentControl.Paused = true;
+        await ExecuteAsync(persistentConnection, null, """
+            UPDATE Tasks
+               SET Status='Paused',Stage='Paused',UpdatedAt=$at
+             WHERE Id=$id AND Status IN ('Pending','Retrying','Preparing','Running')
+            """, ("$at", Now()), ("$id", taskId));
+        await LogAsync(persistentConnection, null, taskId, "Info", "任务已暂停。");
+        return new(taskId, "Paused", "任务已暂停。");
+
         if (!scanControls.TryGetValue(taskId, out ScanControl? control))
             throw new InvalidOperationException("该任务不在当前会话中运行，无法暂停。");
         control.Paused = true;
@@ -132,6 +165,18 @@ public sealed class LibraryWorkflowService(string databasePath)
 
     public async Task<TaskMutationResult> ResumeTaskAsync(long taskId)
     {
+        await using var persistentConnection = await OpenAsync();
+        if (await ScalarLongAsync(persistentConnection, null, "SELECT COUNT(*) FROM Tasks WHERE Id=$id AND TaskType='Scan'", ("$id", taskId)) == 0)
+            throw new KeyNotFoundException("任务不存在。");
+        if (scanControls.TryGetValue(taskId, out ScanControl? persistentControl)) persistentControl.Paused = false;
+        await ExecuteAsync(persistentConnection, null, """
+            UPDATE Tasks
+               SET Status='Pending',Stage='Pending',UpdatedAt=$at
+             WHERE Id=$id AND Status='Paused'
+            """, ("$at", Now()), ("$id", taskId));
+        await LogAsync(persistentConnection, null, taskId, "Info", "任务已继续。");
+        return new(taskId, "Pending", "任务已继续。");
+
         if (!scanControls.TryGetValue(taskId, out ScanControl? control))
             throw new InvalidOperationException("该任务不在当前会话中运行，无法继续。");
         control.Paused = false;
@@ -143,6 +188,19 @@ public sealed class LibraryWorkflowService(string databasePath)
 
     public async Task<TaskMutationResult> CancelTaskAsync(long taskId)
     {
+        await using var persistentConnection = await OpenAsync();
+        string? persistentStatus = await ScalarTextAsync(persistentConnection, null, "SELECT Status FROM Tasks WHERE Id=$id AND TaskType='Scan'", ("$id", taskId));
+        if (persistentStatus is null) throw new KeyNotFoundException("任务不存在。");
+        if (persistentStatus is "Completed" or "Failed" or "Cancelled") throw new InvalidOperationException("该任务已经结束。");
+        if (scanControls.TryGetValue(taskId, out ScanControl? persistentControl)) persistentControl.Cancellation.Cancel();
+        await ExecuteAsync(persistentConnection, null, """
+            UPDATE Tasks
+               SET Status='Cancelled',Stage='Cancelled',CancellationRequested=1,CompletedAt=$at,UpdatedAt=$at
+             WHERE Id=$id
+            """, ("$at", Now()), ("$id", taskId));
+        await LogAsync(persistentConnection, null, taskId, "Warning", "任务已由用户取消。");
+        return new(taskId, "Cancelled", "任务已取消；已经提交的单项导入不会回滚。");
+
         await using var connection = await OpenAsync();
         string? status = await ScalarTextAsync(connection, null, "SELECT Status FROM Tasks WHERE Id=$id", ("$id", taskId));
         if (status is null) throw new KeyNotFoundException("任务不存在。");
@@ -166,11 +224,106 @@ public sealed class LibraryWorkflowService(string databasePath)
         string payload = reader.IsDBNull(2) ? "" : reader.GetString(2);
         if (type != "Scan") throw new InvalidOperationException("当前仅扫描任务支持重试。");
         if (status is not ("Failed" or "Cancelled")) throw new InvalidOperationException("只有失败或已取消的任务可以重试。");
-        using var json = JsonDocument.Parse(payload);
+        _ = payload;
+        await ExecuteAsync(connection, null, """
+            UPDATE Tasks
+               SET Status='Retrying',Stage='Retrying',Progress=0,CompletedItems=0,ErrorMessage=NULL,
+                   CompletedAt=NULL,CancellationRequested=0,RetryCount=RetryCount+1,UpdatedAt=$at
+             WHERE Id=$id
+            """, ("$at", Now()), ("$id", taskId));
+        await LogAsync(connection, null, taskId, "Info", "扫描任务已进入重试队列。");
+        return new(taskId, "Retrying", "扫描任务已进入重试队列。");
+    }
+
+    public async Task<bool> RunQueuedScanForTestsAsync(long taskId, CancellationToken cancellationToken = default)
+    {
+        if (!await ClaimSpecificScanAsync(taskId, cancellationToken)) return false;
+        await RunClaimedScanAsync(taskId, cancellationToken);
+        return true;
+    }
+
+    public Task RecoverInterruptedScansForTestsAsync(CancellationToken cancellationToken = default) =>
+        RecoverInterruptedScansAsync(cancellationToken);
+
+    private async Task RunClaimedScanAsync(long taskId, CancellationToken cancellationToken)
+    {
+        ScanTaskPayload payload = await ReadScanTaskPayloadAsync(taskId, cancellationToken);
+        scanControls[taskId] = new ScanControl();
+        using CancellationTokenRegistration registration = cancellationToken.Register(() => {
+            if (scanControls.TryGetValue(taskId, out ScanControl? control)) control.Cancellation.Cancel();
+        });
+        await ExecuteScanAsync(taskId, payload.LibraryId, new(payload.FullScan, payload.AutoSync));
+    }
+
+    private async Task RecoverInterruptedScansAsync(CancellationToken token)
+    {
+        await using var connection = await OpenAsync();
+        var recovered = new List<long>();
+        await using (var command = connection.CreateCommand()) {
+            command.CommandText = "SELECT Id FROM Tasks WHERE TaskType='Scan' AND Status IN ('Preparing','Running')";
+            await using var reader = await command.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token)) recovered.Add(reader.GetInt64(0));
+        }
+        await ExecuteAsync(connection, null, """
+            UPDATE Tasks
+               SET Status='Retrying',Stage='Retrying',RetryCount=RetryCount+1,
+                   ErrorMessage='上次扫描异常中断，已恢复到可重试队列。',UpdatedAt=$at
+             WHERE TaskType='Scan' AND Status IN ('Preparing','Running')
+            """, ("$at", Now()));
+        foreach (long id in recovered)
+            await LogAsync(connection, null, id, "Warning", "上次扫描异常中断，任务已恢复到可重试队列。");
+    }
+
+    private async Task<long?> ClaimScanAsync(CancellationToken token)
+    {
+        await using var connection = await OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE Tasks
+               SET Status='Preparing',Stage='Preparing',StartedAt=COALESCE(StartedAt,$at),
+                   UpdatedAt=$at,CancellationRequested=0
+             WHERE Id=(
+                SELECT Id FROM Tasks
+                 WHERE TaskType='Scan' AND Status IN ('Pending','Retrying')
+                 ORDER BY Id
+                 LIMIT 1
+             )
+             RETURNING Id
+            """;
+        command.Parameters.AddWithValue("$at", Now());
+        object? result = await command.ExecuteScalarAsync(token);
+        return result is null or DBNull ? null : Convert.ToInt64(result);
+    }
+
+    private async Task<bool> ClaimSpecificScanAsync(long taskId, CancellationToken token)
+    {
+        await using var connection = await OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE Tasks
+               SET Status='Preparing',Stage='Preparing',StartedAt=COALESCE(StartedAt,$at),
+                   UpdatedAt=$at,CancellationRequested=0
+             WHERE Id=$id AND TaskType='Scan' AND Status IN ('Pending','Retrying')
+             RETURNING Id
+            """;
+        command.Parameters.AddWithValue("$at", Now());
+        command.Parameters.AddWithValue("$id", taskId);
+        object? result = await command.ExecuteScalarAsync(token);
+        return result is not null and not DBNull;
+    }
+
+    private async Task<ScanTaskPayload> ReadScanTaskPayloadAsync(long taskId, CancellationToken token)
+    {
+        await using var connection = await OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT PayloadJson FROM Tasks WHERE Id=$id AND TaskType='Scan'";
+        command.Parameters.AddWithValue("$id", taskId);
+        string payload = Convert.ToString(await command.ExecuteScalarAsync(token)) ?? "{}";
+        using JsonDocument json = JsonDocument.Parse(payload);
         long libraryId = json.RootElement.GetProperty("LibraryId").GetInt64();
-        bool fullScan = json.RootElement.TryGetProperty("FullScan", out var full) && full.GetBoolean();
-        bool autoSync = !json.RootElement.TryGetProperty("AutoSync", out var sync) || sync.GetBoolean();
-        return await StartScanAsync(libraryId, new(fullScan, autoSync));
+        bool fullScan = json.RootElement.TryGetProperty("FullScan", out JsonElement full) && full.GetBoolean();
+        bool autoSync = !json.RootElement.TryGetProperty("AutoSync", out JsonElement sync) || sync.GetBoolean();
+        return new(libraryId, fullScan, autoSync);
     }
 
     private async Task ExecuteScanAsync(long taskId, long libraryId, ScanLibraryCommand input)
@@ -182,7 +335,7 @@ public sealed class LibraryWorkflowService(string databasePath)
             lockAcquired = true;
             await using var connection = await OpenAsync();
             await ExecuteAsync(connection, null,
-                "UPDATE Tasks SET Status='Running',StartedAt=$at WHERE Id=$id", ("$at", Now()), ("$id", taskId));
+                "UPDATE Tasks SET Status='Running',Stage='Running',StartedAt=COALESCE(StartedAt,$at),UpdatedAt=$at WHERE Id=$id", ("$at", Now()), ("$id", taskId));
             await LogAsync(connection, null, taskId, "Info", input.FullScan ? "开始全量扫描。" : "开始增量扫描。");
 
             IReadOnlyList<ScanFolder> folders = await ReadScanFoldersAsync(connection, libraryId);
@@ -191,7 +344,7 @@ public sealed class LibraryWorkflowService(string databasePath)
             var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var folderErrors = new List<string>();
             foreach (ScanFolder folder in folders) {
-                await WaitIfPausedAsync(control);
+                await WaitIfPausedAsync(taskId, control);
                 control.Cancellation.Token.ThrowIfCancellationRequested();
                 if (!Directory.Exists(folder.Path)) {
                     string error = $"来源文件夹不存在：{folder.Path}";
@@ -222,7 +375,7 @@ public sealed class LibraryWorkflowService(string databasePath)
                 ("$total", candidates.Count), ("$id", taskId));
             int imported = 0, skipped = 0, restored = 0, failed = 0, completed = 0;
             foreach (string path in candidates) {
-                await WaitIfPausedAsync(control);
+                await WaitIfPausedAsync(taskId, control);
                 control.Cancellation.Token.ThrowIfCancellationRequested();
                 try {
                     ImportOutcome outcome = await ImportFileAsync(connection, libraryId, path, input.AutoSync);
@@ -236,8 +389,8 @@ public sealed class LibraryWorkflowService(string databasePath)
                 completed++;
                 double progress = candidates.Count == 0 ? 100 : completed * 100d / candidates.Count;
                 await ExecuteAsync(connection, null,
-                    "UPDATE Tasks SET Progress=$progress,CompletedItems=$completed WHERE Id=$id",
-                    ("$progress", progress), ("$completed", completed), ("$id", taskId));
+                    "UPDATE Tasks SET Progress=$progress,CompletedItems=$completed,UpdatedAt=$at WHERE Id=$id",
+                    ("$progress", progress), ("$completed", completed), ("$at", Now()), ("$id", taskId));
             }
 
             int missing = 0;
@@ -252,8 +405,8 @@ public sealed class LibraryWorkflowService(string databasePath)
             string status = failed > 0 || folderErrors.Count > 0 ? "Failed" : "Completed";
             string? errorMessage = status == "Failed" ? $"{failed + folderErrors.Count} 项失败；其余项目已安全完成。" : null;
             await ExecuteAsync(connection, null, """
-                UPDATE Tasks SET Status=$status,Progress=100,CompletedItems=$completed,ResultJson=$result,
-                                 ErrorMessage=$error,CompletedAt=$at WHERE Id=$id
+                UPDATE Tasks SET Status=$status,Stage=$status,Progress=100,CompletedItems=$completed,ResultJson=$result,
+                                 ErrorMessage=$error,CompletedAt=$at,UpdatedAt=$at WHERE Id=$id
                 """, ("$status", status), ("$completed", completed), ("$result", result),
                 ("$error", errorMessage), ("$at", finished), ("$id", taskId));
             await LogAsync(connection, null, taskId, status == "Completed" ? "Info" : "Warning",
@@ -261,13 +414,13 @@ public sealed class LibraryWorkflowService(string databasePath)
         } catch (OperationCanceledException) {
             try {
                 await using var connection = await OpenAsync();
-                await ExecuteAsync(connection, null, "UPDATE Tasks SET Status='Cancelled',CompletedAt=COALESCE(CompletedAt,$at) WHERE Id=$id",
+                await ExecuteAsync(connection, null, "UPDATE Tasks SET Status='Cancelled',Stage='Cancelled',CompletedAt=COALESCE(CompletedAt,$at),UpdatedAt=$at WHERE Id=$id",
                     ("$at", Now()), ("$id", taskId));
             } catch (Exception persistenceError) { Console.Error.WriteLine($"Could not persist cancellation for task {taskId}: {persistenceError}"); }
         } catch (Exception error) {
             try {
                 await using var connection = await OpenAsync();
-                await ExecuteAsync(connection, null, "UPDATE Tasks SET Status='Failed',ErrorMessage=$error,CompletedAt=$at WHERE Id=$id",
+                await ExecuteAsync(connection, null, "UPDATE Tasks SET Status='Failed',Stage='Failed',ErrorMessage=$error,CompletedAt=$at,UpdatedAt=$at WHERE Id=$id",
                     ("$error", error.Message), ("$at", Now()), ("$id", taskId));
                 await LogAsync(connection, null, taskId, "Error", error.Message);
             } catch (Exception persistenceError) {
@@ -280,10 +433,14 @@ public sealed class LibraryWorkflowService(string databasePath)
         }
     }
 
-    private static async Task WaitIfPausedAsync(ScanControl control)
+    private async Task WaitIfPausedAsync(long taskId, ScanControl control)
     {
-        while (control.Paused) {
+        while (true) {
             control.Cancellation.Token.ThrowIfCancellationRequested();
+            await using var connection = await OpenAsync();
+            string? status = await ScalarTextAsync(connection, null, "SELECT Status FROM Tasks WHERE Id=$id", ("$id", taskId));
+            if (status == "Cancelled") throw new OperationCanceledException(control.Cancellation.Token);
+            if (status != "Paused" && !control.Paused) return;
             await Task.Delay(100, control.Cancellation.Token);
         }
     }
@@ -569,6 +726,7 @@ public sealed class LibraryWorkflowService(string databasePath)
 
     private sealed record PreviewGrant(string Operation, long EntityId, DateTimeOffset ExpiresAt);
     private sealed record ScanFolder(long Id, string Path, bool IncludeSubfolders, IReadOnlyList<string> ExcludePatterns);
+    private sealed record ScanTaskPayload(long LibraryId, bool FullScan, bool AutoSync);
     private sealed record ImportOutcome(bool Imported, bool RatingRestored);
     private sealed class ScanControl
     {

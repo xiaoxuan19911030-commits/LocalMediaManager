@@ -25,6 +25,7 @@ builder.Services.AddSingleton(new ProductWriter(databasePath));
 builder.Services.AddSingleton(new PlaybackSettingsService(databasePath, configDatabasePath));
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton(new LibraryWorkflowService(databasePath));
+builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<LibraryWorkflowService>());
 builder.Services.AddSingleton(new MetadataProviderSettingsService(databasePath));
 builder.Services.AddSingleton(new MetadataWriteService(databasePath));
 builder.Services.AddSingleton(new TaskLogService(databasePath));
