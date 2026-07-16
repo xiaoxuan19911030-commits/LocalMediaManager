@@ -50,6 +50,8 @@ The legacy WPF project is a compatibility and business-rule reference only. Its 
 
 ## Documentation
 
+- [Development rules for every contributor and AI](AI_RULES.md)
+- [Project context and decisions](PROJECT_CONTEXT.md)
 - [Product vision](docs/PRODUCT_VISION.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Architecture](docs/ARCHITECTURE.md)

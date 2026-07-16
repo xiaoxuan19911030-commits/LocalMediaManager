@@ -11,7 +11,7 @@ Thank you for helping improve LMM. Please discuss large product or schema change
 5. Dangerous writes require preview, confirmation, audit/backup and a rollback strategy.
 6. New UI reuses the shared Material UI theme and supports light and dark themes.
 
-Read `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/UI_DESIGN_SPEC.md` and `docs/TEST_PLAN.md` before making product changes.
+Read `AI_RULES.md`, `AGENTS.md`, `PROJECT_CONTEXT.md`, `docs/ARCHITECTURE.md`, `docs/UI_DESIGN_SPEC.md` and `docs/TEST_PLAN.md` before making product changes. These rules apply equally to human contributors, AI agents, accounts, models and API providers.
 
 ## Local verification
 

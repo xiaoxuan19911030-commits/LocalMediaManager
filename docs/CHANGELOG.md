@@ -6,6 +6,7 @@
 
 ### Planning
 
+- 新增统一的 `AI_RULES.md` 与 `PROJECT_CONTEXT.md`：任何开发者、AI、账号、模型或 API Provider 都遵守同一架构、UI、数据安全、测试和发布规则，并可读取长期产品决策。
 - 正式建立 Sprint 0.4.3 `Media Assets & File Organization` 计划，覆盖图片、NFO、文件整理、MetaTube 真实烟测、Bridge Release 生命周期和限定交互修复。
 - GitHub `main` 增加稳定发布门槛：中间 Sprint 提交保留在本地分支，完成 Self Test、Smoke Test、Freeze 和 Release 后才允许推送。
 - 2026-07-16 对本地 MetaTube `v1.4.0-c0e053f` 完成只读搜索、详情和主图协议预检；30–50 部真实写入烟测仍是 0.4.3 发布门槛。

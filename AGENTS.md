@@ -2,13 +2,15 @@
 
 Before planning or implementing product work, read:
 
-1. `docs/PRODUCT_VISION.md`
-2. `docs/ROADMAP.md`
-3. `docs/TODO.md`
-4. `docs/ARCHITECTURE.md`
-5. `docs/UI_DESIGN_SPEC.md`
-6. `docs/TEST_PLAN.md`
-7. `docs/migration/FEATURE_PARITY_MATRIX.md` when legacy behavior is involved
+1. `AI_RULES.md`
+2. `PROJECT_CONTEXT.md`
+3. `docs/PRODUCT_VISION.md`
+4. `docs/ROADMAP.md`
+5. `docs/TODO.md`
+6. `docs/ARCHITECTURE.md`
+7. `docs/UI_DESIGN_SPEC.md`
+8. `docs/TEST_PLAN.md`
+9. `docs/migration/FEATURE_PARITY_MATRIX.md` when legacy behavior is involved
 
 ## Scope authority
 
