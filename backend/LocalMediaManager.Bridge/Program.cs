@@ -3,7 +3,8 @@ using System.Text.Json;
 using LocalMediaManager.Bridge;
 using Microsoft.Data.Sqlite;
 
-const string bridgeUrl = "http://127.0.0.1:47831";
+string bridgeUrl = Environment.GetEnvironmentVariable("LMM_BRIDGE_URL")
+    ?? "http://127.0.0.1:47831";
 string installedRoot = Environment.GetEnvironmentVariable("LMM_LEGACY_ROOT")
     ?? @"D:\Jvedio\Jvedio5.0";
 string databasePath = Environment.GetEnvironmentVariable("LMM_DATABASE_PATH")

@@ -52,7 +52,16 @@ public sealed class NfoService(string databasePath)
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(movie.PrimaryFile)) return (null, false);
-        string path = Path.ChangeExtension(movie.PrimaryFile, ".nfo");
+        NfoSettingsDto settings = await ReadSettingsAsync(cancellationToken);
+        string path;
+        if (string.IsNullOrWhiteSpace(settings.OutputDirectory)) {
+            path = Path.ChangeExtension(movie.PrimaryFile, ".nfo");
+        } else {
+            Directory.CreateDirectory(settings.OutputDirectory);
+            string fileName = string.Concat((string.IsNullOrWhiteSpace(movie.Code) ? $"movie-{movie.Id}" : movie.Code)
+                .Select(character => Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
+            path = Path.Combine(settings.OutputDirectory, fileName + ".nfo");
+        }
         NfoData data = new(metadata.Code, metadata.Title ?? movie.Title, metadata.Title,
             metadata.Description, null, metadata.ReleaseDate,
             metadata.DurationSeconds is > 0 ? metadata.DurationSeconds / 60 : null,

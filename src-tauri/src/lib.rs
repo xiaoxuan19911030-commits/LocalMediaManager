@@ -1,6 +1,9 @@
-use std::{path::PathBuf, process::{Child, Command}, sync::Mutex};
+use std::{fs::{self, OpenOptions}, net::{SocketAddr, TcpStream}, path::{Path, PathBuf}, process::{Child, Command, Stdio}, sync::Mutex, time::Duration};
 use tauri::{Manager, RunEvent};
 use uuid::Uuid;
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 struct BridgeProcess(Mutex<Option<Child>>);
 struct BridgeSessionToken(String);
@@ -50,20 +53,48 @@ fn migration_candidates(app: &tauri::App) -> Vec<PathBuf> {
     candidates
 }
 
+fn configure_release_process(command: &mut Command, log_path: &Path) -> std::io::Result<()> {
+    if cfg!(debug_assertions) { return Ok(()); }
+    if let Some(parent) = log_path.parent() { fs::create_dir_all(parent)?; }
+    let output = OpenOptions::new().create(true).append(true).open(log_path)?;
+    command.stdout(Stdio::from(output.try_clone()?)).stderr(Stdio::from(output));
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
+    Ok(())
+}
+
+fn bridge_port_is_in_use() -> bool {
+    let address = SocketAddr::from(([127, 0, 0, 1], 47831));
+    TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![bridge_session_token])
         .setup(|app| {
             let token = Uuid::new_v4().simple().to_string();
+            if bridge_port_is_in_use() {
+                return Err("Local Media Manager 或 Bridge 已在运行，请先关闭现有实例。".into());
+            }
+            let log_dir = app.path().app_log_dir()?;
             if let Some(path) = migration_candidates(app).into_iter().find(|path| path.is_file()) {
-                let status = Command::new(path).args(["upgrade", "--confirm"]).status()?;
+                let mut command = Command::new(path);
+                command.args(["upgrade", "--confirm"]);
+                configure_release_process(&mut command, &log_dir.join("migration.log"))?;
+                let status = command.status()?;
                 if !status.success() { return Err(format!("database upgrade failed with {status}").into()); }
             }
             let child = bridge_candidates(app)
                 .into_iter()
                 .find(|path| path.is_file())
-                .and_then(|path| Command::new(path).env("LMM_BRIDGE_TOKEN", &token).spawn().ok());
+                .and_then(|path| {
+                    let mut command = Command::new(path);
+                    command.env("LMM_BRIDGE_TOKEN", &token);
+                    configure_release_process(&mut command, &log_dir.join("bridge.log")).ok()?;
+                    command.spawn().ok()
+                });
+            if child.is_none() { return Err("Bridge 启动失败，请查看日志目录中的 bridge.log。".into()); }
             app.manage(BridgeSessionToken(token));
             app.manage(BridgeProcess(Mutex::new(child)));
             Ok(())
@@ -77,6 +108,7 @@ pub fn run() {
                 if let Ok(mut child) = process.0.lock() {
                     if let Some(mut running) = child.take() {
                         let _ = running.kill();
+                        let _ = running.wait();
                     }
                 }
             }

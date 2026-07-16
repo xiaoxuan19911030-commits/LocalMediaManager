@@ -44,6 +44,22 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task MetaTubeSearchNotFoundIsReportedAsEmptyResultWithoutRetries()
+    {
+        int requests = 0;
+        var provider = new MetaTubeProvider(new FakeHttpClientFactory(_ => {
+            requests++;
+            return new(HttpStatusCode.NotFound) { Content = new StringContent("not found") };
+        }));
+        var settings = new MetaTubeSettingsDto(true, "http://127.0.0.1:8080/", 30, true, false, true, true);
+
+        IReadOnlyList<MetadataSearchResult> results = await provider.SearchAsync("NO-RESULT", settings, CancellationToken.None);
+
+        Assert.Empty(results);
+        Assert.Equal(1, requests);
+    }
+
+    [Fact]
     public async Task MetadataWriteFillsEmptyFieldsAndPreservesManualData()
     {
         await using var connection = await Open();
@@ -74,6 +90,30 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         Assert.Equal(180, read.TimeoutSeconds);
         Assert.True(read.NonDestructive);
         Assert.Equal(saved, read);
+    }
+
+    [Fact]
+    public async Task InterruptedSyncIsRecoveredToRetryingOnExecutorStart()
+    {
+        await using (var connection = await Open()) {
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES(1,'ABP-001','ABP-001',0,0,'pending','Test',$at,$at)", ("$at", at));
+            await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Stage,Provider,Progress,TotalItems,CompletedItems,CreatedAt,UpdatedAt,CurrentMovieId) VALUES(1,'Sync','FetchingMetadata','FetchingMetadata','MetaTube',22,1,0,$at,$at,1)", ("$at", at));
+        }
+        var settings = new MetadataProviderSettingsService(Database);
+        await settings.SaveMetaTubeAsync(new(false, "http://127.0.0.1:8080/", 30, false, false, false, true));
+        var factory = new FakeHttpClientFactory(_ => new(HttpStatusCode.ServiceUnavailable));
+        var executor = new MetadataSyncExecutor(Database, root, settings, new MetaTubeProvider(factory),
+            new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database), new TaskLogService(Database));
+
+        await executor.StartAsync(CancellationToken.None);
+        await Task.Delay(150);
+        await executor.StopAsync(CancellationToken.None);
+
+        await using SqliteConnection verify = await Open();
+        Assert.Equal("Retrying", await Text(verify, "SELECT Status FROM Tasks WHERE Id=1"));
+        Assert.Equal(1, await Scalar(verify, "SELECT RetryCount FROM Tasks WHERE Id=1"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM TaskLogs WHERE TaskId=1 AND Message LIKE '%异常中断%'"));
     }
 
     public Task DisposeAsync() { try { Directory.Delete(root, true); } catch { } return Task.CompletedTask; }

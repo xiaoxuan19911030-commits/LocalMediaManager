@@ -31,7 +31,7 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
     {
         using HttpClient client = CreateClient(settings);
         using JsonDocument document = await GetJsonAsync(client,
-            new Uri(new Uri(settings.BaseUrl), $"v1/movies/search?q={Uri.EscapeDataString(NormalizeCode(code))}&fallback=True"), cancellationToken);
+            new Uri(new Uri(settings.BaseUrl), $"v1/movies/search?q={Uri.EscapeDataString(NormalizeCode(code))}&fallback=True"), cancellationToken, notFoundAsEmpty: true);
         if (!document.RootElement.TryGetProperty("data", out JsonElement data) || data.ValueKind != JsonValueKind.Array)
             return [];
         var results = new List<MetadataSearchResult>();
@@ -107,12 +107,15 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
         return client;
     }
 
-    private static async Task<JsonDocument> GetJsonAsync(HttpClient client, Uri uri, CancellationToken cancellationToken)
+    private static async Task<JsonDocument> GetJsonAsync(HttpClient client, Uri uri, CancellationToken cancellationToken,
+        bool notFoundAsEmpty = false)
     {
         Exception? lastError = null;
         for (int attempt = 0; attempt < 3; attempt++) {
             try {
                 using HttpResponseMessage response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                if (notFoundAsEmpty && response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                    return JsonDocument.Parse("{\"data\":[]}");
                 if (!response.IsSuccessStatusCode)
                     throw new HttpRequestException($"MetaTube 请求失败：HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
                 await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -123,7 +126,7 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
                 if (attempt < 2) await Task.Delay(attempt == 0 ? 500 : 1700, cancellationToken);
             }
         }
-        throw new HttpRequestException("MetaTube 连续请求 3 次均失败。", lastError);
+        throw new HttpRequestException($"MetaTube 连续请求 3 次均失败。最后错误：{lastError?.Message ?? "未知错误"}", lastError);
     }
 
     private static bool HasUsefulMetadata(ProviderMetadata value) =>

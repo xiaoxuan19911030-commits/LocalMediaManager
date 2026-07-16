@@ -112,6 +112,43 @@ public sealed class NfoWorkflowTests : IAsyncLifetime
         Assert.Equal(0, await Scalar(verify, "SELECT COUNT(*) FROM NfoDocuments"));
     }
 
+    [Fact]
+    public async Task AutomaticProviderWriteUsesConfiguredOutputDirectory()
+    {
+        string output = Path.Combine(root, "isolated-nfo");
+        var service = new NfoService(Database);
+        await service.SaveSettingsAsync(new("SkipExisting", output, true, true));
+        var movie = new SyncMovie(1, "SPECIAL-001", "标题", null, null, 0, Video, null);
+        var metadata = new ProviderMetadata("MetaTube", "provider-id", "SPECIAL-001", "Provider title", null,
+            null, null, null, null, null, null, null, [], [], []);
+
+        (string? path, bool created) = await service.WriteAsync(movie, metadata, CancellationToken.None);
+
+        Assert.True(created);
+        Assert.Equal(Path.Combine(output, "SPECIAL-001.nfo"), path);
+        Assert.True(File.Exists(path));
+        Assert.False(File.Exists(Path.ChangeExtension(Video, ".nfo")));
+    }
+
+    [Fact]
+    public async Task AutomaticWriteFailureLeavesNoDocumentOrTemporaryFile()
+    {
+        string blockedOutput = Path.Combine(root, "blocked-output");
+        await File.WriteAllTextAsync(blockedOutput, "this path is a file");
+        var service = new NfoService(Database);
+        await service.SaveSettingsAsync(new("SkipExisting", blockedOutput, true, true));
+        var movie = new SyncMovie(1, "SPECIAL-001", "标题", null, null, 0, Video, null);
+        var metadata = new ProviderMetadata("MetaTube", "provider-id", "SPECIAL-001", "Provider title", null,
+            null, null, null, null, null, null, null, [], [], []);
+
+        await Assert.ThrowsAnyAsync<IOException>(() => service.WriteAsync(movie, metadata, CancellationToken.None));
+
+        await using SqliteConnection verify = await Open();
+        Assert.Equal(0, await Scalar(verify, "SELECT COUNT(*) FROM NfoDocuments"));
+        Assert.Empty(Directory.EnumerateFiles(root, "*.lmm-write", SearchOption.AllDirectories));
+        Assert.Equal("this path is a file", await File.ReadAllTextAsync(blockedOutput));
+    }
+
     public Task DisposeAsync() { try { Directory.Delete(root, true); } catch { } return Task.CompletedTask; }
     private async Task<SqliteConnection> Open() { var connection = new SqliteConnection($"Data Source={Database}"); await connection.OpenAsync(); return connection; }
     private static async Task Execute(SqliteConnection connection, string sql, params (string, object?)[] values) { await using var command=connection.CreateCommand();command.CommandText=sql;foreach((string name,object? value) in values)command.Parameters.AddWithValue(name,value??DBNull.Value);await command.ExecuteNonQueryAsync(); }

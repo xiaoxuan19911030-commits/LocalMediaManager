@@ -49,6 +49,7 @@ export default function MovieDetailPage() {
   const [movie, setMovie] = useState<MovieDetail>(); const [error, setError] = useState(''); const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false); const [tagDialog, setTagDialog] = useState(false); const [actorDialog, setActorDialog] = useState(false)
   const [tagOptions, setTagOptions] = useState<NamedItem[]>([]); const [selectedTags, setSelectedTags] = useState<NamedItem[]>([])
+  const [tagSearch, setTagSearch] = useState('')
   const [actorOptions, setActorOptions] = useState<NamedItem[]>([]); const [selectedActors, setSelectedActors] = useState<NamedItem[]>([]); const [actorSearch, setActorSearch] = useState('')
   const [imageAssets, setImageAssets] = useState<ImageAsset[]>([]); const [posterFailed, setPosterFailed] = useState(false)
   const [neighbors, setNeighbors] = useState<{ previousId?: number; nextId?: number }>({})
@@ -62,7 +63,7 @@ export default function MovieDetailPage() {
   useEffect(() => { if (!actorDialog) return; const timer = window.setTimeout(() => bridge.entities('actors', actorSearch, 'name', 48, 0).then((result) => setActorOptions([...selectedActors, ...result.items.filter((item) => !selectedActors.some((selected) => selected.id === item.id))])).catch((reason: Error) => setNotice(reason.message)), 200); return () => window.clearTimeout(timer) }, [actorDialog, actorSearch, selectedActors])
   const play = () => movie && bridge.play(movie.id).then(() => setNotice(`正在打开：${movie.code || movie.title}`)).catch((reason: Error) => setNotice(reason.message))
   const mutate = (action: Promise<unknown>) => { if (!movie) return; setBusy(true); action.then(() => loadMovie(movie.id)).then(() => setNotice('已保存')).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false)) }
-  const openTags = () => { if (!movie) return; setSelectedTags(movie.tags); setTagDialog(true); bridge.entities('tags', '', 'name', 96, 0).then((result) => setTagOptions(result.items)).catch((reason: Error) => setNotice(reason.message)) }
+  const openTags = () => { if (!movie) return; setSelectedTags(movie.tags); setTagSearch(''); setTagDialog(true); bridge.entities('tags', '', 'name', 96, 0).then((result) => setTagOptions(result.items)).catch((reason: Error) => setNotice(reason.message)) }
   const saveTags = () => { if (!movie) return; const current = new Set(movie.tags.map((item) => item.id)); const selected = new Set(selectedTags.map((item) => item.id)); mutate(bridge.updateMovieTags(movie.id, [...selected].filter((tag) => !current.has(tag)), [...current].filter((tag) => !selected.has(tag)))); setTagDialog(false) }
   const openActors = () => { if (!movie) return; setSelectedActors(movie.actors); setActorOptions(movie.actors); setActorDialog(true) }
   const saveActors = () => { if (!movie) return; mutate(bridge.setMovieActors(movie.id, selectedActors.map((item) => item.id))); setActorDialog(false) }
@@ -150,13 +151,14 @@ export default function MovieDetailPage() {
         <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 750 }}>已选标签</Typography>
         <Paper variant="outlined" sx={{ minHeight: 64, mt: .5, p: 1.25, borderRadius: 2.5 }}>
           <Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap' }}>
-            {selectedTags.length ? selectedTags.map((tag) => <Chip key={tag.id} label={tag.name} color="primary" onDelete={() => setSelectedTags((value) => value.filter((item) => item.id !== tag.id))}/>) : <Typography variant="body2" color="text.disabled">尚未选择标签</Typography>}
+            {selectedTags.length ? selectedTags.map((tag) => <Chip key={tag.id} label={tag.name} color="primary" clickable onClick={() => setSelectedTags((value) => value.filter((item) => item.id !== tag.id))} onDelete={() => setSelectedTags((value) => value.filter((item) => item.id !== tag.id))}/>) : <Typography variant="body2" color="text.disabled">尚未选择标签</Typography>}
           </Stack>
         </Paper>
         <Typography variant="overline" color="text.secondary" sx={{ display: 'block', fontWeight: 750, mt: 2 }}>标签池</Typography>
+        <TextField size="small" fullWidth value={tagSearch} onChange={(event) => setTagSearch(event.target.value)} placeholder="搜索标签" sx={{ mt: .5 }}/>
         <Paper variant="outlined" sx={{ minHeight: 110, maxHeight: 260, overflowY: 'auto', mt: .5, p: 1.25, borderRadius: 2.5 }}>
           <Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap' }}>
-            {tagOptions.filter((tag) => !selectedTags.some((selected) => selected.id === tag.id)).map((tag) => <Chip key={tag.id} label={tag.name} variant="outlined" clickable onClick={() => setSelectedTags((value) => [...value, tag])}/>)}
+            {tagOptions.filter((tag) => !selectedTags.some((selected) => selected.id === tag.id) && tag.name.toLocaleLowerCase().includes(tagSearch.trim().toLocaleLowerCase())).map((tag) => <Chip key={tag.id} label={tag.name} variant="outlined" clickable onClick={() => setSelectedTags((value) => [...value, tag])}/>)}
           </Stack>
         </Paper>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>点击标签池添加；点击已选标签上的 × 移除。用户手工标签不会被同步覆盖。</Typography>
