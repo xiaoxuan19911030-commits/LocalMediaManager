@@ -85,7 +85,7 @@ export default function MovieDetailPage() {
     {!movie && !error ? <Box sx={{ minHeight: 420, display: 'grid', placeItems: 'center' }}><CircularProgress/></Box> : movie && <Stack spacing={2.25} sx={{ animation: 'detailIn .32s ease both', '@media (prefers-reduced-motion: reduce)': { animation: 'none' } }}>
       <Paper variant="outlined" sx={{ position: 'relative', overflow: 'hidden', borderRadius: 3.5, p: { xs: 2, md: 3 } }}>
         <Box sx={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: (theme) => `radial-gradient(circle at 82% 10%, ${alpha(theme.palette.primary.main, .18)}, transparent 42%), linear-gradient(135deg, ${alpha(theme.palette.background.paper, .7)}, ${theme.palette.background.paper})` }}/>
-        <Box sx={{ position: 'relative', display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '210px minmax(0,1fr)', lg: '250px minmax(0,1fr)' }, gap: { xs: 2, md: 3 } }}>
+        <Box sx={{ position: 'relative', display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '230px minmax(0,1fr)', lg: '290px minmax(0,1fr)' }, gap: { xs: 2, md: 3 } }}>
           <Card sx={{ overflow: 'hidden', width: '100%', maxWidth: { xs: 260, sm: 'none' }, mx: { xs: 'auto', sm: 0 }, alignSelf: 'start', boxShadow: (theme) => `0 18px 42px ${alpha(theme.palette.common.black, theme.palette.mode === 'dark' ? .36 : .18)}` }}>
             <Box sx={{ aspectRatio: '2/3', bgcolor: 'action.hover', display: 'grid', placeItems: 'center' }}>
               {movie.coverUrl && !posterFailed ? <Box component="img" src={movie.coverUrl} alt={movie.code || movie.title} onError={() => setPosterFailed(true)} sx={{ width: '100%', height: '100%', objectFit: 'cover' }}/> : <Typography color="text.disabled" sx={{ px: 2, textAlign: 'center' }}>{posterFailed ? '图片损坏或不可用' : '暂无海报'}</Typography>}
@@ -144,7 +144,25 @@ export default function MovieDetailPage() {
       </Box>
       <Stack direction="row" spacing={1.25} sx={{ justifyContent: 'space-between' }}><Button startIcon={<NavigateBeforeRoundedIcon/>} disabled={!neighbors.previousId} onClick={() => go(neighbors.previousId)}>上一部</Button><Button endIcon={<NavigateNextRoundedIcon/>} disabled={!neighbors.nextId} onClick={() => go(neighbors.nextId)}>下一部</Button></Stack>
     </Stack>}
-    <Dialog open={tagDialog} onClose={() => setTagDialog(false)} fullWidth maxWidth="sm"><DialogTitle>编辑影片标签</DialogTitle><DialogContent><Autocomplete multiple options={tagOptions} value={selectedTags} isOptionEqualToValue={(a, b) => a.id === b.id} getOptionLabel={(option) => option.name} onChange={(_, value) => setSelectedTags(value)} renderInput={(params) => <TextField {...params} autoFocus label="标签" margin="normal" helperText="用户手工标签不会被同步覆盖"/>}/></DialogContent><DialogActions><Button onClick={() => setTagDialog(false)}>取消</Button><Button variant="contained" onClick={saveTags}>保存</Button></DialogActions></Dialog>
+    <Dialog open={tagDialog} onClose={() => setTagDialog(false)} fullWidth maxWidth="sm">
+      <DialogTitle>编辑影片标签</DialogTitle>
+      <DialogContent>
+        <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 750 }}>已选标签</Typography>
+        <Paper variant="outlined" sx={{ minHeight: 64, mt: .5, p: 1.25, borderRadius: 2.5 }}>
+          <Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap' }}>
+            {selectedTags.length ? selectedTags.map((tag) => <Chip key={tag.id} label={tag.name} color="primary" onDelete={() => setSelectedTags((value) => value.filter((item) => item.id !== tag.id))}/>) : <Typography variant="body2" color="text.disabled">尚未选择标签</Typography>}
+          </Stack>
+        </Paper>
+        <Typography variant="overline" color="text.secondary" sx={{ display: 'block', fontWeight: 750, mt: 2 }}>标签池</Typography>
+        <Paper variant="outlined" sx={{ minHeight: 110, maxHeight: 260, overflowY: 'auto', mt: .5, p: 1.25, borderRadius: 2.5 }}>
+          <Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap' }}>
+            {tagOptions.filter((tag) => !selectedTags.some((selected) => selected.id === tag.id)).map((tag) => <Chip key={tag.id} label={tag.name} variant="outlined" clickable onClick={() => setSelectedTags((value) => [...value, tag])}/>)}
+          </Stack>
+        </Paper>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>点击标签池添加；点击已选标签上的 × 移除。用户手工标签不会被同步覆盖。</Typography>
+      </DialogContent>
+      <DialogActions><Button onClick={() => setTagDialog(false)}>取消</Button><Button variant="contained" onClick={saveTags}>保存</Button></DialogActions>
+    </Dialog>
     <Dialog open={actorDialog} onClose={() => setActorDialog(false)} fullWidth maxWidth="sm"><DialogTitle>编辑演员关系</DialogTitle><DialogContent><Autocomplete multiple filterOptions={(options) => options} options={actorOptions} value={selectedActors} isOptionEqualToValue={(a, b) => a.id === b.id} getOptionLabel={(option) => option.name} onInputChange={(_, value) => setActorSearch(value)} onChange={(_, value) => setSelectedActors(value)} renderInput={(params) => <TextField {...params} autoFocus label="搜索并选择演员" margin="normal"/>}/></DialogContent><DialogActions><Button onClick={() => setActorDialog(false)}>取消</Button><Button variant="contained" onClick={saveActors}>保存</Button></DialogActions></Dialog>
     <Dialog open={Boolean(deletePreview)} onClose={() => setDeletePreview(undefined)} maxWidth="sm" fullWidth><DialogTitle>从资料库移除影片？</DialogTitle><DialogContent><DialogContentText>将移除“{deletePreview?.code}”的数据库记录，但不会删除媒体文件。{deletePreview?.ratingWillBeRemembered ? '当前评分会按文件名记忆，重新导入同名文件时可恢复。' : '当前没有需要记忆的评分。'}</DialogContentText><Alert severity="warning" sx={{ mt: 2 }}>{deletePreview?.warnings.join(' ')}</Alert></DialogContent><DialogActions><Button onClick={() => setDeletePreview(undefined)}>取消</Button><Button variant="contained" color="error" onClick={confirmDelete}>确认移除记录</Button></DialogActions></Dialog>
     <Dialog open={Boolean(nfoPreview)} onClose={() => setNfoPreview(undefined)} maxWidth="sm" fullWidth><DialogTitle>{nfoMode === 'import' ? '导入 NFO 预览' : '导出 NFO 预览'}</DialogTitle><DialogContent><DialogContentText sx={{ overflowWrap: 'anywhere' }}>{nfoPreview?.path}</DialogContentText>{nfoPreview?.changes.length ? <Alert severity="info" sx={{ mt: 2 }}>将处理：{nfoPreview.changes.join('、')}</Alert> : null}{nfoPreview?.conflicts.length ? <Alert severity="warning" sx={{ mt: 1 }}>冲突字段保持原值：{nfoPreview.conflicts.join('、')}</Alert> : null}{nfoPreview?.warnings.map((warning) => <Alert key={warning} severity="warning" sx={{ mt: 1 }}>{warning}</Alert>)}</DialogContent><DialogActions><Button onClick={() => setNfoPreview(undefined)}>取消</Button>{nfoMode === 'export' && nfoPreview && !nfoPreview.canApply && <Button variant="outlined" onClick={() => confirmNfo(true)}>另存为 .lmm.nfo</Button>}<Button variant="contained" disabled={busy || Boolean(nfoPreview && !nfoPreview.canApply)} onClick={() => confirmNfo()}>{nfoMode === 'import' ? '确认导入' : '确认导出'}</Button></DialogActions></Dialog>

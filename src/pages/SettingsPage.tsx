@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/PageHeader'
 import { SettingsItem, SettingsLayout, SettingsSaveBar, SettingsSection, SettingsStatusBanner, settingsCategories } from '@/components/settings/SettingsComponents'
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
-import type { MetaTubeSettings, NfoSettings, SettingsSnapshot } from '@/types/settings'
+import type { MetaTubeSettings, NfoSettings, PlaybackSettings, SettingsSnapshot } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 import { BrandMark } from '@/components/BrandMark'
 
@@ -27,14 +27,16 @@ export default function SettingsPage() {
   const [providerBusy, setProviderBusy] = useState(false)
   const [metaTube, setMetaTube] = useState<MetaTubeSettings>()
   const [nfoSettings, setNfoSettings] = useState<NfoSettings>()
+  const [playbackSettings, setPlaybackSettings] = useState<PlaybackSettings>()
   const [cachePreview, setCachePreview] = useState<ImageCachePreview>(); const [cacheBusy, setCacheBusy] = useState(false)
   const { mode, setMode } = useColorMode()
-  useEffect(() => { Promise.all([bridge.settings(), bridge.nfoSettings()]).then(([value, nfo]) => { setSnapshot(value); setMetaTube(value.metaTube); setNfoSettings(nfo) }).catch((reason: Error) => setError(reason.message)) }, [])
+  useEffect(() => { Promise.all([bridge.settings(), bridge.nfoSettings(), bridge.playbackSettings()]).then(([value, nfo, playback]) => { setSnapshot(value); setMetaTube(value.metaTube); setNfoSettings(nfo); setPlaybackSettings(playback) }).catch((reason: Error) => setError(reason.message)) }, [])
   const title = settingsCategories.find(([key]) => key === category)?.[1] ?? '设置'
   const fields = useMemo(() => snapshot?.fields.filter(field => field.category === category) ?? [], [snapshot, category])
   const mapped = fields.filter(field => field.mapped)
+  const renderedMapped = category === 'playback' ? [] : mapped
   const compatibility = fields.filter(field => !field.mapped)
-  const sections = [...new Set(mapped.map(field => field.section))]
+  const sections = [...new Set(renderedMapped.map(field => field.section))]
 
   return <Box>
     <PageHeader title="设置" description="Local Media Manager 的统一设置中心。" />
@@ -83,6 +85,9 @@ export default function SettingsPage() {
             <Stack direction="row" sx={{ justifyContent: 'flex-end' }}><Button variant="contained" disabled={providerBusy} onClick={() => { setProviderBusy(true); bridge.saveNfoSettings(nfoSettings).then(value => { setNfoSettings(value); setProviderNotice({ severity: 'success', text: 'NFO 设置已保存并立即生效。' }) }).catch((reason: Error) => setProviderNotice({ severity: 'error', text: reason.message })).finally(() => setProviderBusy(false)) }}>保存 NFO 设置</Button></Stack>
           </Stack></Box>
         </SettingsSection>}
+        {category === 'playback' && playbackSettings && <SettingsSection title="播放器" description="播放操作统一通过 Settings Service 读取此配置，不再使用硬编码或页面内路径。">
+          <Box sx={{ p: 2 }}><Stack spacing={1.5}><FormControlLabel control={<Switch checked={playbackSettings.useSystemDefault} onChange={event => setPlaybackSettings({ ...playbackSettings, useSystemDefault: event.target.checked })}/>} label="使用系统默认播放器"/><TextField size="small" disabled={playbackSettings.useSystemDefault} label="播放器 EXE 路径" value={playbackSettings.playerPath} onChange={event => setPlaybackSettings({ ...playbackSettings, playerPath: event.target.value })}/><Stack direction="row" sx={{ justifyContent: 'flex-end' }}><Button variant="contained" disabled={providerBusy} onClick={() => { setProviderBusy(true); bridge.savePlaybackSettings(playbackSettings).then(value => { setPlaybackSettings(value); setProviderNotice({ severity: 'success', text: '播放器设置已保存并立即生效。' }) }).catch((reason: Error) => setProviderNotice({ severity: 'error', text: reason.message })).finally(() => setProviderBusy(false)) }}>保存播放器设置</Button></Stack></Stack></Box>
+        </SettingsSection>}
         {category === 'appearance' && <SettingsSection title="主题预览" description="即时预览只修改当前窗口，不会写回旧主题设置。">
           <Stack direction="row" spacing={1} sx={{ p: 2 }}>
             <Button variant={mode === 'light' ? 'contained' : 'outlined'} startIcon={<LightModeRoundedIcon />} onClick={() => setMode('light')}>浅色</Button>
@@ -90,7 +95,7 @@ export default function SettingsPage() {
           </Stack>
         </SettingsSection>}
         {sections.map(section => <SettingsSection key={section} title={section}>
-          {mapped.filter(field => field.section === section).map(field => <SettingsItem key={field.key} field={field} />)}
+          {renderedMapped.filter(field => field.section === section).map(field => <SettingsItem key={field.key} field={field} />)}
         </SettingsSection>)}
         {category === 'advanced' && snapshot.servers.length > 0 && <SettingsSection title="服务器资源" description="Cookies 和 Headers 已在 Bridge 中隐藏；当前阶段禁止修改和测试。">
           <TableContainer sx={{ overflowX: 'auto' }}><Table size="small" sx={{ minWidth: 760 }}>

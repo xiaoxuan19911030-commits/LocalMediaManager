@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageMutationResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, ScanLaunchResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
-import type { MetaTubeSettings, NfoSettings, ProviderConnectionResult, SettingsSnapshot } from '@/types/settings'
+import type { MetaTubeSettings, NfoSettings, PlaybackSettings, ProviderConnectionResult, SettingsSnapshot } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
 
@@ -36,6 +36,8 @@ export const bridge = {
   testMetaTube: (value: MetaTubeSettings) => request<ProviderConnectionResult>('/api/settings/providers/metatube/test', { method: 'POST', body: JSON.stringify(value) }),
   nfoSettings: () => request<NfoSettings>('/api/settings/nfo'),
   saveNfoSettings: (value: NfoSettings) => request<NfoSettings>('/api/settings/nfo', { method: 'PUT', body: JSON.stringify(value) }),
+  playbackSettings: () => request<PlaybackSettings>('/api/settings/playback'),
+  savePlaybackSettings: (value: PlaybackSettings) => request<PlaybackSettings>('/api/settings/playback', { method: 'PUT', body: JSON.stringify(value) }),
   movie: (id: number) => request<MovieDetail>(`/api/videos/${id}`),
   movieImages: (id: number) => request<ImageAsset[]>(`/api/videos/${id}/images`),
   setImageLock: (imageId: number, locked: boolean) => request<ImageMutationResult>(`/api/image-assets/${imageId}/lock`, { method: 'PUT', body: JSON.stringify({ locked }) }),

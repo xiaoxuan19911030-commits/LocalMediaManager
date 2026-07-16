@@ -21,6 +21,7 @@ builder.WebHost.UseUrls(bridgeUrl);
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddSingleton(new ProductWriter(databasePath));
+builder.Services.AddSingleton(new PlaybackSettingsService(databasePath, configDatabasePath));
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton(new LibraryWorkflowService(databasePath));
 builder.Services.AddSingleton(new MetadataProviderSettingsService(databasePath));
@@ -351,6 +352,10 @@ app.MapGet("/api/settings/nfo", async (NfoService nfo, CancellationToken token) 
     Results.Ok(await nfo.ReadSettingsAsync(token)));
 app.MapPut("/api/settings/nfo", async (NfoSettingsDto command, NfoService nfo, CancellationToken token) =>
     Results.Ok(await nfo.SaveSettingsAsync(command, token)));
+app.MapGet("/api/settings/playback", async (PlaybackSettingsService playback, CancellationToken token) =>
+    Results.Ok(await playback.ReadAsync(token)));
+app.MapPut("/api/settings/playback", async (PlaybackSettingsDto command, PlaybackSettingsService playback, CancellationToken token) =>
+    Results.Ok(await playback.SaveAsync(command, token)));
 
 app.MapPost("/api/organizer/dry-run", async (OrganizerPlanCommand command, FileOrganizerService organizer, CancellationToken token) =>
     Results.Ok(await organizer.DryRunAsync(command, token)));
@@ -370,7 +375,7 @@ app.MapGet("/api/actors/{actorId:long}", async (long actorId) => {
     return actor is null ? Results.NotFound() : Results.Ok(actor);
 });
 
-app.MapPost("/api/videos/{dataId:long}/play", async (long dataId, ProductWriter writer) => {
+app.MapPost("/api/videos/{dataId:long}/play", async (long dataId, ProductWriter writer, PlaybackSettingsService playback) => {
     if (!File.Exists(databasePath))
         return Results.Problem($"找不到数据库：{databasePath}", statusCode: 503);
 
@@ -387,7 +392,7 @@ app.MapPost("/api/videos/{dataId:long}/play", async (long dataId, ProductWriter 
     if (!IsVideoFile(path))
         return Results.BadRequest($"该记录不是可播放的影片文件：{path}");
 
-    string? configuredPlayer = Environment.GetEnvironmentVariable("LMM_PLAYER_PATH");
+    string? configuredPlayer = (await playback.ReadAsync()).PlayerPath;
     var startInfo = new ProcessStartInfo { UseShellExecute = true };
     if (!string.IsNullOrWhiteSpace(configuredPlayer) && File.Exists(configuredPlayer)) {
         startInfo.FileName = configuredPlayer;
