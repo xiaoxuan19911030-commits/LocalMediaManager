@@ -18,5 +18,6 @@
     <Content Include="..\LocalMediaManager.Migration\migrations\0005_MetadataSyncWorkflow.sql" Link="migrations\0005_MetadataSyncWorkflow.sql" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\LocalMediaManager.Migration\migrations\0006_ImageAssetWorkflow.sql" Link="migrations\0006_ImageAssetWorkflow.sql" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\LocalMediaManager.Migration\migrations\0007_NfoWorkflow.sql" Link="migrations\0007_NfoWorkflow.sql" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\LocalMediaManager.Migration\migrations\0008_FileOrganizerWorkflow.sql" Link="migrations\0008_FileOrganizerWorkflow.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

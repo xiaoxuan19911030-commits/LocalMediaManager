@@ -44,10 +44,14 @@ builder.Services.AddSingleton(serviceProvider => new ImageCacheTaskService(
     serviceProvider.GetRequiredService<ImageAssetService>(),
     serviceProvider.GetRequiredService<TaskLogService>()));
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<ImageCacheTaskService>());
+builder.Services.AddSingleton(serviceProvider => new FileOrganizerService(
+    databasePath, serviceProvider.GetRequiredService<TaskLogService>()));
+builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<FileOrganizerService>());
 builder.Services.AddSingleton(serviceProvider => new TaskCommandService(databasePath,
     serviceProvider.GetRequiredService<LibraryWorkflowService>(),
     serviceProvider.GetRequiredService<MetadataSyncExecutor>(),
-    serviceProvider.GetRequiredService<ImageCacheTaskService>()));
+    serviceProvider.GetRequiredService<ImageCacheTaskService>(),
+    serviceProvider.GetRequiredService<FileOrganizerService>()));
 
 var app = builder.Build();
 app.UseCors();
@@ -347,6 +351,13 @@ app.MapGet("/api/settings/nfo", async (NfoService nfo, CancellationToken token) 
     Results.Ok(await nfo.ReadSettingsAsync(token)));
 app.MapPut("/api/settings/nfo", async (NfoSettingsDto command, NfoService nfo, CancellationToken token) =>
     Results.Ok(await nfo.SaveSettingsAsync(command, token)));
+
+app.MapPost("/api/organizer/dry-run", async (OrganizerPlanCommand command, FileOrganizerService organizer, CancellationToken token) =>
+    Results.Ok(await organizer.DryRunAsync(command, token)));
+app.MapGet("/api/organizer/{taskId:long}/preview", async (long taskId, FileOrganizerService organizer, CancellationToken token) =>
+    Results.Ok(await organizer.PreviewAsync(taskId, token)));
+app.MapPost("/api/organizer/{taskId:long}/execute", async (long taskId, OrganizerExecuteCommand command, FileOrganizerService organizer, CancellationToken token) =>
+    Results.Ok(await organizer.ExecuteConfirmedAsync(taskId, command.ConfirmationToken, token)));
 
 app.MapGet("/api/actors/{actorId:long}/image", async (long actorId, ImageAssetService images, CancellationToken token) => {
     ImageAssetContent? content = await images.ResolveActorAsync(actorId, token);

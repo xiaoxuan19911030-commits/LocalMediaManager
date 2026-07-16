@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageMutationResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, ScanLaunchResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
+import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageMutationResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, ScanLaunchResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
 import type { MetaTubeSettings, NfoSettings, ProviderConnectionResult, SettingsSnapshot } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
@@ -46,6 +46,9 @@ export const bridge = {
   exportNfo: (movieId: number, confirmationToken: string, separateWhenLocked = false) => request<NfoMutationResult>(`/api/videos/${movieId}/nfo/export?separateWhenLocked=${separateWhenLocked}`, { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
   previewNfoImport: (movieId: number) => request<NfoPreview>(`/api/videos/${movieId}/nfo/import-preview`),
   importNfo: (movieId: number, confirmationToken: string) => request<NfoMutationResult>(`/api/videos/${movieId}/nfo/import`, { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
+  organizerDryRun: (movieIds: number[], fileNameTemplate: string, destinationDirectory?: string) => request<OrganizerPreview>('/api/organizer/dry-run', { method: 'POST', body: JSON.stringify({ movieIds, fileNameTemplate, destinationDirectory: destinationDirectory || null }) }),
+  organizerPreview: (taskId: number) => request<OrganizerPreview>(`/api/organizer/${taskId}/preview`),
+  executeOrganizer: (taskId: number, confirmationToken: string) => request<OrganizerLaunchResult>(`/api/organizer/${taskId}/execute`, { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
   syncMovie: (id: number) => request<ScanLaunchResult>(`/api/videos/${id}/sync`, { method: 'POST' }),
   neighbors: (id: number, search = '', sort = 'newest') => request<NeighborResult>(`/api/videos/${id}/neighbors?${new URLSearchParams({ search, sort })}`),
   search: (query: string, limit = 12) => request<GlobalSearchResult>(`/api/search?${new URLSearchParams({ q: query, limit: String(limit) })}`),

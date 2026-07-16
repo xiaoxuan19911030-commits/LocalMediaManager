@@ -205,3 +205,6 @@ export interface NfoPreview {
   confirmationToken: string; changes: string[]; conflicts: string[]; warnings: string[]; data: NfoData
 }
 export interface NfoMutationResult { changed: boolean; path: string; ownership: string; locked: boolean; message: string }
+export interface OrganizerItem { movieId: number; mediaFileId: number; sourcePath: string; destinationPath: string; operation: string; valid: boolean; conflict?: string; fileSize: number }
+export interface OrganizerPreview { taskId: number; status: string; confirmationToken: string; items: OrganizerItem[]; warnings: string[]; validItems: number; conflictItems: number }
+export interface OrganizerLaunchResult { taskId: number; status: string; totalItems: number; message: string }
