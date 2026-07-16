@@ -128,3 +128,13 @@ Acceptance: 发布验证记录或独立验收文档
 - Controls: scan pause/resume/cancel/retry update persistent task state and runner checkpoints read database state.
 - Idempotency: repeated scans reuse existing media rows and do not duplicate rating restore or sync queue entries.
 - Automated: `LibraryWorkflowServiceTests` covers pending claim, restart recovery, pause/resume, cancel, retry, duplicate claim protection, duplicate import protection and sync-task single creation.
+
+## 0.5.0-03 Evidence Note
+
+- Scope: media-library create, edit, preview-confirmed delete, source-folder management, scan-rule persistence, and scan launch through the existing persistent task workflow.
+- Bridge: `GET/POST/PUT /api/libraries`, `GET/POST /api/libraries/{id}/delete*`, and `POST /api/libraries/{id}/scan`; all writes remain session-authenticated Bridge DTO calls.
+- Migration: N/A. Existing checksummed `0004_LibraryScanWorkflow` already stores libraries, folders, scan mode, subfolder inclusion, exclusions, audit data, and delete rollback backups.
+- Automated: `LibraryCrudPersistsMultipleSourcesAndScanRulesForExistingRunner` verifies multiple sources, edit persistence, exclusions, scan import, and `LastScannedAt`; all 33 Bridge tests pass.
+- Smoke: isolated filesystem/database service smoke passed with physical video samples and the existing migration schema; the installed desktop app opens the Media Libraries page, while a full installed isolated write smoke remains blocked by the environment session-token launch policy documented in `releases/0.5.0-02-INSTALLED-SCAN-SMOKE.md`.
+- Commit: `1971d89`.
+- Status: item 28 remains partially migrated until its required installed end-to-end scan acceptance is executable and recorded.
