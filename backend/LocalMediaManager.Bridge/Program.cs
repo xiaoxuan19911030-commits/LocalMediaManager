@@ -28,7 +28,7 @@ builder.Services.AddSingleton(new MetadataWriteService(databasePath));
 builder.Services.AddSingleton(new TaskLogService(databasePath));
 builder.Services.AddSingleton(new ImageAssetService(databasePath, imageRoot));
 builder.Services.AddSingleton<ImageDownloadService>();
-builder.Services.AddSingleton<NfoService>();
+builder.Services.AddSingleton(new NfoService(databasePath));
 builder.Services.AddSingleton<IMetadataProvider, MetaTubeProvider>();
 builder.Services.AddSingleton(serviceProvider => new MetadataSyncExecutor(
     databasePath, imageRoot,
@@ -334,6 +334,19 @@ app.MapPost("/api/images/cache/cleanup", async (ImageCacheCleanupCommand command
 
 app.MapPost("/api/images/cache/rebuild", async (ImageCacheTaskService tasks) =>
     Results.Ok(await tasks.EnqueueAsync()));
+
+app.MapGet("/api/videos/{movieId:long}/nfo/export-preview", async (long movieId, NfoService nfo, CancellationToken token) =>
+    Results.Ok(await nfo.PreviewExportAsync(movieId, token)));
+app.MapPost("/api/videos/{movieId:long}/nfo/export", async (long movieId, NfoConfirmCommand command, bool? separateWhenLocked, NfoService nfo, CancellationToken token) =>
+    Results.Ok(await nfo.ExportAsync(movieId, command.ConfirmationToken, separateWhenLocked ?? false, token)));
+app.MapGet("/api/videos/{movieId:long}/nfo/import-preview", async (long movieId, NfoService nfo, CancellationToken token) =>
+    Results.Ok(await nfo.PreviewImportAsync(movieId, token)));
+app.MapPost("/api/videos/{movieId:long}/nfo/import", async (long movieId, NfoConfirmCommand command, NfoService nfo, CancellationToken token) =>
+    Results.Ok(await nfo.ImportAsync(movieId, command.ConfirmationToken, token)));
+app.MapGet("/api/settings/nfo", async (NfoService nfo, CancellationToken token) =>
+    Results.Ok(await nfo.ReadSettingsAsync(token)));
+app.MapPut("/api/settings/nfo", async (NfoSettingsDto command, NfoService nfo, CancellationToken token) =>
+    Results.Ok(await nfo.SaveSettingsAsync(command, token)));
 
 app.MapGet("/api/actors/{actorId:long}/image", async (long actorId, ImageAssetService images, CancellationToken token) => {
     ImageAssetContent? content = await images.ResolveActorAsync(actorId, token);

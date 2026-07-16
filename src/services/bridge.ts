@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageMutationResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, ScanLaunchResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
-import type { MetaTubeSettings, ProviderConnectionResult, SettingsSnapshot } from '@/types/settings'
+import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageMutationResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, ScanLaunchResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
+import type { MetaTubeSettings, NfoSettings, ProviderConnectionResult, SettingsSnapshot } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
 
@@ -34,12 +34,18 @@ export const bridge = {
   settings: () => request<SettingsSnapshot>('/api/settings'),
   saveMetaTubeSettings: (value: MetaTubeSettings) => request<MetaTubeSettings>('/api/settings/providers/metatube', { method: 'PUT', body: JSON.stringify(value) }),
   testMetaTube: (value: MetaTubeSettings) => request<ProviderConnectionResult>('/api/settings/providers/metatube/test', { method: 'POST', body: JSON.stringify(value) }),
+  nfoSettings: () => request<NfoSettings>('/api/settings/nfo'),
+  saveNfoSettings: (value: NfoSettings) => request<NfoSettings>('/api/settings/nfo', { method: 'PUT', body: JSON.stringify(value) }),
   movie: (id: number) => request<MovieDetail>(`/api/videos/${id}`),
   movieImages: (id: number) => request<ImageAsset[]>(`/api/videos/${id}/images`),
   setImageLock: (imageId: number, locked: boolean) => request<ImageMutationResult>(`/api/image-assets/${imageId}/lock`, { method: 'PUT', body: JSON.stringify({ locked }) }),
   imageCachePreview: () => request<ImageCachePreview>('/api/images/cache/cleanup-preview'),
   cleanupImageCache: (confirmationToken: string) => request<ImageCacheCleanupResult>('/api/images/cache/cleanup', { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
   rebuildImageCache: () => request<ImageCacheRebuildLaunchResult>('/api/images/cache/rebuild', { method: 'POST' }),
+  previewNfoExport: (movieId: number) => request<NfoPreview>(`/api/videos/${movieId}/nfo/export-preview`),
+  exportNfo: (movieId: number, confirmationToken: string, separateWhenLocked = false) => request<NfoMutationResult>(`/api/videos/${movieId}/nfo/export?separateWhenLocked=${separateWhenLocked}`, { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
+  previewNfoImport: (movieId: number) => request<NfoPreview>(`/api/videos/${movieId}/nfo/import-preview`),
+  importNfo: (movieId: number, confirmationToken: string) => request<NfoMutationResult>(`/api/videos/${movieId}/nfo/import`, { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
   syncMovie: (id: number) => request<ScanLaunchResult>(`/api/videos/${id}/sync`, { method: 'POST' }),
   neighbors: (id: number, search = '', sort = 'newest') => request<NeighborResult>(`/api/videos/${id}/neighbors?${new URLSearchParams({ search, sort })}`),
   search: (query: string, limit = 12) => request<GlobalSearchResult>(`/api/search?${new URLSearchParams({ q: query, limit: String(limit) })}`),

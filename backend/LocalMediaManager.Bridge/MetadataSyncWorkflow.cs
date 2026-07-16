@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
-using System.Xml.Linq;
 using Microsoft.Data.Sqlite;
 
 namespace LocalMediaManager.Bridge;
@@ -126,33 +125,6 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
             if (total > MaximumDownloadBytes) throw new InvalidDataException("远程图片超过 64 MB 安全限制。");
             await destination.WriteAsync(buffer.AsMemory(0, read), token);
         }
-    }
-}
-
-public sealed class NfoService
-{
-    public async Task<(string? Path, bool Created)> WriteAsync(SyncMovie movie, ProviderMetadata metadata, CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(movie.PrimaryFile)) return (null, false);
-        string path = Path.ChangeExtension(movie.PrimaryFile, ".nfo");
-        if (File.Exists(path)) return (path, false);
-        var root = new XElement("movie",
-            new XElement("title", metadata.Title ?? movie.Title ?? metadata.Code),
-            new XElement("originaltitle", metadata.Title ?? ""),
-            new XElement("id", metadata.Code),
-            new XElement("plot", metadata.Description ?? ""),
-            new XElement("premiered", metadata.ReleaseDate ?? ""),
-            new XElement("runtime", metadata.DurationSeconds is > 0 ? metadata.DurationSeconds / 60 : 0),
-            new XElement("director", metadata.Director ?? ""),
-            new XElement("studio", metadata.Studio ?? ""),
-            metadata.Genres.Select(value => new XElement("genre", value)),
-            metadata.Actors.Select(value => new XElement("actor", new XElement("name", value))),
-            new XElement("source", metadata.Provider),
-            new XElement("sourceid", metadata.ExternalId));
-        string temporary = path + ".lmm-write";
-        await File.WriteAllTextAsync(temporary, new XDocument(new XDeclaration("1.0", "utf-8", "yes"), root).ToString(), cancellationToken);
-        File.Move(temporary, path, false);
-        return (path, true);
     }
 }
 

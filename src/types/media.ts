@@ -195,3 +195,13 @@ export interface ImageCachePreview {
 }
 export interface ImageCacheCleanupResult { deletedEntries: number; deletedBytes: number; failedEntries: number; message: string }
 export interface ImageCacheRebuildLaunchResult { taskId: number; status: string; totalItems: number; message: string }
+export interface NfoData {
+  code: string; title?: string; originalTitle?: string; plot?: string; rating?: number; releaseDate?: string
+  runtimeMinutes?: number; director?: string; studio?: string; publisher?: string; country?: string
+  actors: string[]; tags: string[]; genres: string[]; series: string[]; imageReferences: string[]; source?: string; sourceId?: string
+}
+export interface NfoPreview {
+  movieId: number; path: string; ownership: string; locked: boolean; exists: boolean; canApply: boolean
+  confirmationToken: string; changes: string[]; conflicts: string[]; warnings: string[]; data: NfoData
+}
+export interface NfoMutationResult { changed: boolean; path: string; ownership: string; locked: boolean; message: string }

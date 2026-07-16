@@ -29,3 +29,4 @@ export interface MetaTubeSettings {
 }
 
 export interface ProviderConnectionResult { success: boolean; provider: string; message: string; elapsedMilliseconds: number }
+export interface NfoSettings { exportPolicy: 'SkipExisting' | 'SeparateFile'; outputDirectory: string; fillEmptyOnly: boolean; includeImages: boolean }

@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/PageHeader'
 import { SettingsItem, SettingsLayout, SettingsSaveBar, SettingsSection, SettingsStatusBanner, settingsCategories } from '@/components/settings/SettingsComponents'
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
-import type { MetaTubeSettings, SettingsSnapshot } from '@/types/settings'
+import type { MetaTubeSettings, NfoSettings, SettingsSnapshot } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 import { BrandMark } from '@/components/BrandMark'
 
@@ -26,9 +26,10 @@ export default function SettingsPage() {
   const [providerNotice, setProviderNotice] = useState<{ severity: 'success' | 'error' | 'info'; text: string }>()
   const [providerBusy, setProviderBusy] = useState(false)
   const [metaTube, setMetaTube] = useState<MetaTubeSettings>()
+  const [nfoSettings, setNfoSettings] = useState<NfoSettings>()
   const [cachePreview, setCachePreview] = useState<ImageCachePreview>(); const [cacheBusy, setCacheBusy] = useState(false)
   const { mode, setMode } = useColorMode()
-  useEffect(() => { bridge.settings().then(value => { setSnapshot(value); setMetaTube(value.metaTube) }).catch((reason: Error) => setError(reason.message)) }, [])
+  useEffect(() => { Promise.all([bridge.settings(), bridge.nfoSettings()]).then(([value, nfo]) => { setSnapshot(value); setMetaTube(value.metaTube); setNfoSettings(nfo) }).catch((reason: Error) => setError(reason.message)) }, [])
   const title = settingsCategories.find(([key]) => key === category)?.[1] ?? '设置'
   const fields = useMemo(() => snapshot?.fields.filter(field => field.category === category) ?? [], [snapshot, category])
   const mapped = fields.filter(field => field.mapped)
@@ -71,6 +72,15 @@ export default function SettingsPage() {
               <Button variant="outlined" disabled={cacheBusy} onClick={() => { setCacheBusy(true); bridge.imageCachePreview().then(setCachePreview).catch((reason: Error) => setProviderNotice({ severity: 'error', text: reason.message })).finally(() => setCacheBusy(false)) }}>检查缓存</Button>
               <Button color="error" variant="contained" disabled={cacheBusy || !cachePreview} onClick={() => { if (!cachePreview) return; setCacheBusy(true); bridge.cleanupImageCache(cachePreview.confirmationToken).then(result => { setProviderNotice({ severity: result.failedEntries ? 'error' : 'success', text: result.message }); setCachePreview(undefined) }).catch((reason: Error) => setProviderNotice({ severity: 'error', text: reason.message })).finally(() => setCacheBusy(false)) }}>确认清理</Button>
             </Stack>
+          </Stack></Box>
+        </SettingsSection>}
+        {category === 'metadata' && nfoSettings && <SettingsSection title="NFO" description="导入只补全空字段；用户已有 NFO 默认锁定，自动同步不会覆盖。">
+          <Box sx={{ p: 2 }}><Stack spacing={1.5}>
+            <TextField size="small" label="NFO 输出目录" value={nfoSettings.outputDirectory} onChange={event => setNfoSettings({ ...nfoSettings, outputDirectory: event.target.value })} helperText="留空时保存在主影片文件旁。"/>
+            <FormControlLabel control={<Switch checked={nfoSettings.exportPolicy === 'SeparateFile'} onChange={event => setNfoSettings({ ...nfoSettings, exportPolicy: event.target.checked ? 'SeparateFile' : 'SkipExisting' })}/>} label="用户 NFO 冲突时另存为 .lmm.nfo"/>
+            <FormControlLabel control={<Switch checked={nfoSettings.includeImages} onChange={event => setNfoSettings({ ...nfoSettings, includeImages: event.target.checked })}/>} label="导出图片引用"/>
+            <Alert severity="info">导入始终仅补全空字段并追加缺失关系；标题、标签、评分、收藏等用户数据不会被覆盖。</Alert>
+            <Stack direction="row" sx={{ justifyContent: 'flex-end' }}><Button variant="contained" disabled={providerBusy} onClick={() => { setProviderBusy(true); bridge.saveNfoSettings(nfoSettings).then(value => { setNfoSettings(value); setProviderNotice({ severity: 'success', text: 'NFO 设置已保存并立即生效。' }) }).catch((reason: Error) => setProviderNotice({ severity: 'error', text: reason.message })).finally(() => setProviderBusy(false)) }}>保存 NFO 设置</Button></Stack>
           </Stack></Box>
         </SettingsSection>}
         {category === 'appearance' && <SettingsSection title="主题预览" description="即时预览只修改当前窗口，不会写回旧主题设置。">

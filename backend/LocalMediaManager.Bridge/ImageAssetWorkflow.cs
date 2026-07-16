@@ -381,6 +381,6 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("lmm-image-cache|" + state))).ToLowerInvariant();
     }
     private static async Task DeleteCacheRowAsync(SqliteConnection connection, long id, CancellationToken token) { await using SqliteCommand command=connection.CreateCommand();command.CommandText="DELETE FROM ImageCacheEntries WHERE Id=$id";command.Parameters.AddWithValue("$id",id);await command.ExecuteNonQueryAsync(token); }
-    private async Task<SqliteConnection> OpenAsync(SqliteOpenMode mode, CancellationToken token) { var connection=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=databasePath,Mode=mode,Cache=SqliteCacheMode.Shared}.ToString());await connection.OpenAsync(token);await using var command=connection.CreateCommand();command.CommandText="PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;";await command.ExecuteNonQueryAsync(token);return connection; }
+    private async Task<SqliteConnection> OpenAsync(SqliteOpenMode mode, CancellationToken token) { var connection=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=databasePath,Mode=mode,Cache=SqliteCacheMode.Private}.ToString());await connection.OpenAsync(token);await using var command=connection.CreateCommand();command.CommandText="PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;";await command.ExecuteNonQueryAsync(token);return connection; }
     private static string Now() => DateTimeOffset.UtcNow.ToString("O");
 }
