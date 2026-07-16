@@ -12,6 +12,8 @@ import FolderRoundedIcon from '@mui/icons-material/FolderRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import VisibilityRoundedIcon from '@mui/icons-material/VisibilityRounded'
 import SyncRoundedIcon from '@mui/icons-material/SyncRounded'
+import LockRoundedIcon from '@mui/icons-material/LockRounded'
+import LockOpenRoundedIcon from '@mui/icons-material/LockOpenRounded'
 import { Alert, Autocomplete, Box, Button, Card, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Divider, IconButton, Paper, Rating, Snackbar, Stack, TextField, Tooltip, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import type { ReactNode } from 'react'
@@ -19,7 +21,7 @@ import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router'
 import { SurfaceSection } from '@/components/ProductComponents'
 import { bridge } from '@/services/bridge'
-import type { MovieDeletePreview, MovieDetail, NamedItem } from '@/types/media'
+import type { ImageAsset, MovieDeletePreview, MovieDetail, NamedItem } from '@/types/media'
 
 const formatDuration = (seconds: number) => {
   if (!seconds) return '时长未知'
@@ -27,6 +29,7 @@ const formatDuration = (seconds: number) => {
   return hours ? `${hours} 小时 ${minutes} 分` : `${minutes} 分钟`
 }
 const formatSize = (bytes: number) => bytes ? `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB` : '大小未知'
+const formatImageSize = (bytes: number) => bytes ? bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB` : '大小待校验'
 const date = (value?: string) => value?.slice(0, 10) || '未知'
 
 function Fact({ icon, label }: { icon: ReactNode; label: string }) {
@@ -47,12 +50,13 @@ export default function MovieDetailPage() {
   const [busy, setBusy] = useState(false); const [tagDialog, setTagDialog] = useState(false); const [actorDialog, setActorDialog] = useState(false)
   const [tagOptions, setTagOptions] = useState<NamedItem[]>([]); const [selectedTags, setSelectedTags] = useState<NamedItem[]>([])
   const [actorOptions, setActorOptions] = useState<NamedItem[]>([]); const [selectedActors, setSelectedActors] = useState<NamedItem[]>([]); const [actorSearch, setActorSearch] = useState('')
+  const [imageAssets, setImageAssets] = useState<ImageAsset[]>([]); const [posterFailed, setPosterFailed] = useState(false)
   const [neighbors, setNeighbors] = useState<{ previousId?: number; nextId?: number }>({})
   const [deletePreview, setDeletePreview] = useState<MovieDeletePreview>()
   const context = (location.state as { context?: { search?: string; sort?: string } } | null)?.context
-  const loadMovie = (movieId: number) => bridge.movie(movieId).then(setMovie)
+  const loadMovie = (movieId: number) => Promise.all([bridge.movie(movieId).then(setMovie), bridge.movieImages(movieId).then(setImageAssets)])
   useEffect(() => { const movieId = Number(id); if (!Number.isFinite(movieId)) { setError('无效影片编号'); return }
-    setMovie(undefined); setError(''); loadMovie(movieId).catch((reason: Error) => setError(reason.message)); bridge.neighbors(movieId, context?.search, context?.sort).then(setNeighbors).catch(() => setNeighbors({})) }, [id])
+    setMovie(undefined); setImageAssets([]); setPosterFailed(false); setError(''); loadMovie(movieId).catch((reason: Error) => setError(reason.message)); bridge.neighbors(movieId, context?.search, context?.sort).then(setNeighbors).catch(() => setNeighbors({})) }, [id])
   useEffect(() => { if (!actorDialog) return; const timer = window.setTimeout(() => bridge.entities('actors', actorSearch, 'name', 48, 0).then((result) => setActorOptions([...selectedActors, ...result.items.filter((item) => !selectedActors.some((selected) => selected.id === item.id))])).catch((reason: Error) => setNotice(reason.message)), 200); return () => window.clearTimeout(timer) }, [actorDialog, actorSearch, selectedActors])
   const play = () => movie && bridge.play(movie.id).then(() => setNotice(`正在打开：${movie.code || movie.title}`)).catch((reason: Error) => setNotice(reason.message))
   const mutate = (action: Promise<unknown>) => { if (!movie) return; setBusy(true); action.then(() => loadMovie(movie.id)).then(() => setNotice('已保存')).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false)) }
@@ -64,6 +68,7 @@ export default function MovieDetailPage() {
   const previewDelete = () => movie && bridge.previewDeleteMovie(movie.id).then(setDeletePreview).catch((reason: Error) => setNotice(reason.message))
   const confirmDelete = () => deletePreview && bridge.deleteMovie(deletePreview.movieId, deletePreview.confirmationToken).then((result) => { setDeletePreview(undefined); navigate('/media', { replace: true }); window.setTimeout(() => setNotice(result.message), 0) }).catch((reason: Error) => setNotice(reason.message))
   const syncMetadata = () => movie && bridge.syncMovie(movie.id).then(result => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message))
+  const setImageLock = (asset: ImageAsset) => bridge.setImageLock(asset.id, !asset.locked).then(result => { setNotice(result.message); return movie ? bridge.movieImages(movie.id).then(setImageAssets) : undefined }).catch((reason: Error) => setNotice(reason.message))
 
   return <Box sx={{ '@keyframes detailIn': { from: { opacity: 0, transform: 'translateY(10px)' }, to: { opacity: 1, transform: 'translateY(0)' } } }}>
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: 2 }}>
@@ -77,7 +82,7 @@ export default function MovieDetailPage() {
         <Box sx={{ position: 'relative', display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '210px minmax(0,1fr)', lg: '250px minmax(0,1fr)' }, gap: { xs: 2, md: 3 } }}>
           <Card sx={{ overflow: 'hidden', width: '100%', maxWidth: { xs: 260, sm: 'none' }, mx: { xs: 'auto', sm: 0 }, alignSelf: 'start', boxShadow: (theme) => `0 18px 42px ${alpha(theme.palette.common.black, theme.palette.mode === 'dark' ? .36 : .18)}` }}>
             <Box sx={{ aspectRatio: '2/3', bgcolor: 'action.hover', display: 'grid', placeItems: 'center' }}>
-              {movie.coverUrl ? <Box component="img" src={movie.coverUrl} alt={movie.code || movie.title} sx={{ width: '100%', height: '100%', objectFit: 'cover' }}/> : <Typography color="text.disabled">暂无海报</Typography>}
+              {movie.coverUrl && !posterFailed ? <Box component="img" src={movie.coverUrl} alt={movie.code || movie.title} onError={() => setPosterFailed(true)} sx={{ width: '100%', height: '100%', objectFit: 'cover' }}/> : <Typography color="text.disabled" sx={{ px: 2, textAlign: 'center' }}>{posterFailed ? '图片损坏或不可用' : '暂无海报'}</Typography>}
             </Box>
           </Card>
           <Box sx={{ minWidth: 0, display: 'flex', flexDirection: 'column', py: { sm: 1 } }}>
@@ -109,6 +114,19 @@ export default function MovieDetailPage() {
               <Box><Typography variant="overline" color="text.secondary" sx={{ fontWeight: 750 }}>导入日期</Typography><Typography sx={{ mt: .5 }}>{date(movie.importedAt)}</Typography></Box>
             </Box>
             {movie.description && <><Divider sx={{ my: 2.25 }}/><Typography variant="subtitle2" sx={{ fontWeight: 800, mb: .75 }}>内容简介</Typography><Typography color="text.secondary" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.85 }}>{movie.description}</Typography></>}
+          </SurfaceSection>
+          <SurfaceSection title="图片资源" description="源图按需读取；锁定的用户图片不会被同步或缓存重建覆盖">
+            {imageAssets.length ? <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2,minmax(0,1fr))', sm: 'repeat(3,minmax(0,1fr))' }, gap: 1.5 }}>
+              {imageAssets.map(asset => <Card key={asset.id} variant="outlined" sx={{ overflow: 'hidden' }}>
+                <Box sx={{ aspectRatio: '3/2', bgcolor: 'action.hover', display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
+                  {asset.url ? <Box component="img" src={asset.url} alt={asset.type} loading="lazy" sx={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={event => { event.currentTarget.style.display = 'none' }}/> : <Typography variant="caption" color="text.disabled">图片不可用</Typography>}
+                </Box>
+                <Box sx={{ p: 1.25 }}><Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}><Chip size="small" label={asset.type}/>{asset.primary && <Chip size="small" color="primary" label="主图"/>}{asset.locked && <Chip size="small" color="warning" label="用户锁定"/>}</Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: .75 }}>{asset.width && asset.height ? `${asset.width}×${asset.height}` : '尺寸待校验'} · {formatImageSize(asset.fileSize)}</Typography>
+                  <Button size="small" color={asset.locked ? 'warning' : 'inherit'} startIcon={asset.locked ? <LockOpenRoundedIcon/> : <LockRoundedIcon/>} onClick={() => void setImageLock(asset)} sx={{ mt: .5 }}>{asset.locked ? '解除锁定' : '锁定图片'}</Button>
+                </Box>
+              </Card>)}
+            </Box> : <Typography variant="body2" color="text.secondary">暂无已登记图片资源；缺失图片不会显示损坏图标。</Typography>}
           </SurfaceSection>
         </Stack>
         <SurfaceSection title="媒体文件" description={`${movie.mediaFiles.length} 个关联文件`}>

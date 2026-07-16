@@ -9,6 +9,7 @@ import { SettingsItem, SettingsLayout, SettingsSaveBar, SettingsSection, Setting
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
 import type { MetaTubeSettings, SettingsSnapshot } from '@/types/settings'
+import type { ImageCachePreview } from '@/types/media'
 import { BrandMark } from '@/components/BrandMark'
 
 const descriptions: Record<string, string> = {
@@ -25,6 +26,7 @@ export default function SettingsPage() {
   const [providerNotice, setProviderNotice] = useState<{ severity: 'success' | 'error' | 'info'; text: string }>()
   const [providerBusy, setProviderBusy] = useState(false)
   const [metaTube, setMetaTube] = useState<MetaTubeSettings>()
+  const [cachePreview, setCachePreview] = useState<ImageCachePreview>(); const [cacheBusy, setCacheBusy] = useState(false)
   const { mode, setMode } = useColorMode()
   useEffect(() => { bridge.settings().then(value => { setSnapshot(value); setMetaTube(value.metaTube) }).catch((reason: Error) => setError(reason.message)) }, [])
   const title = settingsCategories.find(([key]) => key === category)?.[1] ?? '设置'
@@ -60,6 +62,16 @@ export default function SettingsPage() {
               </Stack>
             </Stack>
           </Box>
+        </SettingsSection>}
+        {category === 'metadata' && <SettingsSection title="图片缓存" description="列表使用派生缩略缓存，详情按需读取原图。清理只影响可重建缓存，不删除源图、用户图片或智能卡图。">
+          <Box sx={{ p: 2 }}><Stack spacing={1.5}>
+            {cachePreview && <Alert severity="warning">共 {cachePreview.entries} 条缓存记录，实际文件 {cachePreview.existingEntries} 个，占用 {(cachePreview.bytes / 1024 / 1024).toFixed(1)} MB；缺失记录 {cachePreview.missingEntries} 条。{cachePreview.warnings.join(' ')}</Alert>}
+            <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
+              <Button variant="outlined" disabled={cacheBusy} onClick={() => { setCacheBusy(true); bridge.rebuildImageCache().then(result => setProviderNotice({ severity: 'success', text: `${result.message}（${result.totalItems} 部影片）` })).catch((reason: Error) => setProviderNotice({ severity: 'error', text: reason.message })).finally(() => setCacheBusy(false)) }}>重建缓存</Button>
+              <Button variant="outlined" disabled={cacheBusy} onClick={() => { setCacheBusy(true); bridge.imageCachePreview().then(setCachePreview).catch((reason: Error) => setProviderNotice({ severity: 'error', text: reason.message })).finally(() => setCacheBusy(false)) }}>检查缓存</Button>
+              <Button color="error" variant="contained" disabled={cacheBusy || !cachePreview} onClick={() => { if (!cachePreview) return; setCacheBusy(true); bridge.cleanupImageCache(cachePreview.confirmationToken).then(result => { setProviderNotice({ severity: result.failedEntries ? 'error' : 'success', text: result.message }); setCachePreview(undefined) }).catch((reason: Error) => setProviderNotice({ severity: 'error', text: reason.message })).finally(() => setCacheBusy(false)) }}>确认清理</Button>
+            </Stack>
+          </Stack></Box>
         </SettingsSection>}
         {category === 'appearance' && <SettingsSection title="主题预览" description="即时预览只修改当前窗口，不会写回旧主题设置。">
           <Stack direction="row" spacing={1} sx={{ p: 2 }}>

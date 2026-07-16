@@ -8,7 +8,9 @@ namespace LocalMediaManager.Bridge;
 public sealed record MetadataSyncLaunchResult(long TaskId, string Status, string Message);
 public sealed record SyncMovie(long Id, string Code, string? Title, string? Description, string? ReleaseDate,
     int DurationSeconds, string? PrimaryFile, string? NfoPath);
-public sealed record SavedImage(string Type, string Path, string SourceUrl, long Size, bool Created);
+public sealed record SavedImage(string Type, string Path, string SourceUrl, long Size, bool Created,
+    int Width = 0, int Height = 0, string? ContentType = null, string? FileHash = null,
+    string Ownership = "Provider", bool IsDerived = false);
 public sealed record PreparedFiles(IReadOnlyList<SavedImage> Images, string? NfoPath, IReadOnlyList<string> CreatedPaths);
 
 public sealed class TaskLogService(string databasePath)
@@ -32,6 +34,8 @@ public sealed class TaskLogService(string databasePath)
 
 public sealed class ImageDownloadService(IHttpClientFactory clients)
 {
+    private const long MaximumDownloadBytes = 64L * 1024 * 1024;
+
     public async Task<IReadOnlyList<SavedImage>> DownloadAsync(string imageRoot, string code,
         IReadOnlyList<MetadataImage> images, int timeoutSeconds, CancellationToken cancellationToken)
     {
@@ -41,31 +45,53 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
         using HttpClient client = clients.CreateClient("MetadataImages");
         client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
         int previewIndex = 0;
-        foreach (MetadataImage image in images) {
-            cancellationToken.ThrowIfCancellationRequested();
-            string folder = image.Type == "Poster" ? "SmallPic" : "ExtraPic";
-            string suffix = image.Type == "Poster" ? "" : $"-{++previewIndex:00}";
-            string targetDirectory = Path.Combine(imageRoot, folder);
-            Directory.CreateDirectory(targetDirectory);
-            string target = Path.Combine(targetDirectory, safeCode + suffix + Extension(image.Url));
-            if (File.Exists(target)) {
-                saved.Add(new(image.Type, target, image.Url, new FileInfo(target).Length, false));
-                continue;
-            }
-            string temporary = target + ".lmm-download";
-            try {
+        string temporaryRoot = Path.Combine(imageRoot, ".lmm-temp", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryRoot);
+        try {
+            foreach (MetadataImage image in images) {
+                cancellationToken.ThrowIfCancellationRequested();
+                (string folder, string suffix, string normalizedType) = Destination(image.Type, ++previewIndex);
+                if (normalizedType != "Preview") previewIndex--;
+                string targetDirectory = Path.Combine(imageRoot, folder);
+                Directory.CreateDirectory(targetDirectory);
+                string baseName = safeCode + suffix;
+                string? existing = FindExisting(targetDirectory, baseName);
+                if (existing is not null) {
+                    ImageValidationResult current = await ImageFileValidator.ValidateAsync(existing, null, cancellationToken);
+                    if (current.Valid) {
+                        saved.Add(new(normalizedType, existing, image.Url, current.FileSize, false, current.Width,
+                            current.Height, current.ContentType, current.Sha256, "Legacy"));
+                        continue;
+                    }
+                    throw new InvalidDataException($"已有图片损坏但受到保护，未覆盖：{existing}");
+                }
+
+                string temporary = Path.Combine(temporaryRoot, Guid.NewGuid().ToString("N") + ".part");
                 using HttpResponseMessage response = await client.GetAsync(image.Url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                 response.EnsureSuccessStatusCode();
+                string? declaredType = response.Content.Headers.ContentType?.MediaType;
+                if (response.Content.Headers.ContentLength is > MaximumDownloadBytes)
+                    throw new InvalidDataException("远程图片超过 64 MB 安全限制。");
                 await using (Stream source = await response.Content.ReadAsStreamAsync(cancellationToken))
                 await using (FileStream destination = new(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                    await source.CopyToAsync(destination, cancellationToken);
-                if (new FileInfo(temporary).Length == 0) throw new InvalidDataException("下载的图片为空。");
+                    await CopyWithLimitAsync(source, destination, cancellationToken);
+                ImageValidationResult validation = await ImageFileValidator.ValidateAsync(temporary, declaredType, cancellationToken);
+                if (!validation.Valid) throw new InvalidDataException(validation.Error ?? "图片校验失败。");
+                string target = Path.Combine(targetDirectory, baseName + Extension(validation.ContentType));
+                if (File.Exists(target)) {
+                    File.Delete(temporary);
+                    ImageValidationResult concurrent = await ImageFileValidator.ValidateAsync(target, null, cancellationToken);
+                    if (!concurrent.Valid) throw new InvalidDataException($"目标图片冲突且无效，未覆盖：{target}");
+                    saved.Add(new(normalizedType, target, image.Url, concurrent.FileSize, false, concurrent.Width,
+                        concurrent.Height, concurrent.ContentType, concurrent.Sha256, "Legacy"));
+                    continue;
+                }
                 File.Move(temporary, target, false);
-                saved.Add(new(image.Type, target, image.Url, new FileInfo(target).Length, true));
-            } catch {
-                if (File.Exists(temporary)) File.Delete(temporary);
-                throw;
+                saved.Add(new(normalizedType, target, image.Url, validation.FileSize, true, validation.Width,
+                    validation.Height, validation.ContentType, validation.Sha256));
             }
+        } finally {
+            try { if (Directory.Exists(temporaryRoot)) Directory.Delete(temporaryRoot, true); } catch { }
         }
         return saved;
     }
@@ -74,9 +100,32 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
         string result = string.Concat(value.Select(ch => Path.GetInvalidFileNameChars().Contains(ch) ? '_' : ch)).Trim();
         return string.IsNullOrWhiteSpace(result) ? "unknown" : result;
     }
-    private static string Extension(string url) {
-        string extension = Path.GetExtension(Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) ? uri.AbsolutePath : url).ToLowerInvariant();
-        return extension is ".png" or ".webp" or ".jpeg" ? extension : ".jpg";
+    private static (string Folder, string Suffix, string Type) Destination(string type, int previewIndex) => type switch {
+        "Thumbnail" or "Thumb" => ("SmallPic", "", "Thumbnail"),
+        "Fanart" => ("BigPic", "-fanart", "Fanart"),
+        "BigPic" => ("BigPic", "", "BigPic"),
+        "Preview" or "ExtraPic" => ("ExtraPic", $"-{previewIndex:00}", "Preview"),
+        _ => ("BigPic", "", "Poster"),
+    };
+    private static string? FindExisting(string directory, string baseName) {
+        foreach (string extension in new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif" }) {
+            string candidate = Path.Combine(directory, baseName + extension);
+            if (File.Exists(candidate)) return candidate;
+        }
+        return null;
+    }
+    private static string Extension(string? contentType) => contentType switch {
+        "image/png" => ".png", "image/webp" => ".webp", "image/gif" => ".gif", _ => ".jpg"
+    };
+    private static async Task CopyWithLimitAsync(Stream source, Stream destination, CancellationToken token) {
+        byte[] buffer = new byte[81920]; long total = 0;
+        while (true) {
+            int read = await source.ReadAsync(buffer, token);
+            if (read == 0) break;
+            total += read;
+            if (total > MaximumDownloadBytes) throw new InvalidDataException("远程图片超过 64 MB 安全限制。");
+            await destination.WriteAsync(buffer.AsMemory(0, read), token);
+        }
     }
 }
 
@@ -157,10 +206,15 @@ public sealed class MetadataWriteService(string databasePath)
         }
         foreach (SavedImage image in files.Images.Where(value => value.Created))
             await ExecuteAsync(connection, transaction, """
-                INSERT OR IGNORE INTO Images(MovieId,ActorId,ImageType,FilePath,SourceUrl,FileSize,IsPrimary,SourceProvider,DownloadedAt,CreatedAt,UpdatedAt)
-                VALUES($movie,NULL,$type,$path,$url,$size,$primary,$provider,$at,$at,$at)
+                INSERT OR IGNORE INTO Images(MovieId,ActorId,ImageType,FilePath,SourceUrl,Width,Height,FileSize,FileHash,
+                    IsPrimary,SourceProvider,DownloadedAt,CreatedAt,UpdatedAt,Ownership,IsLocked,IsDerived,ContentType,ValidationStatus,ValidatedAt)
+                VALUES($movie,NULL,$type,$path,$url,$width,$height,$size,$hash,$primary,$provider,$at,$at,$at,
+                    $ownership,0,$derived,$content,'Valid',$at)
                 """, ("$movie", movie.Id), ("$type", image.Type), ("$path", image.Path), ("$url", image.SourceUrl),
-                ("$size", image.Size), ("$primary", image.Type == "Poster" ? 1 : 0), ("$provider", metadata.Provider), ("$at", Now()));
+                ("$width", image.Width), ("$height", image.Height), ("$size", image.Size), ("$hash", image.FileHash),
+                ("$primary", image.Type == "Poster" ? 1 : 0), ("$provider", metadata.Provider),
+                ("$ownership", image.Ownership), ("$derived", image.IsDerived ? 1 : 0),
+                ("$content", image.ContentType), ("$at", Now()));
         string applied = JsonSerializer.Serialize(new { metadata.Provider, metadata.ExternalId, metadata.Code, metadata.Title,
             ImagesDownloaded = files.Images.Count(value => value.Created), ImagesPreserved = files.Images.Count(value => !value.Created),
             Genres = metadata.Genres.Count, Actors = metadata.Actors.Count, NonDestructive = true });
@@ -354,11 +408,12 @@ public sealed class MetadataSyncExecutor(
     private static async Task<string?> ScalarTextAsync(SqliteConnection c,string sql,params (string,object?)[] p){await using var x=c.CreateCommand();x.CommandText=sql;foreach(var(n,v)in p)x.Parameters.AddWithValue(n,v??DBNull.Value);return(await x.ExecuteScalarAsync())?.ToString();}
 }
 
-public sealed class TaskCommandService(string databasePath, LibraryWorkflowService libraries, MetadataSyncExecutor sync)
+public sealed class TaskCommandService(string databasePath, LibraryWorkflowService libraries,
+    MetadataSyncExecutor sync, ImageCacheTaskService imageCache)
 {
-    public async Task<TaskMutationResult> PauseAsync(long id)=>await TypeAsync(id)=="Sync"?await sync.PauseAsync(id):await libraries.PauseTaskAsync(id);
-    public async Task<TaskMutationResult> ResumeAsync(long id)=>await TypeAsync(id)=="Sync"?await sync.ResumeAsync(id):await libraries.ResumeTaskAsync(id);
-    public async Task<TaskMutationResult> CancelAsync(long id)=>await TypeAsync(id)=="Sync"?await sync.CancelAsync(id):await libraries.CancelTaskAsync(id);
-    public async Task<object> RetryAsync(long id)=>await TypeAsync(id)=="Sync"?await sync.RetryAsync(id):await libraries.RetryTaskAsync(id);
+    public async Task<TaskMutationResult> PauseAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.PauseAsync(id), "ImageCacheRebuild"=>await imageCache.PauseAsync(id), _=>await libraries.PauseTaskAsync(id) };
+    public async Task<TaskMutationResult> ResumeAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.ResumeAsync(id), "ImageCacheRebuild"=>await imageCache.ResumeAsync(id), _=>await libraries.ResumeTaskAsync(id) };
+    public async Task<TaskMutationResult> CancelAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.CancelAsync(id), "ImageCacheRebuild"=>await imageCache.CancelAsync(id), _=>await libraries.CancelTaskAsync(id) };
+    public async Task<object> RetryAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.RetryAsync(id), "ImageCacheRebuild"=>await imageCache.RetryAsync(id), _=>await libraries.RetryTaskAsync(id) };
     private async Task<string> TypeAsync(long id){await using var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=databasePath,Mode=SqliteOpenMode.ReadOnly}.ToString());await c.OpenAsync();await using var x=c.CreateCommand();x.CommandText="SELECT TaskType FROM Tasks WHERE Id=$id";x.Parameters.AddWithValue("$id",id);return(await x.ExecuteScalarAsync())?.ToString()??throw new KeyNotFoundException("任务不存在。");}
 }

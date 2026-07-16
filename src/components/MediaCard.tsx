@@ -3,7 +3,7 @@ import NewReleasesRoundedIcon from '@mui/icons-material/NewReleasesRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import { Box, Card, CardContent, Checkbox, Chip, IconButton, Rating, Tooltip, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { MediaItem } from '@/types/media'
 
 const isRecent = (value: string) => {
@@ -17,6 +17,8 @@ export function MediaCardGrid({ children, minWidth = 148 }: { children: ReactNod
 }
 
 export function MediaCard({ item, onPlay, onOpen, selected, onSelect }: { item: MediaItem; onPlay: (item: MediaItem) => void; onOpen?: (item: MediaItem) => void; selected?: boolean; onSelect?: (item: MediaItem, selected: boolean) => void }) {
+  const [coverFailed, setCoverFailed] = useState(false)
+  useEffect(() => setCoverFailed(false), [item.coverUrl])
   const recent = isRecent(item.importedAt)
   const displayTitle = item.title && !item.title.includes('\uFFFD') ? item.title : ''
   const primaryText = item.code || displayTitle || `影片 ${item.dataId}`
@@ -28,11 +30,12 @@ export function MediaCard({ item, onPlay, onOpen, selected, onSelect }: { item: 
         '&:hover .media-play': { opacity: 1, transform: 'translate(-50%,-50%) scale(1)' }, '&:hover .media-image': { transform: 'scale(1.025)' },
         '@media (prefers-reduced-motion: reduce)': { transition: 'none', '& .media-image, & .media-play': { transition: 'none' } } }}>
       <Box sx={{ position: 'relative', aspectRatio: '2 / 3', bgcolor: 'action.hover', overflow: 'hidden' }}>
-        {item.coverUrl ? (
+        {item.coverUrl && !coverFailed ? (
           <Box className="media-image" component="img" src={item.coverUrl} alt={primaryText} loading="lazy"
+            onError={() => setCoverFailed(true)}
             sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', transition: 'transform .35s cubic-bezier(.2,.8,.2,1)' }} />
         ) : (
-          <Box sx={{ height: '100%', display: 'grid', placeItems: 'center', color: 'text.disabled' }}>暂无海报</Box>
+          <Box sx={{ height: '100%', display: 'grid', placeItems: 'center', color: 'text.disabled', px: 1.5, textAlign: 'center' }}>{coverFailed ? '图片损坏或不可用' : '暂无海报'}</Box>
         )}
         <Box sx={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(5,8,14,.08) 45%, rgba(5,8,14,.78) 100%)', pointerEvents: 'none' }}/>
         <Box sx={{ position: 'absolute', top: 8, left: 8, right: 8, display: 'flex', gap: .75, alignItems: 'start', flexWrap: 'wrap' }}>

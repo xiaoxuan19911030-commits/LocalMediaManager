@@ -26,6 +26,7 @@ builder.Services.AddSingleton(new LibraryWorkflowService(databasePath));
 builder.Services.AddSingleton(new MetadataProviderSettingsService(databasePath));
 builder.Services.AddSingleton(new MetadataWriteService(databasePath));
 builder.Services.AddSingleton(new TaskLogService(databasePath));
+builder.Services.AddSingleton(new ImageAssetService(databasePath, imageRoot));
 builder.Services.AddSingleton<ImageDownloadService>();
 builder.Services.AddSingleton<NfoService>();
 builder.Services.AddSingleton<IMetadataProvider, MetaTubeProvider>();
@@ -38,8 +39,15 @@ builder.Services.AddSingleton(serviceProvider => new MetadataSyncExecutor(
     serviceProvider.GetRequiredService<NfoService>(),
     serviceProvider.GetRequiredService<TaskLogService>()));
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<MetadataSyncExecutor>());
+builder.Services.AddSingleton(serviceProvider => new ImageCacheTaskService(
+    databasePath,
+    serviceProvider.GetRequiredService<ImageAssetService>(),
+    serviceProvider.GetRequiredService<TaskLogService>()));
+builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<ImageCacheTaskService>());
 builder.Services.AddSingleton(serviceProvider => new TaskCommandService(databasePath,
-    serviceProvider.GetRequiredService<LibraryWorkflowService>(), serviceProvider.GetRequiredService<MetadataSyncExecutor>()));
+    serviceProvider.GetRequiredService<LibraryWorkflowService>(),
+    serviceProvider.GetRequiredService<MetadataSyncExecutor>(),
+    serviceProvider.GetRequiredService<ImageCacheTaskService>()));
 
 var app = builder.Build();
 app.UseCors();
@@ -238,7 +246,7 @@ app.MapGet("/api/videos", async (int? limit, int? offset, string? search, string
             releaseDate = reader.GetString(6),
             importedAt = reader.GetString(7),
             coverUrl = reader.GetInt64(8) == 1
-                ? $"{bridgeUrl}/api/images/{reader.GetInt64(0)}/primary"
+                ? $"{bridgeUrl}/api/images/{reader.GetInt64(0)}/primary?variant=thumbnail"
                 : null,
         });
     }
@@ -302,33 +310,34 @@ app.MapGet("/api/covers/{code}", (string code) => {
         : Results.File(path, ContentType(path), enableRangeProcessing: true);
 });
 
-app.MapGet("/api/images/{movieId:long}/primary", async (long movieId) => {
-    if (!File.Exists(databasePath)) return Results.NotFound();
-    await using var connection = await OpenReadOnlyAsync(databasePath);
-    await using var command = connection.CreateCommand();
-    command.CommandText = """
-        SELECT FilePath FROM Images
-         WHERE MovieId=$id AND FilePath IS NOT NULL
-         ORDER BY IsPrimary DESC,
-                  CASE ImageType WHEN 'GeneratedCard' THEN 0 WHEN 'Poster' THEN 1 WHEN 'Fanart' THEN 2 ELSE 3 END,
-                  Id
-         LIMIT 1
-        """;
-    command.Parameters.AddWithValue("$id", movieId);
-    string? path = (string?)(await command.ExecuteScalarAsync());
-    return string.IsNullOrWhiteSpace(path) || !File.Exists(path)
-        ? Results.NotFound()
-        : Results.File(path, ContentType(path), enableRangeProcessing: true);
+app.MapGet("/api/images/{movieId:long}/primary", async (long movieId, string? variant, ImageAssetService images, CancellationToken token) => {
+    ImageAssetContent? content = await images.ResolveMovieAsync(movieId, variant ?? "original", token);
+    return content is null ? Results.NotFound() : Results.File(content.Path, content.ContentType, enableRangeProcessing: true);
 });
 
-app.MapGet("/api/actors/{actorId:long}/image", async (long actorId) => {
-    if (!File.Exists(databasePath)) return Results.NotFound();
-    await using var connection = await OpenReadOnlyAsync(databasePath);
-    await using var command = connection.CreateCommand();
-    command.CommandText = "SELECT FilePath FROM Images WHERE ActorId=$id AND FilePath IS NOT NULL ORDER BY IsPrimary DESC,Id LIMIT 1";
-    command.Parameters.AddWithValue("$id", actorId);
-    string? path = (string?)await command.ExecuteScalarAsync();
-    return string.IsNullOrWhiteSpace(path) || !File.Exists(path) ? Results.NotFound() : Results.File(path, ContentType(path), enableRangeProcessing: true);
+app.MapGet("/api/videos/{movieId:long}/images", async (long movieId, ImageAssetService images, CancellationToken token) =>
+    Results.Ok(await images.ReadMovieAssetsAsync(movieId, bridgeUrl, token)));
+
+app.MapGet("/api/image-assets/{imageId:long}/content", async (long imageId, ImageAssetService images, CancellationToken token) => {
+    ImageAssetContent? content = await images.ResolveAssetAsync(imageId, token);
+    return content is null ? Results.NotFound() : Results.File(content.Path, content.ContentType, enableRangeProcessing: true);
+});
+
+app.MapPut("/api/image-assets/{imageId:long}/lock", async (long imageId, ImageLockCommand command, ImageAssetService images, CancellationToken token) =>
+    Results.Ok(await images.SetLockAsync(imageId, command.Locked, token)));
+
+app.MapGet("/api/images/cache/cleanup-preview", async (ImageAssetService images, CancellationToken token) =>
+    Results.Ok(await images.PreviewCacheCleanupAsync(token)));
+
+app.MapPost("/api/images/cache/cleanup", async (ImageCacheCleanupCommand command, ImageAssetService images, CancellationToken token) =>
+    Results.Ok(await images.CleanupCacheAsync(command.ConfirmationToken, token)));
+
+app.MapPost("/api/images/cache/rebuild", async (ImageCacheTaskService tasks) =>
+    Results.Ok(await tasks.EnqueueAsync()));
+
+app.MapGet("/api/actors/{actorId:long}/image", async (long actorId, ImageAssetService images, CancellationToken token) => {
+    ImageAssetContent? content = await images.ResolveActorAsync(actorId, token);
+    return content is null ? Results.NotFound() : Results.File(content.Path, content.ContentType, enableRangeProcessing: true);
 });
 
 app.MapGet("/api/actors/{actorId:long}", async (long actorId) => {

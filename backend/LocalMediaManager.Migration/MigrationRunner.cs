@@ -379,6 +379,38 @@ internal static class MigrationRunner
                         ("$primary", type is "GeneratedCard" or "Poster" ? 1 : 0), ("$at", UtcNow()));
             }
         }
+
+        // Jvedio stores actor portraits as either "{legacy actor id}_{name}.ext"
+        // or "{name}.ext" under Actresses. Match both forms without moving or
+        // rewriting the user's legacy files.
+        string actorFolder = Path.Combine(imageRoot, "Actresses");
+        if (Directory.Exists(actorFolder)) {
+            var actorFiles = Directory.EnumerateFiles(actorFolder, "*", SearchOption.TopDirectoryOnly)
+                .Where(file => new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif" }
+                    .Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
+                .ToDictionary(file => Path.GetFileNameWithoutExtension(file), file => file,
+                    StringComparer.OrdinalIgnoreCase);
+            await using var actorCommand = target.CreateCommand();
+            actorCommand.Transaction = (SqliteTransaction)tx;
+            actorCommand.CommandText = "SELECT Id,Name,LegacyId FROM Actors ORDER BY Id";
+            await using var actorReader = await actorCommand.ExecuteReaderAsync();
+            var actors = new List<(long Id, string Name, long? LegacyId)>();
+            while (await actorReader.ReadAsync())
+                actors.Add((actorReader.GetInt64(0), actorReader.GetString(1),
+                    actorReader.IsDBNull(2) ? null : actorReader.GetInt64(2)));
+            await actorReader.DisposeAsync();
+
+            foreach ((long actorId, string actorName, long? legacyId) in actors) {
+                string? file = null;
+                if (legacyId.HasValue) actorFiles.TryGetValue($"{legacyId.Value}_{actorName}", out file);
+                if (file is null) actorFiles.TryGetValue(actorName, out file);
+                if (file is null) continue;
+                var info = new FileInfo(file);
+                await ExecuteAsync(target,
+                    "INSERT OR IGNORE INTO Images(MovieId,ActorId,ImageType,FilePath,SourceUrl,FileSize,IsPrimary,SourceProvider,CreatedAt,UpdatedAt) VALUES(NULL,$actor,'ActorAvatar',$path,NULL,$size,1,'LegacyFile',$at,$at)",
+                    tx, ("$actor", actorId), ("$path", file), ("$size", info.Length), ("$at", UtcNow()));
+            }
+        }
         counts["Images"] = await ScalarLong(target, "SELECT COUNT(*) FROM Images", tx);
     }
 

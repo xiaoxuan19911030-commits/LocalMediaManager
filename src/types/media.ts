@@ -182,3 +182,16 @@ export interface ImpactPreview { operation: string; entityId: number; name: stri
 export interface ActorRepairPreview { candidateActors: number; affectedRelations: number; confirmationToken: string; warnings: string[] }
 export interface NeighborResult { previousId?: number; nextId?: number }
 export interface MovieDeletePreview { movieId: number; code: string; fileName: string; ratingWillBeRemembered: boolean; confirmationToken: string; warnings: string[] }
+
+export interface ImageAsset {
+  id: number; type: string; url?: string; ownership: string; locked: boolean; derived: boolean
+  primary: boolean; validationStatus: string; width: number; height: number; fileSize: number
+  provider?: string; downloadedAt?: string
+}
+export interface ImageMutationResult { changed: boolean; message: string }
+export interface ImageCachePreview {
+  entries: number; existingEntries: number; missingEntries: number; bytes: number
+  confirmationToken: string; warnings: string[]
+}
+export interface ImageCacheCleanupResult { deletedEntries: number; deletedBytes: number; failedEntries: number; message: string }
+export interface ImageCacheRebuildLaunchResult { taskId: number; status: string; totalItems: number; message: string }
