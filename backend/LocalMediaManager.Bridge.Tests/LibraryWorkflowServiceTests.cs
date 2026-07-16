@@ -84,6 +84,46 @@ public sealed class LibraryWorkflowServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task LibraryCrudPersistsMultipleSourcesAndScanRulesForExistingRunner()
+    {
+        string secondRoot = Path.Combine(root, "second-media");
+        Directory.CreateDirectory(secondRoot);
+        await File.WriteAllBytesAsync(Path.Combine(MediaRoot, "PRIMARY-001.mp4"), [1]);
+        await File.WriteAllBytesAsync(Path.Combine(MediaRoot, "skip-this.mkv"), [2]);
+        await File.WriteAllBytesAsync(Path.Combine(secondRoot, "SECONDARY-001.avi"), [3]);
+
+        LibraryMutationResult library = await service.CreateLibraryAsync(new(
+            "Multi source", "Initial source rules", true,
+            [
+                new(MediaRoot, IncludeSubfolders: true, Enabled: true, ScanMode: "normal", ExcludePatterns: ["skip-*"]),
+                new(secondRoot, IncludeSubfolders: false, Enabled: true, ScanMode: "manual", ExcludePatterns: []),
+            ]));
+
+        await service.UpdateLibraryAsync(library.Id, new(
+            "Multi source updated", "Rules saved through CRUD", true,
+            [
+                new(MediaRoot, IncludeSubfolders: false, Enabled: true, ScanMode: "watch", ExcludePatterns: ["skip-*", "*.nfo"]),
+                new(secondRoot, IncludeSubfolders: true, Enabled: true, ScanMode: "manual", ExcludePatterns: []),
+            ]));
+
+        await using (var connection = await Open()) {
+            Assert.Equal(2, await Scalar(connection, "SELECT COUNT(*) FROM LibraryFolders WHERE LibraryId=" + library.Id));
+            Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM LibraryFolders WHERE LibraryId=" + library.Id + " AND ScanMode='watch' AND IncludeSubfolders=0"));
+            Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM LibraryFolders WHERE LibraryId=" + library.Id + " AND ScanMode='manual' AND IncludeSubfolders=1"));
+            Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM LibraryFolders WHERE LibraryId=" + library.Id + " AND ExcludePatternsJson LIKE '%skip-%'"));
+        }
+
+        ScanLaunchResult scan = await service.StartScanAsync(library.Id, new(FullScan: true, AutoSync: false));
+        Assert.True(await service.RunQueuedScanForTestsAsync(scan.TaskId));
+        Assert.Equal("Completed", await WaitForTask(scan.TaskId));
+
+        await using var verify = await Open();
+        Assert.Equal(2, await Scalar(verify, "SELECT COUNT(*) FROM MediaFiles WHERE LibraryId=" + library.Id + " AND MediaType='Video'"));
+        Assert.Equal(0, await Scalar(verify, "SELECT COUNT(*) FROM MediaFiles WHERE FileName='skip-this.mkv'"));
+        Assert.Equal(2, await Scalar(verify, "SELECT COUNT(*) FROM LibraryFolders WHERE LibraryId=" + library.Id + " AND LastScannedAt IS NOT NULL"));
+    }
+
+    [Fact]
     public async Task ScanTaskLifecycleIsPersistentRecoverableAndIdempotent()
     {
         await File.WriteAllBytesAsync(Path.Combine(MediaRoot, "LIFE-001.mp4"), [1]);
