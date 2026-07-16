@@ -115,14 +115,15 @@ Planning → Design → Develop → Self Test → Smoke Test → Freeze → Rele
 
 2026-07-16 已完成图片、NFO、文件整理、限定交互修复、30 部真实 MetaTube 隔离烟测、Debug/Release 门禁、NSIS 安装复验及 Bridge Release 生命周期验收。未完成的智能卡图、敏感 Header/Cookie、完整任务类型和浏览体验项保留在 TODO/Feature Parity Matrix，不以本次发布冒充完成。
 
-## 0.5.0 — Media Management
+## 0.5.0 — Feature Parity Release
 
-**状态：Future**
+**状态：Planning / Sprint 0.5.0-01 Audit complete**
 
-- 对 0.4.1–0.4.3 的媒体管理功能执行最终等价验收
-- 完成剩余 Duplicate Manager 与完整 Task Manager 边界
-- 关闭 Feature Parity Matrix 中必须保留功能的证据缺口
-- 发布主要旧版媒体管理功能等价版本
+- 对 0.4.1–0.4.3 的媒体管理功能执行最终等价验收；审计结论见 [`audits/FEATURE_PARITY_AUDIT_0.5.0-01.md`](audits/FEATURE_PARITY_AUDIT_0.5.0-01.md)。
+- 首先关闭 P0 的任务生命周期、安装版扫描导入、受保护元数据写入、查重安全工作流和文件操作故障恢复。
+- 统一 Bridge DTO、错误、日志、超时、重试和任务状态；数据库、Bridge、性能审计分别记录在 `docs/audits/`。
+- 仅修复阻塞功能的 UI 问题；不新增 AI、NAS、插件市场、OCR、语义搜索、推荐、助手或大型 UI 重构。
+- 达到完整迁移门槛后才发布主要旧版媒体管理功能等价版本。
 
 ## 0.5.5 — LTS Stability
 

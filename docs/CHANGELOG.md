@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Planning
+
+- 启动 Sprint 0.5.0-01 `Feature Parity Finalization`，先完成基于旧版源码、Next 实现、Migration、Bridge、测试和安装版证据的审计，再按 P0/P1 补齐功能。
+- 新增 Feature Parity、Bridge API、Database Health 和 Performance Baseline 审计报告；不把页面、只读接口或单条预检提升为完整迁移。
+
 ## [0.4.3] - 2026-07-16
 
 ### Planning

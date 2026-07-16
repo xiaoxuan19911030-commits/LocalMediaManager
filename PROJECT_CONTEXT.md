@@ -83,10 +83,9 @@ LMM Next 没有 `DesignSystem.xaml`。统一设计体系基于 Material UI，并
 
 ## 6. 当前版本上下文
 
-- 当前已发布版本：0.4.1，第一阶段旧功能迁移。
-- Sprint 0.4.2：扫描导入和 MetaTube 同步执行器已经完成主要实现，仍需安装版与发布验收。
-- Sprint 0.4.3：处于 Planning，主题为 Media Assets & File Organization。
-- 0.5.0：主要旧版媒体管理功能等价验收。
+- 当前已发布版本：0.4.3（2026-07-16），图片、NFO、文件整理、真实 MetaTube 隔离烟测和 Bridge Release 生命周期已完成发布验收。
+- Sprint 0.5.0-01：处于 Planning；已完成 Feature Parity、Bridge、数据库和性能基线审计，尚未进入功能实现或 Release。
+- 0.5.0：主要旧版媒体管理功能等价验收；严格状态和证据以功能矩阵与审计报告为准。
 - 0.5.5：LTS 稳定性、性能、内存、启动速度和大媒体库优化。
 - 0.6.0：在稳定底盘上开始受控 AI Provider 能力。
 
