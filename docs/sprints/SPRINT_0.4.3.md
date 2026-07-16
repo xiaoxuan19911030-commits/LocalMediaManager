@@ -2,12 +2,12 @@
 
 ## Lifecycle
 
-- Current stage: **Planning**
+- Current stage: **Released and Archived (2026-07-16)**
 - Previous checkpoint: Sprint 0.4.2 Batch 2 implementation and self-test complete
-- Entry condition for Develop: this plan, Roadmap, TODO, Feature Parity Matrix and Test Plan agree on scope
+- Release evidence: 31 Bridge tests in Debug/Release, Rust lifecycle test in Debug/Release, 30-title isolated MetaTube smoke, NSIS install smoke and installed UI acceptance
 - Exit condition: `Planning → Design → Develop → Self Test → Smoke Test → Freeze → Release → Archive`
 
-Sprint 0.4.2 Batch 2 completion means its executor, Provider, Migration 0005 and installed build are available. It does not mean MetaTube is fully accepted: real-provider sampling remains open and is an explicit 0.4.3 deliverable.
+At Sprint entry, the 0.4.2 Batch 2 executor, Provider, Migration 0005 and installed build were available, but MetaTube had not yet passed real-provider sampling. That release gate was completed by the isolated 30-title run documented in `releases/0.4.3-METATUBE-SMOKE.md`.
 
 ## Sprint goal
 

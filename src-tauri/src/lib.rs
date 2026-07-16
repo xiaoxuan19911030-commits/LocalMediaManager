@@ -56,11 +56,20 @@ fn migration_candidates(app: &tauri::App) -> Vec<PathBuf> {
 fn configure_release_process(command: &mut Command, log_path: &Path) -> std::io::Result<()> {
     if cfg!(debug_assertions) { return Ok(()); }
     if let Some(parent) = log_path.parent() { fs::create_dir_all(parent)?; }
+    rotate_log(log_path)?;
     let output = OpenOptions::new().create(true).append(true).open(log_path)?;
     command.stdout(Stdio::from(output.try_clone()?)).stderr(Stdio::from(output));
     #[cfg(windows)]
     command.creation_flags(0x0800_0000);
     Ok(())
+}
+
+fn rotate_log(path: &Path) -> std::io::Result<()> {
+    const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
+    if path.metadata().map(|metadata| metadata.len()).unwrap_or(0) < MAX_LOG_BYTES { return Ok(()); }
+    let rotated = path.with_extension("log.1");
+    if rotated.exists() { fs::remove_file(&rotated)?; }
+    fs::rename(path, rotated)
 }
 
 fn bridge_port_is_in_use() -> bool {
@@ -114,4 +123,26 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rotate_log;
+    use std::{fs::{self, OpenOptions}, path::PathBuf};
+    use uuid::Uuid;
+
+    #[test]
+    fn oversized_release_log_is_rotated_without_deleting_evidence() {
+        let root: PathBuf = std::env::temp_dir().join(format!("lmm-log-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let log = root.join("bridge.log");
+        let file = OpenOptions::new().create(true).write(true).open(&log).unwrap();
+        file.set_len(5 * 1024 * 1024 + 1).unwrap();
+
+        rotate_log(&log).unwrap();
+
+        assert!(!log.exists());
+        assert!(root.join("bridge.log.1").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
 }

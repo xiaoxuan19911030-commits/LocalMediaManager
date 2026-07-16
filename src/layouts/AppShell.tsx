@@ -33,7 +33,7 @@ export default function AppShell(){
       <Box component="form" onSubmit={submit} sx={{px:1.25,pt:1.25}}><TextField size="small" fullWidth value={search} onChange={(event)=>setSearch(event.target.value)} placeholder="全局搜索"
         slotProps={{input:{startAdornment:<InputAdornment position="start"><SearchRoundedIcon fontSize="small"/></InputAdornment>}}}/></Box>
       <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}><List sx={{px:1,py:1}}>{nav(primary)}</List><Divider sx={{mx:1}}/><List sx={{px:1,py:1}}>{nav(utility)}</List></Box>
-      <Box><Divider/><Box sx={{px:2,py:1.25}}><Typography variant="caption" color={bridgeOnline===false?'error.main':'text.secondary'}>LMM 0.4.1 · {bridgeOnline===false?'Bridge 已断开':'Bridge 已连接'}</Typography></Box></Box>
+      <Box><Divider/><Box sx={{px:2,py:1.25}}><Typography variant="caption" color={bridgeOnline===false?'error.main':'text.secondary'}>LMM 0.4.3 · {bridgeOnline===false?'Bridge 已断开':'Bridge 已连接'}</Typography></Box></Box>
     </Paper>
     <Box component="main" sx={{overflowY:'auto',p:{xs:2,md:3},minWidth:0}}>{bridgeOnline===false&&<Alert severity="error" sx={{mb:2}}>Bridge 已停止响应。请保存当前操作并重新启动 Local Media Manager；未完成的持久任务会在下次启动时恢复为可重试状态。</Alert>}<Outlet/></Box>
   </Box>

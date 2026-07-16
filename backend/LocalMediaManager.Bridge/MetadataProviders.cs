@@ -102,7 +102,7 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
         HttpClient client = clients.CreateClient("MetaTube");
         client.Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.Clear();
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.4.2"));
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.4.3"));
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         return client;
     }

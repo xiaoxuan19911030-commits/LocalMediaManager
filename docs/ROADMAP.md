@@ -90,7 +90,7 @@ Planning → Design → Develop → Self Test → Smoke Test → Freeze → Rele
 
 ## 0.4.2 — Legacy Feature Migration Part 2
 
-**状态：Develop**
+**状态：Completed（发布内容并入 0.4.3）**
 
 - 媒体扫描与导入
 - 新增后自动同步
@@ -98,11 +98,11 @@ Planning → Design → Develop → Self Test → Smoke Test → Freeze → Rele
 - 同步执行器、非破坏写入与任务恢复
 - 扫描和同步长操作接入 Tasks
 
-当前开发证据：扫描导入第一批与 MetaTube 同步执行器已完成代码和自动化测试；Migration `0005_MetadataSyncWorkflow` 已加入。2026-07-16 已对 MetaTube `v1.4.0-c0e053f` 完成只读协议预检（搜索、详情、主图）；安装版写入烟测和发布验收仍未完成，因此 0.4.2 保持 `Develop`。
+开发证据：扫描导入、MetaTube 同步执行器、Migration `0004`/`0005`、任务控制与非破坏写入均已完成；真实 Provider 写入验收在 0.4.3 的隔离 30 部烟测中完成，因此该批次随 0.4.3 一并发布。
 
 ## 0.4.3 — Media Assets & File Organization
 
-**状态：Planning**
+**状态：Released（2026-07-16）**
 
 - poster、thumb、fanart、BigPic、ExtraPic、演员图与安全图片缓存
 - 完整 NFO 读取、写入、所有权和覆盖策略
@@ -112,6 +112,8 @@ Planning → Design → Develop → Self Test → Smoke Test → Freeze → Rele
 - 标签编辑、详情海报和播放器路径等限定交互修复
 
 正式范围和验收门槛见 [`sprints/SPRINT_0.4.3.md`](sprints/SPRINT_0.4.3.md)。原 Stability Update 中的数据库、性能、内存和大媒体库优化归入 0.5.5 LTS。
+
+2026-07-16 已完成图片、NFO、文件整理、限定交互修复、30 部真实 MetaTube 隔离烟测、Debug/Release 门禁、NSIS 安装复验及 Bridge Release 生命周期验收。未完成的智能卡图、敏感 Header/Cookie、完整任务类型和浏览体验项保留在 TODO/Feature Parity Matrix，不以本次发布冒充完成。
 
 ## 0.5.0 — Media Management
 

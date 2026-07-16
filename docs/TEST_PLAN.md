@@ -157,54 +157,54 @@
 
 ### TP-SYNC 同步与 MetaTube
 
-- [ ] 手工同步入口始终保留，自动同步是附加能力。
-- [ ] 默认补空字段，不覆盖用户标题、标签、评分、收藏和图片锁定。
-- [ ] MetaTube 结果按番号选择，来源、演员图和预览图分别记录。
-- [ ] 精确番号结果优先，并按 `FANZA/MGS/JavBus/JAV321/AVBASE` 旧版顺序选择 Provider。
-- [ ] Provider 地址、超时、图片、NFO 和自动执行设置经 Settings Service 保存，连接测试不隐式保存。
-- [ ] 网络失败、无结果、部分字段失败不破坏旧数据。
-- [ ] 图片使用临时文件原子落盘；失败只清理本次新文件，不删除已有图片/NFO。
-- [ ] 批量同步进入 Tasks，可取消、重试并查看日志。
+- [x] 手工同步入口始终保留，自动同步是附加能力。
+- [x] 默认补空字段，不覆盖用户标题、标签、评分、收藏和图片锁定。
+- [x] MetaTube 结果按番号选择，来源、演员图和预览图分别记录。
+- [x] 精确番号结果优先，并按 `FANZA/MGS/JavBus/JAV321/AVBASE` 旧版顺序选择 Provider。
+- [x] Provider 地址、超时、图片、NFO 和自动执行设置经 Settings Service 保存，连接测试不隐式保存。
+- [x] 网络失败、无结果、部分字段失败不破坏旧数据。
+- [x] 图片使用临时文件原子落盘；失败只清理本次新文件，不删除已有图片/NFO。
+- [x] 批量同步进入 Tasks，可取消、重试并查看日志。
 - [x] 只读协议预检：MetaTube `v1.4.0-c0e053f` 搜索 `ABP-001` 返回 8 条，FANZA 详情返回演员/类型/预览，主图返回 JPEG（92,237 字节）；2026-07-16，未写正式数据。
-- [ ] 在数据库副本和专用图片/NFO 根目录，对固定 30–50 部样本完成真实写入烟测并保留逐部 before/after、Provider、任务和保护字段证据。
+- [x] 在数据库副本和专用图片/NFO 根目录，对固定 30 部样本完成真实写入烟测并保留逐部 before/after、Provider、任务和保护字段证据；公开汇总见 `releases/0.4.3-METATUBE-SMOKE.md`。
 
 ### TP-NFO NFO
 
-- [ ] 导入/导出标题、简介、日期、演员、标签和图片引用。
-- [ ] 图片、演员图、截图、预览图和覆盖行为使用独立设置。
-- [ ] 样本往返后用户字段不丢失。
-- [ ] 文件系统写入失败时数据库和旧 NFO 保持安全。
+- [x] 导入/导出标题、简介、日期、演员、标签和图片引用。
+- [x] 图片、演员图、截图、预览图和覆盖行为使用独立设置。
+- [x] 样本往返后用户字段不丢失。
+- [x] 文件系统写入失败时数据库和旧 NFO 保持安全。
 
 ### TP-IMAGES 图片与卡图
 
-- [ ] poster、thumb、fanart 用途和优先级正确。
-- [ ] BigPic、ExtraPic、统一目录和相对影片目录均兼容。
-- [ ] 列表加载缩略图，详情按需加载高清图。
+- [x] poster、thumb、fanart 用途和优先级正确。
+- [x] BigPic、ExtraPic、统一目录和相对影片目录均兼容。
+- [x] 列表加载缩略图，详情按需加载高清图。
 - [ ] 智能卡图自动补全进入 Tasks。
 - [ ] 重新识别、居中、居左、居右均可修正且不覆盖源图。
-- [ ] 清理缓存只删除派生缓存，不删除源图和专用卡图。
+- [x] 清理缓存只删除派生缓存，不删除源图和专用卡图。
 
 ### TP-FILES 重命名与整理
 
-- [ ] 操作前显示旧路径、新路径和影响数量。
-- [ ] 目标存在时绝不覆盖。
-- [ ] 文件与数据库更新保持事务一致或可补偿回滚。
+- [x] 操作前显示旧路径、新路径和影响数量。
+- [x] 目标存在时绝不覆盖。
+- [x] 文件与数据库更新保持事务一致或可补偿回滚。
 - [ ] 中途失败、权限不足、NAS 断线场景有可恢复结果。
 
 ### TP-TASKS 任务中心
 
-- [ ] `Pending/Preparing/FetchingMetadata/DownloadingImages/WritingMetadata/WritingNfo/Retrying/Paused/Completed/Failed/Cancelled` 状态转换有效。
-- [ ] 显示行为、状态、名称、进度和日期。
-- [ ] 暂停、继续、取消、重试和日志工作正常。
-- [ ] 应用重启后持久任务状态可恢复。
-- [ ] 异常退出的同步任务记录“上次异常中断”并进入可重试队列，不永久卡在运行阶段。
+- [x] `Pending/Preparing/FetchingMetadata/DownloadingImages/WritingMetadata/WritingNfo/Retrying/Paused/Completed/Failed/Cancelled` 状态转换有效。
+- [x] 显示行为、状态、名称、进度和日期。
+- [x] 暂停、继续、取消、重试和日志工作正常。
+- [x] 应用重启后持久任务状态可恢复。
+- [x] 异常退出的同步任务记录“上次异常中断”并进入可重试队列，不永久卡在运行阶段。
 
 ## 6. 体验与扩展
 
 ### TP-UI（★★★★☆）
 
 - [ ] 所有页面复用 AppShell、PageHeader、主题和公共组件。
-- [ ] 深浅主题文字、边框、状态色和 Hover 可读。
+- [x] 深浅主题文字、边框、状态色和 Hover 可读。
 - [ ] 100%/125%/150% 缩放无页面级横向溢出。
 - [ ] 空态、加载态、Bridge 错误和部分数据状态完整。
 - [ ] 键盘焦点、Enter/Space、Tooltip 和减少动态效果通过。
@@ -218,11 +218,11 @@
 
 ### TP-BRIDGE-RELEASE（★★★★☆）
 
-- [ ] Release 后台启动不显示控制台；Debug 保留控制台诊断。
-- [ ] 文件日志轮转且不记录密钥、Cookie 或完整私人路径。
-- [ ] 单实例、端口占用、Bridge 早退和崩溃均给出可理解诊断。
-- [ ] 正常退出不残留 Bridge；异常退出后再次启动可恢复。
-- [ ] 安装版只使用打包 Bridge/Migration，不回退到源码目录。
+- [x] Release 后台启动不显示控制台；Debug 保留控制台诊断。
+- [x] 文件日志轮转且不记录密钥、Cookie 或完整私人路径。
+- [x] 单实例、端口占用、Bridge 早退和崩溃均给出可理解诊断。
+- [x] 正常退出不残留 Bridge；异常退出后再次启动可恢复。
+- [x] 安装版只使用打包 Bridge/Migration，不回退到源码目录。
 
 ### TP-PLUGINS（★★☆☆☆）
 
@@ -250,16 +250,16 @@
 
 ## 8. 构建与部署清单
 
-- [ ] `pnpm build:web`
-- [ ] Bridge Debug / Release
-- [ ] Migration Debug / Release
-- [ ] Bridge 和 Migration 随包 publish
-- [ ] Tauri Debug / Release
-- [ ] Windows NSIS
-- [ ] 现有 `D:\Local Media Manager Next` 完整备份并核对文件数
-- [ ] 安装器退出码为 0
-- [ ] 安装版启动、Bridge health、真实数据库和关键页面烟测
-- [ ] Git 工作树干净，Commit、版本标签、回滚标签正确
+- [x] `pnpm build:web`
+- [x] Bridge Debug / Release
+- [x] Migration Debug / Release
+- [x] Bridge 和 Migration 随包 publish
+- [x] Tauri Debug / Release
+- [x] Windows NSIS
+- [x] 现有 `D:\Local Media Manager Next` 完整备份并核对文件数
+- [x] 安装器退出码为 0
+- [x] 安装版启动、Bridge health、真实数据库和关键页面烟测
+- [x] Git 工作树干净，Commit、版本标签、回滚标签正确（发布提交后以 `v0.4.3`、`sprint/0.4.3`、`rollback/v0.4.3` 复核）
 
 ## 9. 版本验收记录模板
 

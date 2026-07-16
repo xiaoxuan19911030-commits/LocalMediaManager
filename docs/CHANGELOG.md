@@ -4,15 +4,23 @@
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-07-16
+
 ### Planning
 
 - 新增统一的 `AI_RULES.md` 与 `PROJECT_CONTEXT.md`：任何开发者、AI、账号、模型或 API Provider 都遵守同一架构、UI、数据安全、测试和发布规则，并可读取长期产品决策。
 - 正式建立 Sprint 0.4.3 `Media Assets & File Organization` 计划，覆盖图片、NFO、文件整理、MetaTube 真实烟测、Bridge Release 生命周期和限定交互修复。
 - GitHub `main` 增加稳定发布门槛：中间 Sprint 提交保留在本地分支，完成 Self Test、Smoke Test、Freeze 和 Release 后才允许推送。
-- 2026-07-16 对本地 MetaTube `v1.4.0-c0e053f` 完成只读搜索、详情和主图协议预检；30–50 部真实写入烟测仍是 0.4.3 发布门槛。
+- 2026-07-16 对本地 MetaTube `v1.4.0-c0e053f` 完成只读协议预检，并以数据库副本和隔离资源目录完成 30 部真实写入烟测。
 
 ### Added
 
+- Migration `0006_ImageAssetWorkflow`、`0007_NfoWorkflow`、`0008_FileOrganizerWorkflow` 与 `0009_PlaybackSettings`。
+- Poster/Thumb/Fanart/BigPic/ExtraPic、演员头像兼容导入、图片锁定、校验、原子保存以及可检查/清理/重建的缩略缓存。
+- NFO 导入、导出、Provider 自动写入、用户文件锁定、独立输出目录、非覆盖策略和失败恢复。
+- 文件整理 `Dry Run → Preview → Confirm → Task Execute`，包含路径冲突、无覆盖、审计和文件/数据库补偿恢复。
+- 可重复的隔离 MetaTube 烟测工具及 30 部真实样本报告。
+- 播放器 Settings Service、旧配置回退和 Migration 持久化。
 - Migration `0005_MetadataSyncWorkflow`：同步阶段、Provider、重试次数、当前影片、结果摘要、取消标记、Next 原生设置与同步前快照。
 - 独立 `IMetadataProvider`、`MetaTubeProvider`、`MetadataSyncExecutor`、非破坏写入、图片下载、NFO 和持久任务日志服务。
 - MetaTube Provider 设置、连接测试、详情页手动同步与同步任务全阶段控制。
@@ -24,6 +32,11 @@
 
 ### Changed
 
+- Release 版 Bridge/Migration 隐藏控制台并写入滚动文件日志；端口占用阻止重复实例，主程序退出后等待 Bridge 完整结束，前端持续检测 Bridge 健康状态。
+- 版本统一升级到 0.4.3；Debug/Release、NSIS 安装、单实例、无控制台、日志、退出无残留及已安装关键页面烟测通过。
+- 发布证据汇总至 `releases/0.4.3-VERIFICATION.md`；未完成项目继续保留在 TODO 与 Feature Parity Matrix。
+- 标签编辑改为顶部已选标签与可搜索标签池；详情海报适度放大并保持原 Information Layout。
+- MetaTube 搜索 `404` 明确归类为无结果，不再执行三次无意义重试；错误日志保留最后一次 Provider 原因。
 - 修正安装版 Tauri 资源解析，Bridge/Migration 从安装目录 `resources` 启动，不再依赖开发机源码路径。
 - Pending 同步任务现在由 Bridge 后台执行器领取；异常退出任务会记录“上次异常中断”并进入可重试状态。
 - 任务中心显示准备、获取元数据、下载图片、写入元数据、写入 NFO 和重试阶段。

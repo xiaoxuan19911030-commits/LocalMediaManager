@@ -108,7 +108,7 @@ export default function SettingsPage() {
           </Table></TableContainer>
         </SettingsSection>}
         {category === 'advanced' && <SettingsSection title="关于 Local Media Manager" description="本地优先、可维护的现代媒体管理工具。">
-          <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}><BrandMark/><Typography color="text.secondary">版本 0.4.1</Typography></Box>
+          <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}><BrandMark/><Typography color="text.secondary">版本 0.4.3</Typography></Box>
         </SettingsSection>}
         {compatibility.length > 0 && <Accordion disableGutters><AccordionSummary expandIcon={<ExpandMoreRoundedIcon />}>
           <Typography sx={{ fontWeight: 700 }}>兼容字段（{compatibility.length}）</Typography></AccordionSummary>
