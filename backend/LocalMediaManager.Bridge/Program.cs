@@ -30,6 +30,7 @@ builder.Services.AddSingleton(new MetadataProviderSettingsService(databasePath))
 builder.Services.AddSingleton(new MetadataWriteService(databasePath));
 builder.Services.AddSingleton(new TaskLogService(databasePath));
 builder.Services.AddSingleton(new ImageAssetService(databasePath, imageRoot));
+builder.Services.AddSingleton(new DataSafetyService(databasePath, configDatabasePath, imageRoot));
 builder.Services.AddSingleton<ImageDownloadService>();
 builder.Services.AddSingleton(new NfoService(databasePath));
 builder.Services.AddSingleton<IMetadataProvider, MetaTubeProvider>();
@@ -114,6 +115,20 @@ app.MapPut("/api/settings/providers/metatube", async (MetaTubeSettingsDto input,
     Results.Ok(await settings.SaveMetaTubeAsync(input)));
 app.MapPost("/api/settings/providers/metatube/test", async (MetaTubeSettingsDto input, IMetadataProvider provider) =>
     Results.Ok(await provider.TestConnectionAsync(input with { BaseUrl = input.BaseUrl.Trim().TrimEnd('/') + "/" }, CancellationToken.None)));
+app.MapGet("/api/settings/data-safety/overview", async (DataSafetyService safety) =>
+    Results.Ok(await safety.OverviewAsync()));
+app.MapPost("/api/settings/data-safety/backup", async (BackupCreateCommand command, DataSafetyService safety, CancellationToken token) =>
+    Results.Ok(await safety.CreateBackupAsync(command, token)));
+app.MapGet("/api/settings/data-safety/backup/validate", async (string path, DataSafetyService safety, CancellationToken token) =>
+    Results.Ok(await safety.ValidateBackupAsync(path, token)));
+app.MapPost("/api/settings/data-safety/restore-plan", async (RestorePlanCommand command, DataSafetyService safety, CancellationToken token) =>
+    Results.Ok(await safety.CreateRestorePlanAsync(command, token)));
+app.MapGet("/api/settings/export", async (MetadataProviderSettingsService settings, DataSafetyService safety) =>
+    Results.Ok(await safety.ExportSettingsAsync(await settings.ReadMetaTubeAsync())));
+app.MapPost("/api/settings/import-preview", async (JsonElement payload, DataSafetyService safety) =>
+    Results.Ok(await safety.PreviewSettingsImportAsync(payload)));
+app.MapGet("/api/settings/diagnostics", async (DataSafetyService safety, CancellationToken token) =>
+    Results.Ok(await safety.DiagnosticsAsync(token)));
 
 app.MapGet("/api/dashboard", async () => File.Exists(databasePath)
     ? Results.Ok(await ProductReader.ReadDashboardAsync(databasePath, bridgeUrl))

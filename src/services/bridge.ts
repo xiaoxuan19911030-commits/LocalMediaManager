@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateResults, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageMutationResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, ScanLaunchResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
-import type { MetaTubeSettings, NfoSettings, PlaybackSettings, ProviderConnectionResult, SettingsSnapshot } from '@/types/settings'
+import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, MetaTubeSettings, NfoSettings, PlaybackSettings, ProviderConnectionResult, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
 
@@ -32,6 +32,13 @@ export const bridge = {
     return request<MediaPageResult>(`/api/videos?${query}`)
   },
   settings: () => request<SettingsSnapshot>('/api/settings'),
+  dataSafetyOverview: () => request<DataSafetyOverview>('/api/settings/data-safety/overview'),
+  createBackup: (value: BackupCreateCommand) => request<BackupResult>('/api/settings/data-safety/backup', { method: 'POST', body: JSON.stringify(value) }),
+  validateBackup: (path: string) => request<BackupValidation>(`/api/settings/data-safety/backup/validate?${new URLSearchParams({ path })}`),
+  createRestorePlan: (backupPath: string, mode: string) => request<RestorePlan>('/api/settings/data-safety/restore-plan', { method: 'POST', body: JSON.stringify({ backupPath, mode }) }),
+  exportSettings: () => request<SettingsExport>('/api/settings/export'),
+  previewSettingsImport: (value: unknown) => request<SettingsImportPreview>('/api/settings/import-preview', { method: 'POST', body: JSON.stringify(value) }),
+  settingsDiagnostics: () => request<SystemDiagnostic>('/api/settings/diagnostics'),
   saveMetaTubeSettings: (value: MetaTubeSettings) => request<MetaTubeSettings>('/api/settings/providers/metatube', { method: 'PUT', body: JSON.stringify(value) }),
   testMetaTube: (value: MetaTubeSettings) => request<ProviderConnectionResult>('/api/settings/providers/metatube/test', { method: 'POST', body: JSON.stringify(value) }),
   nfoSettings: () => request<NfoSettings>('/api/settings/nfo'),

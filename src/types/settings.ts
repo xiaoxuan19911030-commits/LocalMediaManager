@@ -31,3 +31,19 @@ export interface MetaTubeSettings {
 export interface ProviderConnectionResult { success: boolean; provider: string; message: string; elapsedMilliseconds: number }
 export interface NfoSettings { exportPolicy: 'SkipExisting' | 'SeparateFile'; outputDirectory: string; fillEmptyOnly: boolean; includeImages: boolean }
 export interface PlaybackSettings { playerPath: string; useSystemDefault: boolean }
+
+export interface DataSafetyOverview {
+  databasePath: string; databaseBytes: number; configDatabasePath: string
+  backupDirectory: string; cacheDirectory: string; logDirectory: string; lastBackupAt?: string
+}
+export interface BackupCreateCommand { includeConfig: boolean; includeGeneratedCache: boolean }
+export interface BackupResult { backupPath: string; bytes: number; createdAt: string; included: string[]; warnings: string[] }
+export interface BackupValidation {
+  valid: boolean; backupPath: string; bytes: number; createdAt: string; hasDatabase: boolean
+  hasConfig: boolean; entries: string[]; errors: string[]
+}
+export interface RestorePlan { planPath: string; backupPath: string; mode: string; createdAt: string; steps: string[]; warnings: string[] }
+export interface SettingsExport { exportedAt: string; product: string; version: string; settings: unknown }
+export interface SettingsImportPreview { valid: boolean; version: string; categories: string[]; changes: string[]; warnings: string[] }
+export interface DiagnosticCheck { key: string; label: string; status: 'success' | 'warning' | 'error' | 'info'; detail: string }
+export interface SystemDiagnostic { checkedAt: string; checks: DiagnosticCheck[]; recentLogs: string[] }

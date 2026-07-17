@@ -26,5 +26,22 @@ export function MaintenanceStatusBadge({ severity, label }: { severity?: string;
 
 export function TaskStatusBadge({ status }: { status: string }) {
   const tone: StatusTone = status === 'Completed' ? 'success' : status === 'Failed' ? 'error' : status === 'Cancelled' ? 'neutral' : 'info'
-  return <StatusBadge label={status} tone={tone}/>
+  const labels: Record<string, string> = {
+    Pending: '等待中',
+    Preparing: '准备中',
+    FetchingMetadata: '获取元数据',
+    DownloadingImages: '下载图片',
+    WritingMetadata: '写入元数据',
+    WritingNfo: '写入 NFO',
+    Retrying: '等待重试',
+    Running: '进行中',
+    Paused: '已暂停',
+    Completed: '已完成',
+    Failed: '失败',
+    Cancelled: '已取消',
+    Info: 'Info',
+    Warning: 'Warning',
+    Error: 'Error',
+  }
+  return <StatusBadge label={labels[status] ?? status} tone={tone}/>
 }
