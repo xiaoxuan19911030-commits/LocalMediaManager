@@ -41,7 +41,7 @@ function Fact({ icon, label }: { icon: ReactNode; label: string }) {
 }
 
 function Relation({ label, items }: { label: string; items: NamedItem[] }) {
-  const readable = items.filter((item) => item.name && !item.name.includes('\uFFFD'))
+  const readable = (items ?? []).filter((item) => item.name && !item.name.includes('\uFFFD'))
   return <Box><Typography variant="overline" color="text.secondary" sx={{ fontWeight: 750 }}>{label}</Typography>
     <Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap', mt: .5 }}>
       {readable.length ? readable.map((item) => <Chip key={item.id} label={item.name} size="small" variant="outlined"/>) : <Typography variant="body2" color="text.disabled">暂无</Typography>}
@@ -75,9 +75,9 @@ export default function MovieDetailPage() {
   useEffect(() => { if (!actorDialog) return; const timer = window.setTimeout(() => bridge.entities('actors', actorSearch, 'name', 48, 0).then((result) => setActorOptions([...selectedActors, ...result.items.filter((item) => !selectedActors.some((selected) => selected.id === item.id))])).catch((reason: Error) => setNotice(reason.message)), 200); return () => window.clearTimeout(timer) }, [actorDialog, actorSearch, selectedActors])
   const play = () => movie && bridge.play(movie.id).then(() => setNotice(`正在打开：${movie.code || movie.title}`)).catch((reason: Error) => setNotice(reason.message))
   const mutate = (action: Promise<unknown>) => { if (!movie) return; setBusy(true); action.then(() => loadMovie(movie.id)).then(() => setNotice('已保存')).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false)) }
-  const openTags = () => { if (!movie) return; setSelectedTags(movie.tags); setTagSearch(''); setTagDialog(true); bridge.entities('tags', '', 'name', 96, 0).then((result) => setTagOptions(result.items)).catch((reason: Error) => setNotice(reason.message)) }
-  const saveTags = () => { if (!movie) return; const current = new Set(movie.tags.map((item) => item.id)); const selected = new Set(selectedTags.map((item) => item.id)); mutate(bridge.updateMovieTags(movie.id, [...selected].filter((tag) => !current.has(tag)), [...current].filter((tag) => !selected.has(tag)))); setTagDialog(false) }
-  const openActors = () => { if (!movie) return; setSelectedActors(movie.actors); setActorOptions(movie.actors); setActorDialog(true) }
+  const openTags = () => { if (!movie) return; setSelectedTags(movie.tags ?? []); setTagSearch(''); setTagDialog(true); bridge.entities('tags', '', 'name', 96, 0).then((result) => setTagOptions(result.items)).catch((reason: Error) => setNotice(reason.message)) }
+  const saveTags = () => { if (!movie) return; const current = new Set((movie.tags ?? []).map((item) => item.id)); const selected = new Set(selectedTags.map((item) => item.id)); mutate(bridge.updateMovieTags(movie.id, [...selected].filter((tag) => !current.has(tag)), [...current].filter((tag) => !selected.has(tag)))); setTagDialog(false) }
+  const openActors = () => { if (!movie) return; setSelectedActors(movie.actors ?? []); setActorOptions(movie.actors ?? []); setActorDialog(true) }
   const saveActors = () => { if (!movie) return; mutate(bridge.setMovieActors(movie.id, selectedActors.map((item) => item.id))); setActorDialog(false) }
   const go = (movieId?: number) => movieId && navigate(`/movies/${movieId}`, { state: { context }, replace: true })
   const previewDelete = () => movie && bridge.previewDeleteMovie(movie.id).then(setDeletePreview).catch((reason: Error) => setNotice(reason.message))
@@ -124,7 +124,7 @@ export default function MovieDetailPage() {
             <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', mb: 1.25 }}>
               {movie.favorite && <Chip color="error" icon={<FavoriteRoundedIcon/>} label="已收藏"/>}
               {movie.scraped && <Chip color="success" icon={<CheckCircleRoundedIcon/>} label="元数据完整" variant="outlined"/>}
-              {movie.tags.slice(0, 3).map((item) => <Chip key={item.id} label={item.name} variant="outlined"/>)}
+              {(movie.tags ?? []).slice(0, 3).map((item) => <Chip key={item.id} label={item.name} variant="outlined"/>)}
             </Stack>
             <Typography variant="h3" sx={{ fontWeight: 900, lineHeight: 1.06, letterSpacing: '-.025em', overflowWrap: 'anywhere' }}>{movie.code || movie.title || `影片 ${movie.id}`}</Typography>
             {movie.title && movie.title !== movie.code && <Typography variant="h6" color="text.secondary" sx={{ mt: 1, maxWidth: 900, lineHeight: 1.45 }}>{movie.title}</Typography>}
@@ -141,17 +141,17 @@ export default function MovieDetailPage() {
         </Box>
       </Paper>
 
-      <SurfaceSection title="元数据状态" description={movie.metadataStatus.missingItems.length ? `缺少：${movie.metadataStatus.missingItems.join('、')}` : '当前影片元数据已完整'}>
+      <SurfaceSection title="元数据状态" description={movie.metadataStatus?.missingItems?.length ? `缺少：${movie.metadataStatus.missingItems.join('、')}` : '当前影片元数据已完整'}>
         <Stack spacing={1.5}>
           <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
-            <Chip color={movie.metadataStatus.state === 'complete' ? 'success' : movie.metadataStatus.state === 'unscraped' ? 'error' : 'warning'} label={`${movie.metadataStatus.icon} ${movie.metadataStatus.label}`}/>
+            <Chip color={movie.metadataStatus?.state === 'complete' ? 'success' : movie.metadataStatus?.state === 'unscraped' ? 'error' : 'warning'} label={`${movie.metadataStatus?.icon ?? '✕'} ${movie.metadataStatus?.label ?? '未刮削'}`}/>
             <Button size="small" startIcon={<SyncRoundedIcon/>} onClick={syncMetadata}>同步信息</Button>
             <Button size="small" startIcon={<SyncRoundedIcon/>} onClick={syncMetadata}>重新刮削</Button>
             <Button size="small" startIcon={<FolderRoundedIcon/>} onClick={openMovieFolder}>打开影片目录</Button>
             <Button size="small" onClick={refreshStatus}>刷新状态</Button>
           </Stack>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,minmax(0,1fr))', md: 'repeat(3,minmax(0,1fr))' }, gap: 1 }}>
-            {movie.metadataStatus.checks.map(item => <MetadataCheckRow key={item.key} label={item.label} complete={item.complete}/>)}
+            {(movie.metadataStatus?.checks ?? []).map(item => <MetadataCheckRow key={item.key} label={item.label} complete={item.complete}/>)}
           </Box>
         </Stack>
       </SurfaceSection>
