@@ -29,7 +29,7 @@ export default function SearchPage() {
   const [view, setView] = useState<WorkspaceViewMode>('grid')
   const [favorite, setFavorite] = useState(false)
   const [watched, setWatched] = useState(false)
-  const [rating, setRating] = useState(0)
+  const [rating, setRating] = useState('all')
   const [metadata, setMetadata] = useState('all')
   const [metadataStatus, setMetadataStatus] = useState(initialMetadataStatus)
   const [fileStatus, setFileStatus] = useState('all')
@@ -39,25 +39,25 @@ export default function SearchPage() {
 
   useEffect(() => { bridge.libraries().then(setLibraries).catch(() => undefined) }, [])
   const signature = useMemo(() => [query, page, favorite, watched, rating, metadata, metadataStatus, fileStatus, libraryId, sort].join('|'), [query, page, favorite, watched, rating, metadata, metadataStatus, fileStatus, libraryId, sort])
-  const activeFilterCount = [query, favorite, watched, rating > 0, metadata !== 'all', metadataStatus !== 'all', fileStatus !== 'all', libraryId > 0].filter(Boolean).length
+  const activeFilterCount = [query, favorite, watched, rating !== 'all', metadata !== 'all', metadataStatus !== 'all', fileStatus !== 'all', libraryId > 0].filter(Boolean).length
 
   useEffect(() => {
     setInput(query)
     if (!activeFilterCount) { setItems(undefined); setTotal(0); setRelated(undefined); return }
     setLoading(true); setError('')
     Promise.all([
-      bridge.advancedSearch({ query, favorite: favorite ? true : undefined, watched: watched ? true : undefined, ratingMin: rating, metadata, metadataStatus, fileStatus, libraryId: libraryId || undefined, sort, limit: pageSize, offset: (page - 1) * pageSize }),
+      bridge.advancedSearch({ query, favorite: favorite ? true : undefined, watched: watched ? true : undefined, ratingFilter: rating, metadata, metadataStatus, fileStatus, libraryId: libraryId || undefined, sort, limit: pageSize, offset: (page - 1) * pageSize }),
       query ? bridge.search(query) : Promise.resolve(undefined),
     ]).then(([result, entities]) => { setItems(result.items); setTotal(result.total); setRelated(entities) }).catch((reason: Error) => setError(reason.message)).finally(() => setLoading(false))
   }, [signature, activeFilterCount, query, page, favorite, watched, rating, metadata, metadataStatus, fileStatus, libraryId, sort])
 
   const updatePage = (next: number) => { const value = new URLSearchParams(params); value.set('page', String(next)); setParams(value) }
   const submit = (event: FormEvent) => { event.preventDefault(); const value = new URLSearchParams(params); const text = input.trim(); if (text) value.set('q', text); else value.delete('q'); value.delete('page'); setParams(value) }
-  const clearFilters = () => { setFavorite(false); setWatched(false); setRating(0); setMetadata('all'); setMetadataStatus('all'); setFileStatus('all'); setLibraryId(0); setSort('newest'); setParams(new URLSearchParams()) }
+  const clearFilters = () => { setFavorite(false); setWatched(false); setRating('all'); setMetadata('all'); setMetadataStatus('all'); setFileStatus('all'); setLibraryId(0); setSort('newest'); setParams(new URLSearchParams()) }
 
   const filters = <Stack component="form" onSubmit={submit} direction={{ xs: 'column', xl: 'row' }} spacing={1.25} useFlexGap sx={{ alignItems: { xs: 'stretch', xl: 'center' }, flexWrap: 'wrap' }}>
     <TextField size="small" value={input} onChange={event => setInput(event.target.value)} placeholder="标题、番号、文件名、演员、标签；支持 收藏 已观看 评分>=4" sx={{ flex: '1 1 300px' }} slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchRoundedIcon/></InputAdornment> } }}/>
-    <TextField select size="small" label="最低评分" value={rating} onChange={event => { setRating(Number(event.target.value)); updatePage(1) }} sx={{ minWidth: 130 }}><MenuItem value={0}>全部评分</MenuItem>{[1, 2, 3, 4, 5].map(value => <MenuItem key={value} value={value}>{value} 星以上</MenuItem>)}</TextField>
+    <TextField select size="small" label="评分" value={rating} onChange={event => { setRating(event.target.value); updatePage(1) }} sx={{ minWidth: 130 }}><MenuItem value="all">全部评分</MenuItem><MenuItem value="unrated">未评分</MenuItem>{[5, 4, 3, 2, 1].map(value => <MenuItem key={value} value={String(value)}>{'★'.repeat(value)}</MenuItem>)}</TextField>
     <TextField select size="small" label="元数据状态" value={metadataStatus} onChange={event => { setMetadataStatus(event.target.value); updatePage(1) }} sx={{ minWidth: 150 }}><MenuItem value="all">全部</MenuItem><MenuItem value="complete">已完整</MenuItem><MenuItem value="unscraped">未刮削</MenuItem><MenuItem value="missing-images">缺图片</MenuItem><MenuItem value="missing-nfo">缺 NFO</MenuItem><MenuItem value="missing-actors">缺演员</MenuItem><MenuItem value="missing-tags">缺标签</MenuItem><MenuItem value="missing-description">缺简介</MenuItem></TextField>
     <TextField select size="small" label="元数据" value={metadata} onChange={event => { setMetadata(event.target.value); updatePage(1) }} sx={{ minWidth: 120 }}><MenuItem value="all">全部</MenuItem><MenuItem value="complete">已刮削</MenuItem><MenuItem value="missing">缺信息</MenuItem></TextField>
     <TextField select size="small" label="文件" value={fileStatus} onChange={event => { setFileStatus(event.target.value); updatePage(1) }} sx={{ minWidth: 120 }}><MenuItem value="all">全部</MenuItem><MenuItem value="available">文件存在</MenuItem><MenuItem value="missing">文件缺失</MenuItem></TextField>

@@ -89,15 +89,12 @@ export default function MovieDetailPage() {
   const openMovieFolder = () => {
     const path = movie?.mediaFiles[0]?.path
     if (!path) { setNotice('没有可打开的文件目录'); return }
-    const directory = path.replace(/[\\/][^\\/]*$/, '')
-    window.open(`file:///${directory.replaceAll('\\', '/')}`)
-    setNotice(`正在打开目录：${directory}`)
+    bridge.revealFile(path).then((result) => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))
   }
   const openImageFolder = () => {
     const directory = imageAssets.find(asset => asset.directory)?.directory
     if (!directory) { openMovieFolder(); return }
-    window.open(`file:///${directory.replaceAll('\\', '/')}`)
-    setNotice(`正在打开图片目录：${directory}`)
+    bridge.openDirectory(directory).then((result) => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))
   }
   const setImageLock = (asset: ImageAsset) => bridge.setImageLock(asset.id, !asset.locked).then(result => { setNotice(result.message); return movie ? bridge.movieImages(movie.id).then(setImageAssets) : undefined }).catch((reason: Error) => setNotice(reason.message))
   const previewNfo = (mode: 'import' | 'export') => { if (!movie) return; setBusy(true); setNfoMode(mode); (mode === 'import' ? bridge.previewNfoImport(movie.id) : bridge.previewNfoExport(movie.id)).then(setNfoPreview).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false)) }

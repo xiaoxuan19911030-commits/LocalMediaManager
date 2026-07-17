@@ -3,7 +3,7 @@ import NewReleasesRoundedIcon from '@mui/icons-material/NewReleasesRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import { Box, Card, CardContent, Checkbox, Chip, IconButton, Rating, Tooltip, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
 import { SmartImage } from '@/components/SmartImage'
 import type { MediaItem } from '@/types/media'
 
@@ -17,7 +17,7 @@ export function MediaCardGrid({ children, minWidth = 148 }: { children: ReactNod
   return <Box sx={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${minWidth}px, 1fr))`, gap: { xs: 1.25, md: 1.5 } }}>{children}</Box>
 }
 
-export function MediaCard({ item, onPlay, onOpen, selected, onSelect, onRatingClick }: { item: MediaItem; onPlay: (item: MediaItem) => void; onOpen?: (item: MediaItem) => void; selected?: boolean; onSelect?: (item: MediaItem, selected: boolean) => void; onRatingClick?: (item: MediaItem) => void }) {
+export function MediaCard({ item, onPlay, onOpen, selected, onSelect, onRatingClick, onContextMenu }: { item: MediaItem; onPlay: (item: MediaItem) => void; onOpen?: (item: MediaItem) => void; selected?: boolean; onSelect?: (item: MediaItem, selected: boolean) => void; onRatingClick?: (item: MediaItem) => void; onContextMenu?: (event: MouseEvent, item: MediaItem) => void }) {
   const [coverFailed, setCoverFailed] = useState(false)
   useEffect(() => setCoverFailed(false), [item.coverUrl])
   const recent = isRecent(item.importedAt)
@@ -26,7 +26,7 @@ export function MediaCard({ item, onPlay, onOpen, selected, onSelect, onRatingCl
   const metadataTone = item.metadataStatus?.state === 'complete' ? 'success.main' : item.metadataStatus?.state === 'unscraped' ? 'error.main' : 'warning.main'
   const metadataTip = item.metadataStatus?.missingItems?.length ? `缺少：${item.metadataStatus.missingItems.join('、')}` : item.metadataStatus?.label
   return (
-    <Card role={onOpen ? 'button' : undefined} tabIndex={onOpen ? 0 : undefined} onKeyDown={(event) => { if (onOpen && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(item) } }}
+    <Card role={onOpen ? 'button' : undefined} tabIndex={onOpen ? 0 : undefined} onContextMenu={(event) => onContextMenu?.(event, item)} onKeyDown={(event) => { if (onOpen && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(item) } }}
       onClick={() => onOpen?.(item)} sx={{ overflow: 'hidden', minWidth: 0, cursor: onOpen ? 'pointer' : 'default', position: 'relative', borderColor: selected ? 'primary.main' : undefined,
         transition: 'transform .22s cubic-bezier(.2,.8,.2,1), border-color .22s ease, box-shadow .22s ease',
         '&:hover': onOpen ? { transform: 'translateY(-5px)', borderColor: 'primary.main', boxShadow: (theme) => `0 14px 32px ${alpha(theme.palette.common.black, theme.palette.mode === 'dark' ? .32 : .14)}` } : undefined,

@@ -31,6 +31,7 @@ builder.Services.AddSingleton(new MetadataWriteService(databasePath));
 builder.Services.AddSingleton(new TaskLogService(databasePath));
 builder.Services.AddSingleton(new ImageAssetService(databasePath, imageRoot));
 builder.Services.AddSingleton(new DataSafetyService(databasePath, configDatabasePath, imageRoot));
+builder.Services.AddSingleton<PlatformCommandService>();
 builder.Services.AddSingleton<ImageDownloadService>();
 builder.Services.AddSingleton(new NfoService(databasePath));
 builder.Services.AddSingleton<IMetadataProvider, MetaTubeProvider>();
@@ -163,9 +164,16 @@ app.MapPost("/api/tasks/{taskId:long}/pause", async (long taskId, TaskCommandSer
 app.MapPost("/api/tasks/{taskId:long}/resume", async (long taskId, TaskCommandService service) => Results.Ok(await service.ResumeAsync(taskId)));
 app.MapPost("/api/tasks/{taskId:long}/cancel", async (long taskId, TaskCommandService service) => Results.Ok(await service.CancelAsync(taskId)));
 app.MapPost("/api/tasks/{taskId:long}/retry", async (long taskId, TaskCommandService service) => Results.Ok(await service.RetryAsync(taskId)));
+app.MapDelete("/api/tasks/{taskId:long}", async (long taskId, TaskCommandService service) => Results.Ok(await service.DeleteAsync(taskId)));
+app.MapPost("/api/tasks/cleanup", async (TaskCleanupCommand command, TaskCommandService service) => Results.Ok(await service.CleanupAsync(command.Status)));
 app.MapPost("/api/tasks/batch/cancel-sync", async (IReadOnlyList<long> taskIds, TaskCommandService service) => Results.Ok(await service.CancelSyncBatchAsync(taskIds)));
 app.MapPost("/api/videos/{movieId:long}/sync", async (long movieId, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Manual")));
 app.MapPost("/api/videos/batch/sync", async (IReadOnlyList<long> movieIds, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueBatchAsync(movieIds)));
+
+app.MapPost("/api/platform/open-directory", (PlatformPathCommand command, PlatformCommandService platform) =>
+    Results.Ok(platform.OpenDirectory(command.Path)));
+app.MapPost("/api/platform/reveal-file", (PlatformPathCommand command, PlatformCommandService platform) =>
+    Results.Ok(platform.RevealFile(command.Path)));
 
 app.MapGet("/api/entities/{entityType}", async (string entityType, string? search, string? sort, int? limit, int? offset) => {
     if (!File.Exists(databasePath)) return Results.Problem($"找不到数据库：{databasePath}", statusCode: 503);
@@ -186,9 +194,9 @@ app.MapGet("/api/collections/{kind}", async (string kind, int? limit, int? offse
 });
 
 app.MapGet("/api/search/advanced", async (string? q, long? actorId, long? tagId, bool? favorite, bool? watched, double? ratingMin,
-    string? metadata, string? fileStatus, string? metadataStatus, long? libraryId, string? sort, int? limit, int? offset) => File.Exists(databasePath)
+    string? metadata, string? fileStatus, string? metadataStatus, string? ratingFilter, long? libraryId, string? sort, int? limit, int? offset) => File.Exists(databasePath)
     ? Results.Ok(await ProductReader.AdvancedSearchAsync(databasePath, bridgeUrl, q ?? "", actorId, tagId, favorite,
-        watched, Math.Clamp(ratingMin ?? 0, 0, 5), metadata ?? "all", fileStatus ?? "all", metadataStatus ?? "all", libraryId, sort ?? "newest",
+        watched, Math.Clamp(ratingMin ?? 0, 0, 5), ratingFilter ?? "all", metadata ?? "all", fileStatus ?? "all", metadataStatus ?? "all", libraryId, sort ?? "newest",
         Math.Clamp(limit ?? 48, 1, 96), Math.Max(offset ?? 0, 0)))
     : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
 

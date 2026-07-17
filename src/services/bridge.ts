@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateResults, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageMutationResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, ScanLaunchResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
+import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateResults, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageMutationResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, PlatformOpenResult, ScanLaunchResult, TaskCleanupResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
 import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, MetaTubeSettings, NfoSettings, PlaybackSettings, ProviderConnectionResult, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
@@ -75,12 +75,16 @@ export const bridge = {
   cancelTask: (taskId: number) => request<TaskMutationResult>(`/api/tasks/${taskId}/cancel`, { method: 'POST' }),
   cancelSyncTasks: (taskIds: number[]) => request<{ count: number; message: string }>('/api/tasks/batch/cancel-sync', { method: 'POST', body: JSON.stringify(taskIds) }),
   retryTask: (taskId: number) => request<ScanLaunchResult>(`/api/tasks/${taskId}/retry`, { method: 'POST' }),
+  deleteTask: (taskId: number) => request<TaskCleanupResult>(`/api/tasks/${taskId}`, { method: 'DELETE' }),
+  cleanupTasks: (status: 'completed' | 'failed' | 'cancelled' | 'terminal') => request<TaskCleanupResult>('/api/tasks/cleanup', { method: 'POST', body: JSON.stringify({ status }) }),
+  openDirectory: (path: string) => request<PlatformOpenResult>('/api/platform/open-directory', { method: 'POST', body: JSON.stringify({ path }) }),
+  revealFile: (path: string) => request<PlatformOpenResult>('/api/platform/reveal-file', { method: 'POST', body: JSON.stringify({ path }) }),
   entities: (type: 'actors' | 'tags', search = '', sort = 'count', limit = 48, offset = 0) => request<EntityPageResult>(`/api/entities/${type}?${new URLSearchParams({ search, sort, limit: String(limit), offset: String(offset) })}`),
   actor: (id: number) => request<ActorDetail>(`/api/actors/${id}`),
   entityMovies: (type: 'actors' | 'tags', id: number, limit = 48, offset = 0) => request<MediaPageResult>(`/api/entities/${type}/${id}/movies?${new URLSearchParams({ limit: String(limit), offset: String(offset) })}`),
   collection: (kind: 'favorites' | 'history', limit = 48, offset = 0) => request<MediaPageResult>(`/api/collections/${kind}?${new URLSearchParams({ limit: String(limit), offset: String(offset) })}`),
   advancedSearch: (filters: AdvancedSearchFilters) => {
-    const query = new URLSearchParams({ q: filters.query, limit: String(filters.limit ?? 48), offset: String(filters.offset ?? 0), sort: filters.sort ?? 'newest', metadata: filters.metadata ?? 'all', fileStatus: filters.fileStatus ?? 'all', metadataStatus: filters.metadataStatus ?? 'all', ratingMin: String(filters.ratingMin ?? 0) })
+    const query = new URLSearchParams({ q: filters.query, limit: String(filters.limit ?? 48), offset: String(filters.offset ?? 0), sort: filters.sort ?? 'newest', metadata: filters.metadata ?? 'all', fileStatus: filters.fileStatus ?? 'all', metadataStatus: filters.metadataStatus ?? 'all', ratingMin: String(filters.ratingMin ?? 0), ratingFilter: filters.ratingFilter ?? 'all' })
     if (filters.actorId) query.set('actorId', String(filters.actorId)); if (filters.tagId) query.set('tagId', String(filters.tagId)); if (filters.favorite !== undefined) query.set('favorite', String(filters.favorite)); if (filters.watched !== undefined) query.set('watched', String(filters.watched)); if (filters.libraryId) query.set('libraryId', String(filters.libraryId))
     return request<MediaPageResult>(`/api/search/advanced?${query}`)
   },

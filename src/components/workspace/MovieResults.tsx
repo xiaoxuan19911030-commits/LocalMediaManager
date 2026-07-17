@@ -1,6 +1,7 @@
 import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import { Box, Button, Card, CardContent, Pagination, Rating, Stack, Tooltip, Typography } from '@mui/material'
+import type { MouseEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { MediaCard, MediaCardGrid } from '@/components/MediaCard'
 import { EmptyState, SectionTitle } from '@/components/ProductComponents'
@@ -41,6 +42,7 @@ export function MovieResultContainer({
   selectedIds = [],
   onSelect,
   onRatingClick,
+  onContextMenu,
 }: {
   title?: string
   total?: number
@@ -57,24 +59,25 @@ export function MovieResultContainer({
   selectedIds?: number[]
   onSelect?: (item: MediaItem, selected: boolean) => void
   onRatingClick?: (item: MediaItem) => void
+  onContextMenu?: (event: MouseEvent, item: MediaItem) => void
 }) {
   const pages = total && pageSize ? Math.ceil(total / pageSize) : 0
   return <Stack spacing={2}>
     {title && <SectionTitle title={total === undefined ? title : `${title}（${total}）`}/>}
     {items.length === 0 ? <EmptyState title={emptyTitle} description={emptyDescription}/> : view === 'list'
-      ? <MovieList items={items} onPlay={onPlay} onOpen={onOpen}/>
-      : <MediaCardGrid>{items.map(item => <MediaCard key={item.dataId} item={item} selected={selectedIds.includes(item.dataId)} onSelect={selectable ? onSelect : undefined} onRatingClick={onRatingClick} onPlay={onPlay} onOpen={onOpen}/>)}</MediaCardGrid>}
+      ? <MovieList items={items} onPlay={onPlay} onOpen={onOpen} onContextMenu={onContextMenu}/>
+      : <MediaCardGrid>{items.map(item => <MediaCard key={item.dataId} item={item} selected={selectedIds.includes(item.dataId)} onSelect={selectable ? onSelect : undefined} onRatingClick={onRatingClick} onContextMenu={onContextMenu} onPlay={onPlay} onOpen={onOpen}/>)}</MediaCardGrid>}
     {pages > 1 && page && onPageChange && <Box sx={{ display: 'flex', justifyContent: 'center', pt: 1 }}>
       <Pagination count={pages} page={page} onChange={(_, value) => onPageChange(value)} color="primary"/>
     </Box>}
   </Stack>
 }
 
-export function MovieList({ items, onPlay, onOpen }: { items: MediaItem[]; onPlay: (item: MediaItem) => void; onOpen: (item: MediaItem) => void }) {
+export function MovieList({ items, onPlay, onOpen, onContextMenu }: { items: MediaItem[]; onPlay: (item: MediaItem) => void; onOpen: (item: MediaItem) => void; onContextMenu?: (event: MouseEvent, item: MediaItem) => void }) {
   return <Stack spacing={1}>
     {items.map(item => {
       const title = item.title || item.code || `#${item.dataId}`
-      return <Card key={item.dataId} variant="outlined"><CardContent sx={{ py: 1.25, '&:last-child': { pb: 1.25 } }}>
+      return <Card key={item.dataId} variant="outlined" onContextMenu={(event) => onContextMenu?.(event, item)}><CardContent sx={{ py: 1.25, '&:last-child': { pb: 1.25 } }}>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(130px,.7fr) minmax(220px,1.3fr) 120px 120px auto' }, gap: 1.25, alignItems: 'center' }}>
           <Box sx={{ minWidth: 0 }}><Typography noWrap sx={{ fontWeight: 800 }}>{item.code || `#${item.dataId}`}</Typography><Typography variant="caption" color="text.secondary">ID {item.dataId}</Typography></Box>
           <Tooltip title={title}><Typography noWrap>{title}</Typography></Tooltip>

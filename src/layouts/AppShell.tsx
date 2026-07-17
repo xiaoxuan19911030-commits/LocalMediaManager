@@ -31,7 +31,7 @@ export default function AppShell(){
   useEffect(()=>{let active=true;const check=()=>bridge.health().then((value)=>{if(active){setHealth(value);setBridgeOnline(true)}}).catch(()=>{if(active)setBridgeOnline(false)});void check();const timer=window.setInterval(check,5000);return()=>{active=false;window.clearInterval(timer)}},[])
   const submit=(event:FormEvent)=>{event.preventDefault();const value=search.trim();if(value)navigate(`/search?q=${encodeURIComponent(value)}`)}
   const nav=(items:NavItem[])=>items.map(([label,path,icon])=><ListItemButton key={path} selected={path==='/'?pathname===path:pathname.startsWith(path)} onClick={()=>navigate(path)} sx={{borderRadius:1.75,mb:.4}}><ListItemIcon sx={{minWidth:38}}>{icon}</ListItemIcon><ListItemText primary={label}/></ListItemButton>)
-  return <Box sx={{height:'100vh',display:'grid',gridTemplateColumns:'220px minmax(0,1fr)',overflow:'hidden'}}>
+  return <Box onContextMenu={(event) => event.preventDefault()} sx={{height:'100vh',display:'grid',gridTemplateColumns:'220px minmax(0,1fr)',overflow:'hidden'}}>
     <Paper square elevation={0} sx={{borderRight:1,borderColor:'divider',display:'flex',flexDirection:'column',minHeight:0}}>
       <Box sx={{px:2,py:2}}><BrandMark/></Box><Divider/>
       <Box component="form" onSubmit={submit} sx={{px:1.25,pt:1.25}}><TextField size="small" fullWidth value={search} onChange={(event)=>setSearch(event.target.value)} placeholder="全局搜索"

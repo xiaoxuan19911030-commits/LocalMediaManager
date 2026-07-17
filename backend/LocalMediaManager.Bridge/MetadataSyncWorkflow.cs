@@ -391,10 +391,52 @@ public sealed class MetadataSyncExecutor(
 public sealed class TaskCommandService(string databasePath, LibraryWorkflowService libraries,
     MetadataSyncExecutor sync, ImageCacheTaskService imageCache, FileOrganizerService organizer)
 {
+    private static readonly HashSet<string> TerminalStatuses = new(StringComparer.OrdinalIgnoreCase) { "Completed", "Failed", "Cancelled" };
     public async Task<TaskMutationResult> PauseAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.PauseAsync(id), "ImageCacheRebuild"=>await imageCache.PauseAsync(id), "Organizer"=>await organizer.PauseAsync(id), _=>await libraries.PauseTaskAsync(id) };
     public async Task<TaskMutationResult> ResumeAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.ResumeAsync(id), "ImageCacheRebuild"=>await imageCache.ResumeAsync(id), "Organizer"=>await organizer.ResumeAsync(id), _=>await libraries.ResumeTaskAsync(id) };
     public async Task<TaskMutationResult> CancelAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.CancelAsync(id), "ImageCacheRebuild"=>await imageCache.CancelAsync(id), "Organizer"=>await organizer.CancelAsync(id), _=>await libraries.CancelTaskAsync(id) };
     public async Task<object> RetryAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.RetryAsync(id), "ImageCacheRebuild"=>await imageCache.RetryAsync(id), "Organizer"=>await organizer.RetryAsync(id), _=>await libraries.RetryTaskAsync(id) };
+    public async Task<TaskCleanupResult> DeleteAsync(long id)
+    {
+        TaskSnapshot task = await SnapshotAsync(id);
+        if (!TerminalStatuses.Contains(task.Status))
+            throw new InvalidOperationException("只能删除已完成、失败或已取消的任务。");
+        await using var connection = await OpenWriteAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await ExecuteAsync(connection, "DELETE FROM TaskLogs WHERE TaskId=$id", transaction, ("$id", id));
+        await ExecuteAsync(connection, "DELETE FROM Tasks WHERE Id=$id", transaction, ("$id", id));
+        await transaction.CommitAsync();
+        return new(1, $"已删除任务：{task.Type} #{id}");
+    }
+    public async Task<TaskCleanupResult> CleanupAsync(string? status)
+    {
+        string normalized = string.IsNullOrWhiteSpace(status) ? "terminal" : status.Trim();
+        string[] statuses = normalized.ToLowerInvariant() switch {
+            "terminal" or "all" => ["Completed", "Failed", "Cancelled"],
+            "completed" => ["Completed"],
+            "failed" => ["Failed"],
+            "cancelled" or "canceled" => ["Cancelled"],
+            _ => throw new ArgumentException("仅支持清理已完成、失败、已取消或全部终态任务。"),
+        };
+        await using var connection = await OpenWriteAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        string placeholders = string.Join(",", statuses.Select((_, index) => $"$s{index}"));
+        long count = await ScalarLongAsync(connection, $"SELECT COUNT(*) FROM Tasks WHERE Status IN ({placeholders})", transaction, statuses.Select((value, index) => ($"$s{index}", (object?)value)).ToArray());
+        if (count > 0) {
+            await ExecuteAsync(connection, $"DELETE FROM TaskLogs WHERE TaskId IN (SELECT Id FROM Tasks WHERE Status IN ({placeholders}))", transaction, statuses.Select((value, index) => ($"$s{index}", (object?)value)).ToArray());
+            await ExecuteAsync(connection, $"DELETE FROM Tasks WHERE Status IN ({placeholders})", transaction, statuses.Select((value, index) => ($"$s{index}", (object?)value)).ToArray());
+        }
+        await transaction.CommitAsync();
+        return new(count, count == 0 ? "没有可清理的任务。" : $"已清理 {count} 个任务。");
+    }
     public async Task<BatchTaskMutationResult> CancelSyncBatchAsync(IReadOnlyList<long> ids) { long[] values=ids.Distinct().Where(id=>id>0).ToArray(); if(values.Length is 0 or >500) throw new ArgumentException("Select 1 to 500 sync tasks."); foreach(long id in values){if(await TypeAsync(id)!="Sync")throw new ArgumentException("Only sync tasks can be cancelled in batch."); await sync.CancelAsync(id);} return new(values.Length,$"Cancelled {values.Length} sync tasks."); }
     private async Task<string> TypeAsync(long id){await using var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=databasePath,Mode=SqliteOpenMode.ReadOnly}.ToString());await c.OpenAsync();await using var x=c.CreateCommand();x.CommandText="SELECT TaskType FROM Tasks WHERE Id=$id";x.Parameters.AddWithValue("$id",id);return(await x.ExecuteScalarAsync())?.ToString()??throw new KeyNotFoundException("任务不存在。");}
+    private async Task<TaskSnapshot> SnapshotAsync(long id){await using var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=databasePath,Mode=SqliteOpenMode.ReadOnly}.ToString());await c.OpenAsync();await using var x=c.CreateCommand();x.CommandText="SELECT TaskType,Status FROM Tasks WHERE Id=$id";x.Parameters.AddWithValue("$id",id);await using var r=await x.ExecuteReaderAsync();if(!await r.ReadAsync())throw new KeyNotFoundException("任务不存在。");return new(r.GetString(0),r.GetString(1));}
+    private async Task<SqliteConnection> OpenWriteAsync(){var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=databasePath,Mode=SqliteOpenMode.ReadWrite,Cache=SqliteCacheMode.Shared}.ToString());await c.OpenAsync();return c;}
+    private static async Task ExecuteAsync(SqliteConnection c,string sql,System.Data.Common.DbTransaction tx,params (string,object?)[] p){await using var x=c.CreateCommand();x.Transaction=(SqliteTransaction)tx;x.CommandText=sql;foreach(var(n,v)in p)x.Parameters.AddWithValue(n,v??DBNull.Value);await x.ExecuteNonQueryAsync();}
+    private static async Task<long> ScalarLongAsync(SqliteConnection c,string sql,System.Data.Common.DbTransaction tx,params (string,object?)[] p){await using var x=c.CreateCommand();x.Transaction=(SqliteTransaction)tx;x.CommandText=sql;foreach(var(n,v)in p)x.Parameters.AddWithValue(n,v??DBNull.Value);return Convert.ToInt64(await x.ExecuteScalarAsync()??0L);}
+    private sealed record TaskSnapshot(string Type, string Status);
 }
+
+public sealed record TaskCleanupCommand(string? Status);
+public sealed record TaskCleanupResult(long Count, string Message);

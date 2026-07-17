@@ -53,7 +53,7 @@ public sealed record NeighborsDto(long? PreviousId, long? NextId);
 public sealed record DuplicateMovieDto(long MovieId, string Code, string Title, string FilePath, string? FileHash, string ImportedAt, string Recommendation);
 public sealed record DuplicateGroupDto(string Rule, string Key, long Count, IReadOnlyList<DuplicateMovieDto> Items);
 public sealed record DuplicateResultsDto(long TotalGroups, long TotalMovies, long CodeGroups, long PathGroups, long HashGroups, IReadOnlyList<DuplicateGroupDto> Groups);
-internal sealed record SearchCondition(string Query, bool? Favorite, bool? Watched, double? RatingMin);
+internal sealed record SearchCondition(string Query, bool? Favorite, bool? Watched, double? RatingMin, string? RatingFilter);
 
 public static class ProductReader
 {
@@ -288,7 +288,7 @@ public static class ProductReader
     }
 
     public static async Task<MediaPageDto> AdvancedSearchAsync(string databasePath, string bridgeUrl,
-        string query, long? actorId, long? tagId, bool? favorite, bool? watched, double ratingMin, string metadata,
+        string query, long? actorId, long? tagId, bool? favorite, bool? watched, double ratingMin, string ratingFilter, string metadata,
         string fileStatus, string metadataStatus, long? libraryId, string sort, int limit, int offset)
     {
         var conditions = new List<string>(); var parameters = new List<(string,object)>();
@@ -297,6 +297,7 @@ public static class ProductReader
         favorite ??= parsed.Favorite;
         watched ??= parsed.Watched;
         ratingMin = Math.Clamp(Math.Max(ratingMin, parsed.RatingMin ?? 0), 0, 5);
+        ratingFilter = string.IsNullOrWhiteSpace(parsed.RatingFilter) ? ratingFilter : parsed.RatingFilter;
         bool hasDirectors = await TableExistsAsync(databasePath, "Directors") && await TableExistsAsync(databasePath, "MovieDirectors");
         if (trimmed.Length > 0) {
             string directorCondition = hasDirectors ? """ OR EXISTS(SELECT 1 FROM MovieDirectors md JOIN Directors d ON d.Id=md.DirectorId WHERE md.MovieId=m.Id AND d.Name LIKE $like ESCAPE '\')""" : "";
@@ -307,7 +308,7 @@ public static class ProductReader
         if (tagId.HasValue) { conditions.Add("EXISTS(SELECT 1 FROM MovieTags mt WHERE mt.MovieId=m.Id AND mt.TagId=$tag)"); parameters.Add(("$tag", tagId.Value)); }
         if (favorite.HasValue) { conditions.Add("COALESCE(s.IsFavorite,0)=$favorite"); parameters.Add(("$favorite", favorite.Value ? 1 : 0)); }
         if (watched.HasValue) conditions.Add(watched.Value ? "COALESCE(s.PlayCount,0)>0" : "COALESCE(s.PlayCount,0)=0");
-        if (ratingMin > 0) { conditions.Add("COALESCE(s.UserRating,0)>=$rating"); parameters.Add(("$rating", ratingMin)); }
+        AddRatingCondition(conditions, parameters, ratingFilter, ratingMin);
         if (metadata == "complete") conditions.Add("m.IsScraped=1"); else if (metadata == "missing") conditions.Add("m.IsScraped=0");
         AddMetadataStatusCondition(conditions, metadataStatus, hasDirectors);
         if (fileStatus == "missing") conditions.Add("f.ExistsState='Missing'"); else if (fileStatus == "available") conditions.Add("f.ExistsState<>'Missing'");
@@ -321,16 +322,39 @@ public static class ProductReader
         bool? favorite = null;
         bool? watched = null;
         double? ratingMin = null;
+        string? ratingFilter = null;
         var terms = new List<string>();
         foreach (string token in query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) {
             string normalized = token.Trim();
             string lower = normalized.ToLowerInvariant();
             if (normalized is "收藏" or "已收藏" || lower is "favorite" or "fav") { favorite = true; continue; }
             if (normalized is "已观看" or "看过" or "已播放" || lower is "watched" or "played") { watched = true; continue; }
+            if (normalized is "未评分" || lower is "unrated") { ratingFilter = "unrated"; continue; }
             if (TryParseRatingCondition(normalized, out double rating)) { ratingMin = rating; continue; }
             terms.Add(token);
         }
-        return new(string.Join(' ', terms), favorite, watched, ratingMin);
+        return new(string.Join(' ', terms), favorite, watched, ratingMin, ratingFilter);
+    }
+
+    private static void AddRatingCondition(List<string> conditions, List<(string, object)> parameters, string ratingFilter, double ratingMin)
+    {
+        string normalized = ratingFilter.Trim().ToLowerInvariant();
+        if (normalized is "unrated") {
+            conditions.Add("COALESCE(s.HasUserRating,0)=0");
+            return;
+        }
+        if (normalized.StartsWith("stars:", StringComparison.OrdinalIgnoreCase))
+            normalized = normalized["stars:".Length..];
+        if (int.TryParse(normalized, out int stars) && stars is >= 1 and <= 5) {
+            conditions.Add(stars == 5 ? "COALESCE(s.HasUserRating,0)=1 AND COALESCE(s.UserRating,0)>=5" : "COALESCE(s.HasUserRating,0)=1 AND COALESCE(s.UserRating,0)>=$rating AND COALESCE(s.UserRating,0)<$nextRating");
+            parameters.Add(("$rating", (double)stars));
+            if (stars < 5) parameters.Add(("$nextRating", (double)(stars + 1)));
+            return;
+        }
+        if (ratingMin > 0) {
+            conditions.Add("COALESCE(s.UserRating,0)>=$rating");
+            parameters.Add(("$rating", ratingMin));
+        }
     }
 
     private static bool TryParseRatingCondition(string token, out double rating)

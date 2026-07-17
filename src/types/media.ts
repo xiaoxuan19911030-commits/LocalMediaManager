@@ -164,6 +164,8 @@ export interface TaskItem {
 }
 export interface TaskLogItem { id: number; level: string; message: string; createdAt: string }
 export interface TaskMutationResult { taskId: number; status: string; message: string }
+export interface TaskCleanupResult { count: number; message: string }
+export interface PlatformOpenResult { path: string; message: string }
 
 export interface LibraryFolderInput {
   path: string
@@ -239,7 +241,7 @@ export interface EntityCard { id: number; name: string; movieCount: number; imag
 export interface ActorDetail { id: number; name: string; alias?: string; gender?: number; birthDate?: string; description?: string }
 export interface EntityPageResult { items: EntityCard[]; total: number; limit: number; offset: number }
 export interface AdvancedSearchFilters {
-  query: string; actorId?: number; tagId?: number; favorite?: boolean; watched?: boolean; ratingMin?: number
+  query: string; actorId?: number; tagId?: number; favorite?: boolean; watched?: boolean; ratingMin?: number; ratingFilter?: string
   metadata?: string; fileStatus?: string; metadataStatus?: string; libraryId?: number; sort?: string; limit?: number; offset?: number
 }
 export interface MetadataOverview {
