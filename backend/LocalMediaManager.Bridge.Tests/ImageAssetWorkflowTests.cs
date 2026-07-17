@@ -175,7 +175,7 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
             await Execute(connection, "INSERT INTO MediaFiles(Id,MovieId,FilePath,NormalizedPath,FileName,Extension,MediaType,SourceType,FileSize,ExistsState,IsPrimary,CreatedAt,UpdatedAt) VALUES(1,1,$path,$path,'movie.mp4','.mp4','Video','Test',5,'Exists',1,$at,$at)", ("$path", video), ("$at", at));
         }
         var workflow = new ImageWorkflowService(Database, ImageRoot);
-        var generator = new ImageGenerationTaskService(Database, ImageRoot, workflow, new TaskLogService(Database));
+        var generator = new ImageGenerationTaskService(Database, ImageRoot, workflow, new TaskLogService(Database), new FfmpegLocator(Database, root));
 
         ImageTaskLaunchResult launch = await generator.EnqueueAsync(1, "Screenshot");
 

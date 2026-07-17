@@ -233,7 +233,8 @@ public sealed class ImageGenerationTaskService(
     string databasePath,
     string imageRoot,
     ImageWorkflowService images,
-    TaskLogService logs) : BackgroundService
+    TaskLogService logs,
+    FfmpegLocator ffmpegLocator) : BackgroundService
 {
     private static readonly HashSet<string> Types = new(StringComparer.OrdinalIgnoreCase) { "Poster", "Preview", "Screenshot", "GIF" };
     private readonly ConcurrentDictionary<long, CancellationTokenSource> cancellations = new();
@@ -313,10 +314,13 @@ public sealed class ImageGenerationTaskService(
             string? videoPath = await ReadPrimaryVideoAsync(input.MovieId, token);
             if (string.IsNullOrWhiteSpace(videoPath) || !File.Exists(videoPath))
                 throw new FileNotFoundException("影片文件不存在，无法生成图片。", videoPath);
-            string ffmpeg = ResolveFfmpeg();
+            FfmpegLookupResult lookup = ffmpegLocator.Locate();
+            if (!lookup.Found || string.IsNullOrWhiteSpace(lookup.Path))
+                throw new FileNotFoundException(lookup.Message);
+            string ffmpeg = lookup.Path;
             string target = TargetPath(input.MovieId, input.Type);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            await logs.WriteAsync(taskId, "Info", $"使用 FFmpeg 生成 {ImageWorkflowService.Label(input.Type)}。", token);
+            await logs.WriteAsync(taskId, "Info", $"使用 FFmpeg 生成 {ImageWorkflowService.Label(input.Type)}（{lookup.Source}）。", token);
             await ExecuteAsync(await OpenAsync(SqliteOpenMode.ReadWrite, token),
                 "UPDATE Tasks SET Status='Running',Stage='Running',Progress=25,StartedAt=COALESCE(StartedAt,$at),UpdatedAt=$at WHERE Id=$id",
                 token, ("$at", Now()), ("$id", taskId));
@@ -355,18 +359,6 @@ public sealed class ImageGenerationTaskService(
         return await ScalarTextAsync(connection,
             "SELECT FilePath FROM MediaFiles WHERE MovieId=$movie AND MediaType='Video' ORDER BY IsPrimary DESC,Id LIMIT 1",
             token, ("$movie", movieId));
-    }
-
-    private static string ResolveFfmpeg()
-    {
-        string? configured = Environment.GetEnvironmentVariable("LMM_FFMPEG_PATH");
-        if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured)) return configured;
-        foreach (string folder in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)) {
-            if (string.IsNullOrWhiteSpace(folder)) continue;
-            string candidate = Path.Combine(folder.Trim(), "ffmpeg.exe");
-            if (File.Exists(candidate)) return candidate;
-        }
-        throw new FileNotFoundException("FFmpeg 不存在。请安装 FFmpeg，或设置 LMM_FFMPEG_PATH。");
     }
 
     private string TargetPath(long movieId, string type)

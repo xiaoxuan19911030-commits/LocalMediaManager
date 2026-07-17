@@ -6,12 +6,13 @@ import FolderRoundedIcon from '@mui/icons-material/FolderRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import StarRoundedIcon from '@mui/icons-material/StarRounded'
 import SyncRoundedIcon from '@mui/icons-material/SyncRounded'
-import { Alert, Autocomplete, Button, Collapse, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Divider, InputAdornment, ListItemIcon, Menu, MenuItem, Snackbar, Stack, TextField, Typography } from '@mui/material'
+import { Autocomplete, Button, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, Divider, InputAdornment, ListItemIcon, Menu, MenuItem, Snackbar, Stack, TextField, Typography } from '@mui/material'
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { MovieResultContainer, useMovieActions } from '@/components/workspace/MovieResults'
+import { SafeDeleteDialog } from '@/components/SafeDeleteDialog'
 import { ViewModeToggle, WorkspacePage, refreshAction } from '@/components/workspace/Workspace'
 import { bridge } from '@/services/bridge'
-import type { MediaItem, MediaLibrary, MovieDeletePreview, NamedItem } from '@/types/media'
+import type { MediaItem, MediaLibrary, NamedItem, SafeDeletePreview, SafeDeletePreviewCommand } from '@/types/media'
 import type { WorkspaceViewMode } from '@/components/workspace/Workspace'
 
 const pageSize = 24
@@ -66,7 +67,8 @@ export default function MediaPage() {
   const [addTags, setAddTags] = useState<NamedItem[]>([])
   const [removeTags, setRemoveTags] = useState<NamedItem[]>([])
   const [contextMenu, setContextMenu] = useState<{ mouseX: number; mouseY: number; item: MediaItem }>()
-  const [deletePreview, setDeletePreview] = useState<MovieDeletePreview>()
+  const [deletePreview, setDeletePreview] = useState<SafeDeletePreview>()
+  const [deleteCommand, setDeleteCommand] = useState<SafeDeletePreviewCommand>()
   const [editMode, setEditMode] = useState(false)
   const [subMenu, setSubMenu] = useState<{ kind: 'edit' | 'image' | 'open'; anchor: HTMLElement }>()
   const movieActions = useMovieActions({ onNotice: setNotice, play: bridge.play })
@@ -125,8 +127,17 @@ export default function MediaPage() {
   const createBatchImageTasks = (type: string) => Promise.all(selected.map((id) => bridge.generateMovieImage(id, type))).then((results) => { setNotice(`已创建 ${results.length} 个${type === 'GIF' ? ' GIF' : '截图'}任务，可在任务中心查看进度。`); setSelected([]) }).catch((reason: Error) => setNotice(reason.message))
   const openContextMovie = () => { const item = contextMenu?.item; closeContextMenu(); if (item) movieActions.openMovie(item, { search: query, sort }) }
   const openContextLocation = () => { const item = contextMenu?.item; closeContextMenu(); if (item?.path) bridge.revealFile(item.path).then((result) => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message)); else setNotice('没有可定位的影片文件') }
-  const previewDeleteContextMovie = () => { const item = contextMenu?.item; closeContextMenu(); if (item) bridge.previewDeleteMovie(item.dataId).then(setDeletePreview).catch((reason: Error) => setNotice(reason.message)) }
-  const confirmDeleteContextMovie = () => deletePreview && bridge.deleteMovie(deletePreview.movieId, deletePreview.confirmationToken).then((result) => { setNotice(result.message); setDeletePreview(undefined); load() }).catch((reason: Error) => setNotice(reason.message))
+  const openSafeDelete = (movieIds: number[], mode: 'metadata' | 'media') => {
+    closeContextMenu()
+    const command = { movieIds, mode, deleteDatabaseInfo: true } satisfies SafeDeletePreviewCommand
+    setDeleteCommand(command)
+    bridge.previewSafeDelete(command).then(setDeletePreview).catch((reason: Error) => setNotice(reason.message))
+  }
+  const previewDeleteContextMovie = () => { const item = contextMenu?.item; if (item) openSafeDelete([item.dataId], 'metadata') }
+  const previewDeleteContextMedia = () => { const item = contextMenu?.item; if (item) openSafeDelete([item.dataId], 'media') }
+  const previewBatchDelete = (mode: 'metadata' | 'media') => selected.length && openSafeDelete(selected, mode)
+  const closeDeleteDialog = () => { setDeletePreview(undefined); setDeleteCommand(undefined) }
+  const handleDeleteLaunched = (result: { message: string }) => { setNotice(`${result.message} 可在任务中心查看结果。`); closeDeleteDialog(); setSelected([]); void load() }
   const enterEditMode = () => { setEditMode(true); setSelected([]) }
   const exitEditMode = () => { setEditMode(false); setSelected([]); closeContextMenu() }
   const toggleSelect = (item: MediaItem) => setSelected((current) => current.includes(item.dataId) ? current.filter((id) => id !== item.dataId) : [...current, item.dataId])
@@ -188,8 +199,8 @@ export default function MediaPage() {
         <MenuItem key="batch-screenshot" onClick={() => { closeContextMenu(); void createBatchImageTasks('Screenshot') }}>批量生成截图</MenuItem>,
         <MenuItem key="batch-gif" onClick={() => { closeContextMenu(); void createBatchImageTasks('GIF') }}>批量生成 GIF</MenuItem>,
         <Divider key="batch-divider-2"/>,
-        <MenuItem key="batch-delete-info" disabled>删除信息（开发中：缺少批量预览）</MenuItem>,
-        <MenuItem key="batch-delete-file" disabled>删除影片（开发中：缺少安全文件删除工作流）</MenuItem>,
+        <MenuItem key="batch-delete-info" onClick={() => previewBatchDelete('metadata')}>删除信息</MenuItem>,
+        <MenuItem key="batch-delete-file" onClick={() => previewBatchDelete('media')}>删除影片</MenuItem>,
       ] : [
         <MenuItem key="sync" onClick={syncContextMovie}><ListItemIcon><SyncRoundedIcon fontSize="small"/></ListItemIcon>同步信息</MenuItem>,
         <Divider key="divider-1"/>,
@@ -200,7 +211,7 @@ export default function MediaPage() {
         <MenuItem key="location" onMouseEnter={(event) => setSubMenu({ kind: 'open', anchor: event.currentTarget })} onClick={(event) => setSubMenu({ kind: 'open', anchor: event.currentTarget })}><ListItemIcon><FolderRoundedIcon fontSize="small"/></ListItemIcon>打开位置</MenuItem>,
         <Divider key="divider"/>,
         <MenuItem key="delete-info" onClick={previewDeleteContextMovie}><ListItemIcon><DeleteOutlineRoundedIcon fontSize="small"/></ListItemIcon>删除信息</MenuItem>,
-        <MenuItem key="delete-file" disabled>删除影片（开发中：缺少安全文件删除工作流）</MenuItem>,
+        <MenuItem key="delete-file" onClick={previewDeleteContextMedia}>删除影片</MenuItem>,
       ]}
     </Menu>
     <Menu open={Boolean(subMenu)} anchorEl={subMenu?.anchor} onClose={() => setSubMenu(undefined)} anchorOrigin={{ vertical: 'top', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'left' }}>
@@ -211,6 +222,6 @@ export default function MediaPage() {
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>
     <Dialog open={ratingDialog} onClose={() => setRatingDialog(false)} fullWidth maxWidth="xs"><DialogTitle>批量评分</DialogTitle><DialogContent><TextField select fullWidth margin="normal" label="评分" value={batchRating} onChange={(event) => setBatchRating(event.target.value)}><MenuItem value="">清除评分</MenuItem>{[0, 1, 2, 3, 4, 5].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}</TextField></DialogContent><DialogActions><Button onClick={() => setRatingDialog(false)}>取消</Button><Button variant="contained" onClick={saveBatchRating}>应用到 {selected.length} 部影片</Button></DialogActions></Dialog>
     <Dialog open={tagDialog} onClose={() => setTagDialog(false)} fullWidth maxWidth="sm"><DialogTitle>批量编辑标签</DialogTitle><DialogContent><Autocomplete multiple options={tags.filter((tag) => !removeTags.some((item) => item.id === tag.id))} value={addTags} isOptionEqualToValue={(a, b) => a.id === b.id} getOptionLabel={(option) => option.name} onChange={(_, value) => setAddTags(value)} renderInput={(params) => <TextField {...params} label="添加标签" margin="normal"/>}/><Autocomplete multiple options={tags.filter((tag) => !addTags.some((item) => item.id === tag.id))} value={removeTags} isOptionEqualToValue={(a, b) => a.id === b.id} getOptionLabel={(option) => option.name} onChange={(_, value) => setRemoveTags(value)} renderInput={(params) => <TextField {...params} label="解绑标签" margin="normal" helperText="只解除关系，不删除标签。"/>}/></DialogContent><DialogActions><Button onClick={() => setTagDialog(false)}>取消</Button><Button variant="contained" disabled={!addTags.length && !removeTags.length} onClick={saveBatchTags}>应用到 {selected.length} 部影片</Button></DialogActions></Dialog>
-    <Dialog open={Boolean(deletePreview)} onClose={() => setDeletePreview(undefined)} maxWidth="sm" fullWidth><DialogTitle>删除影片信息？</DialogTitle><DialogContent><DialogContentText>将移除“{deletePreview?.code}”的数据库记录，但不会删除媒体文件。{deletePreview?.ratingWillBeRemembered ? '当前评分会按文件名记忆。' : '当前没有需要记忆的评分。'}</DialogContentText><Alert severity="warning" sx={{ mt: 2 }}>{deletePreview?.warnings.join(' ')}</Alert></DialogContent><DialogActions><Button onClick={() => setDeletePreview(undefined)}>取消</Button><Button variant="contained" color="error" onClick={confirmDeleteContextMovie}>确认删除信息</Button></DialogActions></Dialog>
+    <SafeDeleteDialog preview={deletePreview} command={deleteCommand} onClose={closeDeleteDialog} onLaunched={handleDeleteLaunched}/>
   </WorkspacePage>
 }

@@ -23,9 +23,10 @@ import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router'
 import { SurfaceSection } from '@/components/ProductComponents'
+import { SafeDeleteDialog } from '@/components/SafeDeleteDialog'
 import { SmartImage, clearImageMemoryCache } from '@/components/SmartImage'
 import { bridge } from '@/services/bridge'
-import type { ImageAsset, ImageCenterStatus, ImageDeletePreview, MovieDeletePreview, MovieDetail, NamedItem, NfoPreview, OrganizerPreview } from '@/types/media'
+import type { ImageAsset, ImageCenterStatus, ImageDeletePreview, MovieDetail, NamedItem, NfoPreview, OrganizerPreview, SafeDeletePreview, SafeDeletePreviewCommand } from '@/types/media'
 
 const formatDuration = (seconds: number) => {
   if (!seconds) return '时长未知'
@@ -70,7 +71,8 @@ export default function MovieDetailPage() {
   const [replaceTarget, setReplaceTarget] = useState<ImageAsset>(); const [replacePath, setReplacePath] = useState('')
   const [imageDeletePreview, setImageDeletePreview] = useState<ImageDeletePreview>()
   const [neighbors, setNeighbors] = useState<{ previousId?: number; nextId?: number }>({})
-  const [deletePreview, setDeletePreview] = useState<MovieDeletePreview>()
+  const [deletePreview, setDeletePreview] = useState<SafeDeletePreview>()
+  const [deleteCommand, setDeleteCommand] = useState<SafeDeletePreviewCommand>()
   const [nfoPreview, setNfoPreview] = useState<NfoPreview>(); const [nfoMode, setNfoMode] = useState<'import' | 'export'>('export')
   const [organizerOpen, setOrganizerOpen] = useState(false); const [organizerPreview, setOrganizerPreview] = useState<OrganizerPreview>(); const [organizerTemplate, setOrganizerTemplate] = useState('{Code}'); const [organizerDestination, setOrganizerDestination] = useState('')
   const context = (location.state as { context?: { search?: string; sort?: string } } | null)?.context
@@ -85,8 +87,18 @@ export default function MovieDetailPage() {
   const openActors = () => { if (!movie) return; setSelectedActors(movie.actors ?? []); setActorOptions(movie.actors ?? []); setActorDialog(true) }
   const saveActors = () => { if (!movie) return; mutate(bridge.setMovieActors(movie.id, selectedActors.map((item) => item.id))); setActorDialog(false) }
   const go = (movieId?: number) => movieId && navigate(`/movies/${movieId}`, { state: { context }, replace: true })
-  const previewDelete = () => movie && bridge.previewDeleteMovie(movie.id).then(setDeletePreview).catch((reason: Error) => setNotice(reason.message))
-  const confirmDelete = () => deletePreview && bridge.deleteMovie(deletePreview.movieId, deletePreview.confirmationToken).then((result) => { setDeletePreview(undefined); navigate('/media', { replace: true }); window.setTimeout(() => setNotice(result.message), 0) }).catch((reason: Error) => setNotice(reason.message))
+  const previewDelete = () => {
+    if (!movie) return
+    const command = { movieIds: [movie.id], mode: 'metadata', deleteDatabaseInfo: true } satisfies SafeDeletePreviewCommand
+    setDeleteCommand(command)
+    bridge.previewSafeDelete(command).then(setDeletePreview).catch((reason: Error) => setNotice(reason.message))
+  }
+  const closeDeleteDialog = () => { setDeletePreview(undefined); setDeleteCommand(undefined) }
+  const handleDeleteLaunched = (result: { message: string }) => {
+    closeDeleteDialog()
+    navigate('/media', { replace: true })
+    window.setTimeout(() => setNotice(`${result.message} 可在任务中心查看结果。`), 0)
+  }
   const syncMetadata = () => movie && bridge.syncMovie(movie.id).then(result => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message))
   const refreshImages = () => { clearImageMemoryCache(); if (movie) loadMovie(movie.id).then(() => setNotice('图片状态已刷新')).catch((reason: Error) => setNotice(reason.message)) }
   const rebuildCache = () => bridge.rebuildImageCache().then(result => setNotice(`${result.message}（${result.totalItems} 部影片）`)).catch((reason: Error) => setNotice(reason.message))
@@ -247,7 +259,7 @@ export default function MovieDetailPage() {
       <DialogActions><Button onClick={() => setTagDialog(false)}>取消</Button><Button variant="contained" onClick={saveTags}>保存</Button></DialogActions>
     </Dialog>
     <Dialog open={actorDialog} onClose={() => setActorDialog(false)} fullWidth maxWidth="sm"><DialogTitle>编辑演员关系</DialogTitle><DialogContent><Autocomplete multiple filterOptions={(options) => options} options={actorOptions} value={selectedActors} isOptionEqualToValue={(a, b) => a.id === b.id} getOptionLabel={(option) => option.name} onInputChange={(_, value) => setActorSearch(value)} onChange={(_, value) => setSelectedActors(value)} renderInput={(params) => <TextField {...params} autoFocus label="搜索并选择演员" margin="normal"/>}/></DialogContent><DialogActions><Button onClick={() => setActorDialog(false)}>取消</Button><Button variant="contained" onClick={saveActors}>保存</Button></DialogActions></Dialog>
-    <Dialog open={Boolean(deletePreview)} onClose={() => setDeletePreview(undefined)} maxWidth="sm" fullWidth><DialogTitle>从资料库移除影片？</DialogTitle><DialogContent><DialogContentText>将移除“{deletePreview?.code}”的数据库记录，但不会删除媒体文件。{deletePreview?.ratingWillBeRemembered ? '当前评分会按文件名记忆，重新导入同名文件时可恢复。' : '当前没有需要记忆的评分。'}</DialogContentText><Alert severity="warning" sx={{ mt: 2 }}>{deletePreview?.warnings.join(' ')}</Alert></DialogContent><DialogActions><Button onClick={() => setDeletePreview(undefined)}>取消</Button><Button variant="contained" color="error" onClick={confirmDelete}>确认移除记录</Button></DialogActions></Dialog>
+    <SafeDeleteDialog preview={deletePreview} command={deleteCommand} onClose={closeDeleteDialog} onLaunched={handleDeleteLaunched}/>
     <Dialog open={Boolean(nfoPreview)} onClose={() => setNfoPreview(undefined)} maxWidth="sm" fullWidth><DialogTitle>{nfoMode === 'import' ? '导入 NFO 预览' : '导出 NFO 预览'}</DialogTitle><DialogContent><DialogContentText sx={{ overflowWrap: 'anywhere' }}>{nfoPreview?.path}</DialogContentText>{nfoPreview?.changes.length ? <Alert severity="info" sx={{ mt: 2 }}>将处理：{nfoPreview.changes.join('、')}</Alert> : null}{nfoPreview?.conflicts.length ? <Alert severity="warning" sx={{ mt: 1 }}>冲突字段保持原值：{nfoPreview.conflicts.join('、')}</Alert> : null}{nfoPreview?.warnings.map((warning) => <Alert key={warning} severity="warning" sx={{ mt: 1 }}>{warning}</Alert>)}</DialogContent><DialogActions><Button onClick={() => setNfoPreview(undefined)}>取消</Button>{nfoMode === 'export' && nfoPreview && !nfoPreview.canApply && <Button variant="outlined" onClick={() => confirmNfo(true)}>另存为 .lmm.nfo</Button>}<Button variant="contained" disabled={busy || Boolean(nfoPreview && !nfoPreview.canApply)} onClick={() => confirmNfo()}>{nfoMode === 'import' ? '确认导入' : '确认导出'}</Button></DialogActions></Dialog>
     <Dialog open={organizerOpen} onClose={() => !busy && setOrganizerOpen(false)} maxWidth="md" fullWidth><DialogTitle>整理文件</DialogTitle><DialogContent><Stack spacing={2} sx={{ mt: 1 }}><TextField label="文件名模板" value={organizerTemplate} onChange={event => { setOrganizerTemplate(event.target.value); setOrganizerPreview(undefined) }} helperText="支持 {Code}、{Title}、{Year}、{Actors}"/><TextField label="目标目录" value={organizerDestination} onChange={event => { setOrganizerDestination(event.target.value); setOrganizerPreview(undefined) }} helperText="留空时只在原目录重命名；不会覆盖任何已有目标。"/>{organizerPreview && <><Alert severity={organizerPreview.conflictItems ? 'error' : 'success'}>Dry Run：{organizerPreview.validItems} 项可执行，{organizerPreview.conflictItems} 项冲突。尚未修改文件。</Alert>{organizerPreview.items.map(item => <Paper key={item.mediaFileId} variant="outlined" sx={{ p: 1.5 }}><Typography variant="caption" color="text.secondary">原路径</Typography><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{item.sourcePath}</Typography><Typography variant="caption" color="text.secondary">目标路径</Typography><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{item.destinationPath}</Typography>{item.conflict && <Alert severity="error" sx={{ mt: 1 }}>{item.conflict}</Alert>}</Paper>)}</>}</Stack></DialogContent><DialogActions><Button onClick={() => setOrganizerOpen(false)}>取消</Button><Button variant="outlined" disabled={busy} onClick={dryRunOrganizer}>Dry Run</Button><Button variant="contained" disabled={busy || !organizerPreview || organizerPreview.conflictItems > 0} onClick={executeOrganizer}>确认并进入任务</Button></DialogActions></Dialog>
     <Dialog open={Boolean(replaceTarget)} onClose={() => !busy && setReplaceTarget(undefined)} maxWidth="sm" fullWidth>

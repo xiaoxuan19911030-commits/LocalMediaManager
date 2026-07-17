@@ -18,7 +18,7 @@ public sealed record ImpactPreview(string Operation, long EntityId, string Name,
 public sealed record ActorRepairPreview(long CandidateActors, long AffectedRelations, string ConfirmationToken, IReadOnlyList<string> Warnings);
 public sealed record MovieDeletePreview(long MovieId, string Code, string FileName, bool RatingWillBeRemembered, string ConfirmationToken, IReadOnlyList<string> Warnings);
 
-public sealed class ProductWriter(string databasePath)
+public sealed class ProductWriter(string databasePath, RatingHistoryService? ratingHistory = null)
 {
     private readonly ConcurrentDictionary<string, PreviewGrant> grants = new(StringComparer.Ordinal);
     private static string Now() => DateTimeOffset.UtcNow.ToString("O");
@@ -45,6 +45,8 @@ public sealed class ProductWriter(string databasePath)
         long audit = await AuditAsync(connection, transaction, "UserState", "Movie", movieId, before,
             new { Favorite = favorite, Rating = rating, HasRating = hasRating });
         await transaction.CommitAsync();
+        if (hasRating && rating > 0) await (ratingHistory?.RememberExplicitRatingAsync(movieId, rating) ?? Task.CompletedTask);
+        if (input.ClearRating) await (ratingHistory?.MaybeDeleteOnClearAsync(movieId) ?? Task.CompletedTask);
         return new(true, audit, "用户状态已保存。");
     }
 
@@ -72,6 +74,7 @@ public sealed class ProductWriter(string databasePath)
     public async Task<MutationResult> DeleteMovieAsync(long movieId, ConfirmCommand input)
     {
         Consume(input.ConfirmationToken, "MovieDelete", movieId);
+        if (ratingHistory is not null) await ratingHistory.RememberAsync(movieId);
         string backupPath = await BackupDatabaseAsync("movie-delete");
         await using var connection = await OpenAsync();
         await using var transaction = await connection.BeginTransactionAsync();
@@ -129,6 +132,10 @@ public sealed class ProductWriter(string databasePath)
             await ExecuteAsync(connection, transaction, "INSERT INTO UserMovieState(MovieId,IsFavorite,UserRating,PlayCount,LastPositionSeconds,UpdatedAt,HasUserRating) VALUES($id,0,$rating,0,0,$at,$has) ON CONFLICT(MovieId) DO UPDATE SET UserRating=excluded.UserRating,HasUserRating=excluded.HasUserRating,UpdatedAt=excluded.UpdatedAt", ("$id", id), ("$rating", input.ClearRating ? 0 : input.Rating), ("$has", input.ClearRating ? 0 : 1), ("$at", Now()));
         }
         long audit = await AuditAsync(connection, transaction, "BatchRating", "Movie", null, null, new { MovieIds = ids, input.Rating, input.ClearRating }); await transaction.CommitAsync();
+        if (!input.ClearRating && input.Rating is > 0 && ratingHistory is not null)
+            foreach (long id in ids) await ratingHistory.RememberExplicitRatingAsync(id, input.Rating.Value);
+        if (input.ClearRating && ratingHistory is not null)
+            foreach (long id in ids) await ratingHistory.MaybeDeleteOnClearAsync(id);
         return new(true, audit, $"Updated ratings for {ids.Length} movies.");
     }
 

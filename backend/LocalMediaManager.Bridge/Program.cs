@@ -21,7 +21,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls(bridgeUrl);
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
-builder.Services.AddSingleton(new ProductWriter(databasePath));
+builder.Services.AddSingleton(new RatingHistoryService(databasePath));
+builder.Services.AddSingleton(serviceProvider => new ProductWriter(databasePath, serviceProvider.GetRequiredService<RatingHistoryService>()));
 builder.Services.AddSingleton(new PlaybackSettingsService(databasePath, configDatabasePath));
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton(new LibraryWorkflowService(databasePath));
@@ -29,6 +30,7 @@ builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequired
 builder.Services.AddSingleton(new MetadataProviderSettingsService(databasePath));
 builder.Services.AddSingleton(new MetadataWriteService(databasePath));
 builder.Services.AddSingleton(new TaskLogService(databasePath));
+builder.Services.AddSingleton(new FfmpegLocator(databasePath, AppContext.BaseDirectory));
 builder.Services.AddSingleton(new ImageAssetService(databasePath, imageRoot));
 builder.Services.AddSingleton(new ImageWorkflowService(databasePath, imageRoot));
 builder.Services.AddSingleton(new DataSafetyService(databasePath, configDatabasePath, imageRoot));
@@ -54,17 +56,25 @@ builder.Services.AddSingleton(serviceProvider => new ImageGenerationTaskService(
     databasePath,
     imageRoot,
     serviceProvider.GetRequiredService<ImageWorkflowService>(),
-    serviceProvider.GetRequiredService<TaskLogService>()));
+    serviceProvider.GetRequiredService<TaskLogService>(),
+    serviceProvider.GetRequiredService<FfmpegLocator>()));
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<ImageGenerationTaskService>());
 builder.Services.AddSingleton(serviceProvider => new FileOrganizerService(
     databasePath, serviceProvider.GetRequiredService<TaskLogService>()));
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<FileOrganizerService>());
+builder.Services.AddSingleton(serviceProvider => new SafeDeleteWorkflowService(
+    databasePath,
+    serviceProvider.GetRequiredService<ProductWriter>(),
+    serviceProvider.GetRequiredService<TaskLogService>(),
+    serviceProvider.GetRequiredService<RatingHistoryService>()));
+builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<SafeDeleteWorkflowService>());
 builder.Services.AddSingleton(serviceProvider => new TaskCommandService(databasePath,
     serviceProvider.GetRequiredService<LibraryWorkflowService>(),
     serviceProvider.GetRequiredService<MetadataSyncExecutor>(),
     serviceProvider.GetRequiredService<ImageCacheTaskService>(),
     serviceProvider.GetRequiredService<FileOrganizerService>(),
-    serviceProvider.GetRequiredService<ImageGenerationTaskService>()));
+    serviceProvider.GetRequiredService<ImageGenerationTaskService>(),
+    serviceProvider.GetRequiredService<SafeDeleteWorkflowService>()));
 
 var app = builder.Build();
 app.UseCors();
@@ -177,6 +187,10 @@ app.MapPost("/api/tasks/cleanup", async (TaskCleanupCommand command, TaskCommand
 app.MapPost("/api/tasks/batch/cancel-sync", async (IReadOnlyList<long> taskIds, TaskCommandService service) => Results.Ok(await service.CancelSyncBatchAsync(taskIds)));
 app.MapPost("/api/videos/{movieId:long}/sync", async (long movieId, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Manual")));
 app.MapPost("/api/videos/batch/sync", async (IReadOnlyList<long> movieIds, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueBatchAsync(movieIds)));
+app.MapPost("/api/delete/preview", async (SafeDeletePreviewCommand command, SafeDeleteWorkflowService service, CancellationToken token) =>
+    Results.Ok(await service.PreviewAsync(command, token)));
+app.MapPost("/api/delete/execute", async (SafeDeleteExecuteRequest command, SafeDeleteWorkflowService service, CancellationToken token) =>
+    Results.Ok(await service.ExecuteAsync(command, token)));
 app.MapPost("/api/videos/{movieId:long}/images/{imageType}/replace", async (long movieId, string imageType, ImageReplaceCommand command, ImageWorkflowService service, CancellationToken token) =>
     Results.Ok(await service.ReplaceAsync(movieId, imageType, command.Path, token)));
 app.MapPost("/api/videos/{movieId:long}/images/{imageType}/generate", async (long movieId, string imageType, ImageGenerationTaskService service, CancellationToken token) =>
@@ -357,6 +371,10 @@ app.MapGet("/api/settings/playback", async (PlaybackSettingsService playback, Ca
     Results.Ok(await playback.ReadAsync(token)));
 app.MapPut("/api/settings/playback", async (PlaybackSettingsDto command, PlaybackSettingsService playback, CancellationToken token) =>
     Results.Ok(await playback.SaveAsync(command, token)));
+app.MapGet("/api/settings/rating-history", async (RatingHistoryService ratings, CancellationToken token) =>
+    Results.Ok(await ratings.ReadSettingsAsync(token)));
+app.MapPut("/api/settings/rating-history", async (RatingHistorySettingsDto command, RatingHistoryService ratings, CancellationToken token) =>
+    Results.Ok(await ratings.SaveSettingsAsync(command, token)));
 
 app.MapPost("/api/organizer/dry-run", async (OrganizerPlanCommand command, FileOrganizerService organizer, CancellationToken token) =>
     Results.Ok(await organizer.DryRunAsync(command, token)));

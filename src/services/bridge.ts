@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateResults, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageDeletePreview, ImageMutationResult, ImageTaskLaunchResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, PlatformOpenResult, ScanLaunchResult, TaskCleanupResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
-import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, MetaTubeSettings, NfoSettings, PlaybackSettings, ProviderConnectionResult, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic } from '@/types/settings'
+import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateResults, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageDeletePreview, ImageMutationResult, ImageTaskLaunchResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, PlatformOpenResult, SafeDeleteLaunchResult, SafeDeletePreview, SafeDeletePreviewCommand, ScanLaunchResult, TaskCleanupResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
+import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, MetaTubeSettings, NfoSettings, PlaybackSettings, ProviderConnectionResult, RatingHistorySettings, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
 
@@ -45,6 +45,8 @@ export const bridge = {
   saveNfoSettings: (value: NfoSettings) => request<NfoSettings>('/api/settings/nfo', { method: 'PUT', body: JSON.stringify(value) }),
   playbackSettings: () => request<PlaybackSettings>('/api/settings/playback'),
   savePlaybackSettings: (value: PlaybackSettings) => request<PlaybackSettings>('/api/settings/playback', { method: 'PUT', body: JSON.stringify(value) }),
+  ratingHistorySettings: () => request<RatingHistorySettings>('/api/settings/rating-history'),
+  saveRatingHistorySettings: (value: RatingHistorySettings) => request<RatingHistorySettings>('/api/settings/rating-history', { method: 'PUT', body: JSON.stringify(value) }),
   movie: (id: number) => request<MovieDetail>(`/api/videos/${id}`),
   movieImages: (id: number) => request<ImageAsset[]>(`/api/videos/${id}/images`),
   movieImageStatus: (id: number) => request<ImageCenterStatus>(`/api/videos/${id}/images/status`),
@@ -107,6 +109,9 @@ export const bridge = {
   setBatchFavorite: (movieIds: number[], favorite: boolean) => request<MutationResult>('/api/videos/batch/favorite', { method: 'POST', body: JSON.stringify({ movieIds, favorite }) }),
   setBatchRating: (movieIds: number[], rating?: number, clearRating = false) => request<MutationResult>('/api/videos/batch/rating', { method: 'POST', body: JSON.stringify({ movieIds, rating: rating ?? null, clearRating }) }),
   createBatchSync: (movieIds: number[]) => request<{ count: number; message: string }>('/api/videos/batch/sync', { method: 'POST', body: JSON.stringify(movieIds) }),
+  previewSafeDelete: (value: SafeDeletePreviewCommand) => request<SafeDeletePreview>('/api/delete/preview', { method: 'POST', body: JSON.stringify(value) }),
+  executeSafeDelete: (preview: SafeDeletePreviewCommand, confirmationToken: string, confirmOriginalMedia = false, confirmCount?: number) =>
+    request<SafeDeleteLaunchResult>('/api/delete/execute', { method: 'POST', body: JSON.stringify({ ...preview, confirmationToken, confirmOriginalMedia, confirmCount }) }),
   createTag: (value: { name: string; description?: string; color?: string }) => request<MutationResult & { id: number }>('/api/tags', { method: 'POST', body: JSON.stringify(value) }),
   updateTag: (tagId: number, value: { name: string; description?: string; color?: string }) => request<MutationResult>(`/api/tags/${tagId}`, { method: 'PUT', body: JSON.stringify(value) }),
   previewDeleteTag: (tagId: number) => request<ImpactPreview>(`/api/tags/${tagId}/delete-preview`),

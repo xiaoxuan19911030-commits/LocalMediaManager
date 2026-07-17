@@ -20,5 +20,6 @@
     <Content Include="..\LocalMediaManager.Migration\migrations\0007_NfoWorkflow.sql" Link="migrations\0007_NfoWorkflow.sql" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\LocalMediaManager.Migration\migrations\0008_FileOrganizerWorkflow.sql" Link="migrations\0008_FileOrganizerWorkflow.sql" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\LocalMediaManager.Migration\migrations\0009_PlaybackSettings.sql" Link="migrations\0009_PlaybackSettings.sql" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\LocalMediaManager.Migration\migrations\0010_DeletedMovieRatings.sql" Link="migrations\0010_DeletedMovieRatings.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

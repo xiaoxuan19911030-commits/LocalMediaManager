@@ -476,7 +476,7 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
             ("$name", file.Name), ("$extension", file.Extension.ToLowerInvariant()), ("$size", Math.Max(0, file.Length)),
             ("$source", sourceType), ("$at", at));
 
-        bool restored = await RestoreDeletedRatingAsync(connection, transaction, movieId, file.Name, at);
+        bool restored = await RatingHistoryService.RestoreForImportedMovieAsync(connection, transaction, movieId, code, at);
         if (autoSync) {
             long syncTaskId = await InsertIdAsync(connection, transaction, """
                 INSERT INTO Tasks(TaskType,Status,Stage,Provider,Progress,TotalItems,CompletedItems,PayloadJson,CreatedAt,UpdatedAt,CurrentMovieId)
@@ -486,32 +486,6 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
         }
         await transaction.CommitAsync();
         return new(true, restored);
-    }
-
-    private static async Task<bool> RestoreDeletedRatingAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
-        long movieId, string fileName, string at)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = (SqliteTransaction)transaction;
-        command.CommandText = """
-            SELECT Id,Rating FROM DeletedRatingMemory
-             WHERE NormalizedFileName=$name AND RestoredAt IS NULL
-             ORDER BY RememberedAt DESC,Id DESC LIMIT 1
-            """;
-        command.Parameters.AddWithValue("$name", Path.GetFileName(fileName).Trim().ToLowerInvariant());
-        await using var reader = await command.ExecuteReaderAsync();
-        if (!await reader.ReadAsync()) return false;
-        long memoryId = reader.GetInt64(0);
-        double rating = reader.GetDouble(1);
-        await reader.DisposeAsync();
-        await ExecuteAsync(connection, transaction, """
-            INSERT INTO UserMovieState(MovieId,IsFavorite,UserRating,PlayCount,LastPositionSeconds,UpdatedAt,HasUserRating)
-            VALUES($movie,0,$rating,0,0,$at,1)
-            ON CONFLICT(MovieId) DO NOTHING
-            """, ("$movie", movieId), ("$rating", rating), ("$at", at));
-        await ExecuteAsync(connection, transaction, "UPDATE DeletedRatingMemory SET RestoredAt=$at WHERE Id=$id",
-            ("$at", at), ("$id", memoryId));
-        return true;
     }
 
     private static async Task<int> RefreshMissingStatesAsync(SqliteConnection connection, long libraryId)

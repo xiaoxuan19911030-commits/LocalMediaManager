@@ -302,6 +302,31 @@ export interface ImpactPreview { operation: string; entityId: number; name: stri
 export interface ActorRepairPreview { candidateActors: number; affectedRelations: number; confirmationToken: string; warnings: string[] }
 export interface NeighborResult { previousId?: number; nextId?: number }
 export interface MovieDeletePreview { movieId: number; code: string; fileName: string; ratingWillBeRemembered: boolean; confirmationToken: string; warnings: string[] }
+export interface SafeDeletePathPreview { kind: string; path: string; exists: boolean; size: number; willDelete: boolean; status: string; reason?: string }
+export interface SafeDeleteMoviePreview {
+  movieId: number
+  code: string
+  title: string
+  primaryPath?: string
+  primaryExists: boolean
+  estimatedBytes: number
+  databaseInfo: string[]
+  files: SafeDeletePathPreview[]
+  warnings: string[]
+}
+export interface SafeDeletePreview {
+  mode: 'metadata' | 'media'
+  deleteDatabaseInfo: boolean
+  movieCount: number
+  estimatedBytes: number
+  deletesOriginalMedia: boolean
+  requiresStrongConfirmation: boolean
+  confirmationToken: string
+  warnings: string[]
+  items: SafeDeleteMoviePreview[]
+}
+export interface SafeDeletePreviewCommand { movieIds: number[]; mode: 'metadata' | 'media'; deleteDatabaseInfo?: boolean }
+export interface SafeDeleteLaunchResult { taskId: number; status: string; totalItems: number; message: string }
 
 export interface ImageAsset {
   id: number; type: string; url?: string; ownership: string; locked: boolean; derived: boolean

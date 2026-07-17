@@ -17,7 +17,7 @@ public sealed class LibraryWorkflowServiceTests : IAsyncLifetime
         service = new LibraryWorkflowService(Database);
         await using var connection = new SqliteConnection($"Data Source={Database}");
         await connection.OpenAsync();
-        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql" }) {
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0010_DeletedMovieRatings.sql" }) {
             await using var command = connection.CreateCommand();
             command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
             await command.ExecuteNonQueryAsync();
@@ -33,7 +33,7 @@ public sealed class LibraryWorkflowServiceTests : IAsyncLifetime
         await File.WriteAllTextAsync(Path.Combine(MediaRoot, "RESTORE-001.nfo"), "<movie />");
         await File.WriteAllTextAsync(Path.Combine(MediaRoot, "NEW-002.srt"), "subtitle");
         await using (var seed = await Open())
-            await Execute(seed, "INSERT INTO DeletedRatingMemory(FileName,NormalizedFileName,Rating,RememberedAt) VALUES('RESTORE-001.mp4','restore-001.mp4',4.5,'2026-01-01')");
+            await Execute(seed, "INSERT INTO DeletedMovieRatings(NormalizedMovieCode,Rating,UpdatedAt) VALUES('RESTORE-001',4.5,'2026-01-01')");
 
         LibraryMutationResult library = await service.CreateLibraryAsync(new(
             "Test Library", "Scan test", true,
@@ -48,7 +48,7 @@ public sealed class LibraryWorkflowServiceTests : IAsyncLifetime
         Assert.Equal(2, await Scalar(connection, "SELECT COUNT(*) FROM MediaFiles WHERE MediaType='Video'"));
         Assert.Equal(0, await Scalar(connection, "SELECT COUNT(*) FROM MediaFiles WHERE FileName LIKE 'sample%'"));
         Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM UserMovieState WHERE UserRating=4.5 AND HasUserRating=1"));
-        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM DeletedRatingMemory WHERE RestoredAt IS NOT NULL"));
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM DeletedMovieRatings WHERE NormalizedMovieCode='RESTORE-001'"));
         Assert.Equal(2, await Scalar(connection, "SELECT COUNT(*) FROM Tasks WHERE TaskType='Sync' AND Status='Pending'"));
         Assert.True(await Scalar(connection, $"SELECT COUNT(*) FROM TaskLogs WHERE TaskId={scan.TaskId}") >= 2);
         await service.UpdateLibraryAsync(library.Id, new("Renamed Library", "Updated", true,
