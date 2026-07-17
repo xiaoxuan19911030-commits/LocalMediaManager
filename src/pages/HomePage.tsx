@@ -45,6 +45,45 @@ function meterTone(value: number): 'primary' | 'success' | 'warning' | 'error' {
   return 'error'
 }
 
+function normalizeDashboard(input: DashboardSummary): DashboardSummary {
+  return {
+    ...input,
+    completeMetadataCount: input.completeMetadataCount ?? 0,
+    pendingMetadataCount: input.pendingMetadataCount ?? 0,
+    unscrapedCount: input.unscrapedCount ?? 0,
+    actorCount: input.actorCount ?? 0,
+    directorCount: input.directorCount ?? 0,
+    tagCount: input.tagCount ?? 0,
+    seriesCount: input.seriesCount ?? 0,
+    studioCount: input.studioCount ?? 0,
+    maintenance: input.maintenance ?? {
+      healthyMovies: Math.max(0, input.movieCount - (input.missingFileCount ?? 0)),
+      pendingMovies: input.pendingMetadataCount ?? 0,
+      unscrapedMovies: input.unscrapedCount ?? 0,
+      duplicateMovies: 0,
+      missingImages: 0,
+      missingNfo: 0,
+      cacheProblems: 0,
+    },
+    metadataHealth: input.metadataHealth ?? {
+      completeRate: input.movieCount ? Math.round(((input.completeMetadataCount ?? 0) / input.movieCount) * 100) : 100,
+      imageRate: 100,
+      nfoRate: 100,
+      actorRate: 100,
+      tagRate: 100,
+    },
+    recentActivity: input.recentActivity ?? [],
+    libraries: input.libraries ?? [],
+    topTags: input.topTags ?? [],
+    topActors: input.topActors ?? [],
+    topDirectors: input.topDirectors ?? [],
+    topStudios: input.topStudios ?? [],
+    topSeries: input.topSeries ?? [],
+    recentImports: input.recentImports ?? [],
+    recentPlays: input.recentPlays ?? [],
+  }
+}
+
 function ActionButton({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
   return <Button variant="outlined" color="inherit" startIcon={icon} onClick={onClick} sx={{ justifyContent: 'flex-start', minHeight: 42, borderColor: 'divider' }}>{label}</Button>
 }
@@ -92,7 +131,7 @@ export default function HomePage() {
   const openMovie = (id?: number) => { if (id) navigate(`/movies/${id}`) }
   const searchEntity = (name: string) => navigate(`/search?q=${encodeURIComponent(name)}`)
   const openRandom = () => {
-    const pool = [...(dashboard?.recentImports ?? []), ...(dashboard?.recentPlays ?? [])]
+    const pool = [...(dashboardView?.recentImports ?? []), ...(dashboardView?.recentPlays ?? [])]
     const item = pool[Math.floor(Math.random() * pool.length)]
     item ? navigate(`/movies/${item.dataId}`) : navigate('/media')
   }
@@ -100,9 +139,11 @@ export default function HomePage() {
     ? <MediaCardGrid>{items.map((item) => <MediaCard key={item.dataId} item={item} onPlay={play} onOpen={() => navigate(`/movies/${item.dataId}`)}/>)}</MediaCardGrid>
     : <EmptyState title="暂无影片" description="有可展示的影片后会自动出现在这里。"/>
 
+  const dashboardView = dashboard ? normalizeDashboard(dashboard) : undefined
+
   return <Box>
     {error && <Alert severity="error">Dashboard 读取失败：{error}</Alert>}
-    {!dashboard && !error ? <Box sx={{ minHeight: 420, display: 'grid', placeItems: 'center' }}><CircularProgress/></Box> : dashboard && <Stack spacing={2.5}>
+    {!dashboardView && !error ? <Box sx={{ minHeight: 420, display: 'grid', placeItems: 'center' }}><CircularProgress/></Box> : dashboardView && <Stack spacing={2.5}>
       <Paper variant="outlined" sx={{ p: { xs: 2, md: 2.75 }, borderRadius: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ alignItems: { xs: 'stretch', md: 'center' }, justifyContent: 'space-between' }}>
           <Box>
@@ -119,24 +160,24 @@ export default function HomePage() {
       </Paper>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2,minmax(0,1fr))', md: 'repeat(4,minmax(0,1fr))', xl: 'repeat(8,minmax(0,1fr))' }, gap: 1.25 }}>
-        <Box onClick={() => navigate('/media')} sx={{ cursor: 'pointer' }}><StatCard label="全部影片" value={dashboard.movieCount} icon={<MovieRoundedIcon/>}/></Box>
-        <Box onClick={() => navigate('/favorites')} sx={{ cursor: 'pointer' }}><StatCard label="收藏" value={dashboard.favoriteCount} icon={<FavoriteRoundedIcon/>} tone="error.main"/></Box>
-        <Box onClick={() => navigate('/history')} sx={{ cursor: 'pointer' }}><StatCard label="播放过" value={dashboard.playedCount} icon={<PlayCircleRoundedIcon/>} tone="success.main"/></Box>
-        <Box onClick={() => navigate('/libraries')} sx={{ cursor: 'pointer' }}><StatCard label="媒体库" value={dashboard.libraryCount} icon={<StorageRoundedIcon/>}/></Box>
-        <Box onClick={() => navigate('/actors')} sx={{ cursor: 'pointer' }}><StatCard label="演员" value={dashboard.actorCount} icon={<GroupsRoundedIcon/>}/></Box>
-        <Box onClick={() => navigate('/tags')} sx={{ cursor: 'pointer' }}><StatCard label="标签" value={dashboard.tagCount} icon={<LocalOfferRoundedIcon/>}/></Box>
-        <Box onClick={() => navigate('/tasks')} sx={{ cursor: 'pointer' }}><StatCard label="活动任务" value={dashboard.activeTaskCount} icon={<SyncRoundedIcon/>} tone="warning.main"/></Box>
-        <Box onClick={() => navigate('/maintenance')} sx={{ cursor: 'pointer' }}><StatCard label="待维护" value={dashboard.maintenance.pendingMovies} icon={<BuildRoundedIcon/>} tone="warning.main"/></Box>
+        <Box onClick={() => navigate('/media')} sx={{ cursor: 'pointer' }}><StatCard label="全部影片" value={dashboardView.movieCount} icon={<MovieRoundedIcon/>}/></Box>
+        <Box onClick={() => navigate('/favorites')} sx={{ cursor: 'pointer' }}><StatCard label="收藏" value={dashboardView.favoriteCount} icon={<FavoriteRoundedIcon/>} tone="error.main"/></Box>
+        <Box onClick={() => navigate('/history')} sx={{ cursor: 'pointer' }}><StatCard label="播放过" value={dashboardView.playedCount} icon={<PlayCircleRoundedIcon/>} tone="success.main"/></Box>
+        <Box onClick={() => navigate('/libraries')} sx={{ cursor: 'pointer' }}><StatCard label="媒体库" value={dashboardView.libraryCount} icon={<StorageRoundedIcon/>}/></Box>
+        <Box onClick={() => navigate('/actors')} sx={{ cursor: 'pointer' }}><StatCard label="演员" value={dashboardView.actorCount} icon={<GroupsRoundedIcon/>}/></Box>
+        <Box onClick={() => navigate('/tags')} sx={{ cursor: 'pointer' }}><StatCard label="标签" value={dashboardView.tagCount} icon={<LocalOfferRoundedIcon/>}/></Box>
+        <Box onClick={() => navigate('/tasks')} sx={{ cursor: 'pointer' }}><StatCard label="活动任务" value={dashboardView.activeTaskCount} icon={<SyncRoundedIcon/>} tone="warning.main"/></Box>
+        <Box onClick={() => navigate('/maintenance')} sx={{ cursor: 'pointer' }}><StatCard label="待维护" value={dashboardView.maintenance.pendingMovies} icon={<BuildRoundedIcon/>} tone="warning.main"/></Box>
       </Box>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0,1.35fr) minmax(320px,.65fr)' }, gap: 2 }}>
         <SurfaceSection title="元数据健康" description="完整度、图片、NFO、演员和标签覆盖率">
           <Stack spacing={2}>
-            <HealthMeter label="完整影片" value={dashboard.metadataHealth.completeRate} detail={`${dashboard.completeMetadataCount} / ${dashboard.movieCount}`} tone={meterTone(dashboard.metadataHealth.completeRate)}/>
-            <HealthMeter label="图片覆盖" value={dashboard.metadataHealth.imageRate} detail={`${dashboard.metadataHealth.imageRate}%`} tone={meterTone(dashboard.metadataHealth.imageRate)}/>
-            <HealthMeter label="NFO 覆盖" value={dashboard.metadataHealth.nfoRate} detail={`${dashboard.metadataHealth.nfoRate}%`} tone={meterTone(dashboard.metadataHealth.nfoRate)}/>
-            <HealthMeter label="演员覆盖" value={dashboard.metadataHealth.actorRate} detail={`${dashboard.metadataHealth.actorRate}%`} tone={meterTone(dashboard.metadataHealth.actorRate)}/>
-            <HealthMeter label="标签覆盖" value={dashboard.metadataHealth.tagRate} detail={`${dashboard.metadataHealth.tagRate}%`} tone={meterTone(dashboard.metadataHealth.tagRate)}/>
+            <HealthMeter label="完整影片" value={dashboardView.metadataHealth.completeRate} detail={`${dashboardView.completeMetadataCount} / ${dashboardView.movieCount}`} tone={meterTone(dashboardView.metadataHealth.completeRate)}/>
+            <HealthMeter label="图片覆盖" value={dashboardView.metadataHealth.imageRate} detail={`${dashboardView.metadataHealth.imageRate}%`} tone={meterTone(dashboardView.metadataHealth.imageRate)}/>
+            <HealthMeter label="NFO 覆盖" value={dashboardView.metadataHealth.nfoRate} detail={`${dashboardView.metadataHealth.nfoRate}%`} tone={meterTone(dashboardView.metadataHealth.nfoRate)}/>
+            <HealthMeter label="演员覆盖" value={dashboardView.metadataHealth.actorRate} detail={`${dashboardView.metadataHealth.actorRate}%`} tone={meterTone(dashboardView.metadataHealth.actorRate)}/>
+            <HealthMeter label="标签覆盖" value={dashboardView.metadataHealth.tagRate} detail={`${dashboardView.metadataHealth.tagRate}%`} tone={meterTone(dashboardView.metadataHealth.tagRate)}/>
           </Stack>
         </SurfaceSection>
         <SurfaceSection title="快捷入口" description="继续常用工作">
@@ -153,38 +194,38 @@ export default function HomePage() {
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0,.75fr) minmax(0,1.25fr)' }, gap: 2 }}>
         <SurfaceSection title="维护信号" description="只读聚合，不执行修复操作">
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 1.25 }}>
-            <StatCard label="健康影片" value={dashboard.maintenance.healthyMovies} icon={<TaskAltRoundedIcon/>} tone="success.main"/>
-            <StatCard label="缺失文件" value={dashboard.missingFileCount} icon={<WarningAmberRoundedIcon/>} tone="error.main"/>
-            <StatCard label="重复影片" value={dashboard.maintenance.duplicateMovies} icon={<ContentCopyRoundedIcon/>} tone="warning.main"/>
-            <StatCard label="缺图片" value={dashboard.maintenance.missingImages} icon={<ImageRoundedIcon/>} tone="warning.main"/>
-            <StatCard label="缺 NFO" value={dashboard.maintenance.missingNfo} icon={<BrokenImageRoundedIcon/>} tone="warning.main"/>
-            <StatCard label="缓存异常" value={dashboard.maintenance.cacheProblems} icon={<ImageRoundedIcon/>} tone="error.main"/>
+            <StatCard label="健康影片" value={dashboardView.maintenance.healthyMovies} icon={<TaskAltRoundedIcon/>} tone="success.main"/>
+            <StatCard label="缺失文件" value={dashboardView.missingFileCount} icon={<WarningAmberRoundedIcon/>} tone="error.main"/>
+            <StatCard label="重复影片" value={dashboardView.maintenance.duplicateMovies} icon={<ContentCopyRoundedIcon/>} tone="warning.main"/>
+            <StatCard label="缺图片" value={dashboardView.maintenance.missingImages} icon={<ImageRoundedIcon/>} tone="warning.main"/>
+            <StatCard label="缺 NFO" value={dashboardView.maintenance.missingNfo} icon={<BrokenImageRoundedIcon/>} tone="warning.main"/>
+            <StatCard label="缓存异常" value={dashboardView.maintenance.cacheProblems} icon={<ImageRoundedIcon/>} tone="error.main"/>
           </Box>
         </SurfaceSection>
         <SurfaceSection title="最近活动" description="导入、任务、收藏和评分的时间线">
-          <ActivityList items={dashboard.recentActivity} openMovie={openMovie}/>
+          <ActivityList items={dashboardView.recentActivity} openMovie={openMovie}/>
         </SurfaceSection>
       </Box>
 
       <SurfaceSection title="媒体库" description="按关联影片数量排序">
-        <LibraryList items={dashboard.libraries}/>
+        <LibraryList items={dashboardView.libraries}/>
       </SurfaceSection>
 
       <SurfaceSection title="热门维度" description="标签、演员、导演、制作方和系列">
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2,minmax(0,1fr))', xl: 'repeat(5,minmax(0,1fr))' }, gap: 2 }}>
-          <EntityList title="标签" items={dashboard.topTags} onSelect={searchEntity}/>
-          <EntityList title="演员" items={dashboard.topActors} onSelect={searchEntity}/>
-          <EntityList title="导演" items={dashboard.topDirectors} onSelect={searchEntity}/>
-          <EntityList title="制作方" items={dashboard.topStudios} onSelect={searchEntity}/>
-          <EntityList title="系列" items={dashboard.topSeries} onSelect={searchEntity}/>
+          <EntityList title="标签" items={dashboardView.topTags} onSelect={searchEntity}/>
+          <EntityList title="演员" items={dashboardView.topActors} onSelect={searchEntity}/>
+          <EntityList title="导演" items={dashboardView.topDirectors} onSelect={searchEntity}/>
+          <EntityList title="制作方" items={dashboardView.topStudios} onSelect={searchEntity}/>
+          <EntityList title="系列" items={dashboardView.topSeries} onSelect={searchEntity}/>
         </Box>
       </SurfaceSection>
 
       <SurfaceSection title="最近导入" description="新加入媒体库的影片" action={<Button size="small" onClick={() => navigate('/media')}>查看全部</Button>}>
-        {wall(dashboard.recentImports)}
+        {wall(dashboardView.recentImports)}
       </SurfaceSection>
       <SurfaceSection title="最近播放" description="继续浏览近期观看内容" action={<Button size="small" startIcon={<HistoryRoundedIcon/>} onClick={() => navigate('/history')}>播放历史</Button>}>
-        {wall(dashboard.recentPlays)}
+        {wall(dashboardView.recentPlays)}
       </SurfaceSection>
     </Stack>}
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>
