@@ -177,6 +177,28 @@ export interface MetadataOverview {
 }
 export interface DiagnosticItem { severity: 'error' | 'warning' | 'info'; code: string; title: string; detail: string; count: number }
 export interface DiagnosticsResult { integrity: string; foreignKeyErrors: number; items: DiagnosticItem[] }
+export interface DuplicateMovie {
+  movieId: number
+  code: string
+  title: string
+  filePath: string
+  fileHash?: string
+  importedAt: string
+}
+export interface DuplicateGroup {
+  rule: 'code' | 'path' | 'hash'
+  key: string
+  count: number
+  items: DuplicateMovie[]
+}
+export interface DuplicateResults {
+  totalGroups: number
+  totalMovies: number
+  codeGroups: number
+  pathGroups: number
+  hashGroups: number
+  groups: DuplicateGroup[]
+}
 export interface MutationResult { changed: boolean; auditId: number; message: string }
 export interface ImpactPreview { operation: string; entityId: number; name: string; affectedMovies: number; confirmationToken: string; warnings: string[] }
 export interface ActorRepairPreview { candidateActors: number; affectedRelations: number; confirmationToken: string; warnings: string[] }

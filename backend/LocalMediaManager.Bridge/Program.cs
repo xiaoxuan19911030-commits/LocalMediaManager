@@ -185,6 +185,10 @@ app.MapGet("/api/diagnostics", async () => File.Exists(databasePath)
     ? Results.Ok(await ProductReader.ReadDiagnosticsAsync(databasePath))
     : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
 
+app.MapGet("/api/duplicates", async (string? rule, int? limit) => File.Exists(databasePath)
+    ? Results.Ok(await ProductReader.ReadDuplicateResultsAsync(databasePath, rule ?? "all", Math.Clamp(limit ?? 100, 1, 200)))
+    : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
+
 app.MapGet("/api/library/summary", async () => {
     if (!File.Exists(databasePath))
         return Results.Problem($"找不到数据库：{databasePath}", statusCode: 503);

@@ -11,6 +11,7 @@ import EntityPage from '@/pages/EntityPage'
 import CollectionPage from '@/pages/CollectionPage'
 import MetadataPage from '@/pages/MetadataPage'
 import DiagnosticsPage from '@/pages/DiagnosticsPage'
+import DuplicatesPage from '@/pages/DuplicatesPage'
 import PluginsPage from '@/pages/PluginsPage'
 import AiProvidersPage from '@/pages/AiProvidersPage'
 
@@ -26,6 +27,7 @@ export const router = createHashRouter([{ path: '/', Component: AppShell, childr
   { path: 'history', element: <CollectionPage kind="history" /> },
   { path: 'metadata', Component: MetadataPage },
   { path: 'diagnostics', Component: DiagnosticsPage },
+  { path: 'duplicates', Component: DuplicatesPage },
   { path: 'tasks', Component: TasksPage },
   { path: 'plugins', Component: PluginsPage },
   { path: 'ai-providers', Component: AiProvidersPage },

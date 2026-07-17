@@ -35,6 +35,9 @@ public sealed record MetadataOverviewDto(long TotalMovies, long ScrapedMovies, l
 public sealed record DiagnosticItemDto(string Severity, string Code, string Title, string Detail, long Count);
 public sealed record DiagnosticsDto(string Integrity, long ForeignKeyErrors, IReadOnlyList<DiagnosticItemDto> Items);
 public sealed record NeighborsDto(long? PreviousId, long? NextId);
+public sealed record DuplicateMovieDto(long MovieId, string Code, string Title, string FilePath, string? FileHash, string ImportedAt);
+public sealed record DuplicateGroupDto(string Rule, string Key, long Count, IReadOnlyList<DuplicateMovieDto> Items);
+public sealed record DuplicateResultsDto(long TotalGroups, long TotalMovies, long CodeGroups, long PathGroups, long HashGroups, IReadOnlyList<DuplicateGroupDto> Groups);
 
 public static class ProductReader
 {
@@ -268,6 +271,77 @@ public static class ProductReader
             new("info","MISSING_ACTOR","缺少演员","尚未关联演员的影片。",await ScalarAsync(connection,"SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id)"))
         };
         return new(integrity, foreignKeys, items);
+    }
+
+    public static async Task<DuplicateResultsDto> ReadDuplicateResultsAsync(string databasePath, string rule, int limit)
+    {
+        await using var connection = await OpenAsync(databasePath);
+        string normalizedRule = rule.ToLowerInvariant();
+        if (normalizedRule is not ("all" or "code" or "path" or "hash")) normalizedRule = "all";
+        var groups = new List<DuplicateGroupDto>();
+        if (normalizedRule is "all" or "code")
+            groups.AddRange(await ReadDuplicateGroupsAsync(connection, "code", "upper(trim(m.Code))", "Movies m", "trim(COALESCE(m.Code,''))<>''", "m.Id", limit));
+        if (normalizedRule is "all" or "path")
+            groups.AddRange(await ReadDuplicateGroupsAsync(connection, "path", "lower(trim(f.NormalizedPath))", "MediaFiles f JOIN Movies m ON m.Id=f.MovieId", "trim(COALESCE(f.NormalizedPath,''))<>''", "f.MovieId", limit));
+        if (normalizedRule is "all" or "hash")
+            groups.AddRange(await ReadDuplicateGroupsAsync(connection, "hash", "lower(trim(f.FileHash))", "MediaFiles f JOIN Movies m ON m.Id=f.MovieId", "trim(COALESCE(f.FileHash,''))<>''", "f.MovieId", limit));
+        groups = groups.OrderBy(item => item.Rule).ThenBy(item => item.Key, StringComparer.OrdinalIgnoreCase).Take(limit).ToList();
+        long totalMovies = groups.SelectMany(group => group.Items.Select(item => item.MovieId)).Distinct().LongCount();
+        return new(groups.Count, totalMovies,
+            groups.LongCount(group => group.Rule == "code"),
+            groups.LongCount(group => group.Rule == "path"),
+            groups.LongCount(group => group.Rule == "hash"),
+            groups);
+    }
+
+    private static async Task<IReadOnlyList<DuplicateGroupDto>> ReadDuplicateGroupsAsync(SqliteConnection connection, string rule, string keyExpression, string from, string where, string movieIdExpression, int limit)
+    {
+        var keys = new List<(string Key, long Count)>();
+        await using (var command = connection.CreateCommand()) {
+            command.CommandText = $"""
+                SELECT {keyExpression} AS DuplicateKey, COUNT(DISTINCT {movieIdExpression}) AS DuplicateCount
+                  FROM {from}
+                 WHERE {where}
+                 GROUP BY DuplicateKey
+                HAVING COUNT(DISTINCT {movieIdExpression}) > 1
+                 ORDER BY DuplicateCount DESC, DuplicateKey COLLATE NOCASE
+                 LIMIT $limit
+                """;
+            command.Parameters.AddWithValue("$limit", limit);
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) keys.Add((reader.GetString(0), reader.GetInt64(1)));
+        }
+        var groups = new List<DuplicateGroupDto>();
+        foreach ((string key, long count) in keys) groups.Add(new(rule, key, count, await ReadDuplicateItemsAsync(connection, rule, key)));
+        return groups;
+    }
+
+    private static async Task<IReadOnlyList<DuplicateMovieDto>> ReadDuplicateItemsAsync(SqliteConnection connection, string rule, string key)
+    {
+        string condition = rule switch {
+            "code" => "upper(trim(m.Code))=$key",
+            "path" => "lower(trim(f.NormalizedPath))=$key",
+            _ => "lower(trim(f.FileHash))=$key",
+        };
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT m.Id,COALESCE(m.Code,''),COALESCE(m.Title,''),COALESCE(f.FilePath,''),f.FileHash,COALESCE(m.ImportedAt,m.CreatedAt,'')
+              FROM Movies m
+              LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND (f.IsPrimary=1 OR $rule<>'code')
+             WHERE {condition}
+             ORDER BY m.Code COLLATE NOCASE,m.Id,f.Id
+            """;
+        command.Parameters.AddWithValue("$key", key);
+        command.Parameters.AddWithValue("$rule", rule);
+        var items = new List<DuplicateMovieDto>();
+        var seen = new HashSet<long>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) {
+            long id = reader.GetInt64(0);
+            if (!seen.Add(id)) continue;
+            items.Add(new(id, reader.GetString(1), reader.GetString(2), reader.GetString(3), Text(reader, 4), reader.GetString(5)));
+        }
+        return items;
     }
 
     public static async Task<MovieDetailDto?> ReadMovieAsync(string databasePath, string bridgeUrl, long movieId)
