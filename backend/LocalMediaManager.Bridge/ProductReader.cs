@@ -38,6 +38,7 @@ public sealed record NeighborsDto(long? PreviousId, long? NextId);
 public sealed record DuplicateMovieDto(long MovieId, string Code, string Title, string FilePath, string? FileHash, string ImportedAt);
 public sealed record DuplicateGroupDto(string Rule, string Key, long Count, IReadOnlyList<DuplicateMovieDto> Items);
 public sealed record DuplicateResultsDto(long TotalGroups, long TotalMovies, long CodeGroups, long PathGroups, long HashGroups, IReadOnlyList<DuplicateGroupDto> Groups);
+internal sealed record SearchCondition(string Query, bool? Favorite, bool? Watched, double? RatingMin);
 
 public static class ProductReader
 {
@@ -222,24 +223,59 @@ public static class ProductReader
     }
 
     public static async Task<MediaPageDto> AdvancedSearchAsync(string databasePath, string bridgeUrl,
-        string query, long? actorId, long? tagId, bool? favorite, double ratingMin, string metadata,
+        string query, long? actorId, long? tagId, bool? favorite, bool? watched, double ratingMin, string metadata,
         string fileStatus, long? libraryId, string sort, int limit, int offset)
     {
         var conditions = new List<string>(); var parameters = new List<(string,object)>();
-        string trimmed = query.Trim();
+        var parsed = ParseSearchCondition(query);
+        string trimmed = parsed.Query;
+        favorite ??= parsed.Favorite;
+        watched ??= parsed.Watched;
+        ratingMin = Math.Clamp(Math.Max(ratingMin, parsed.RatingMin ?? 0), 0, 5);
+        bool hasDirectors = await TableExistsAsync(databasePath, "Directors") && await TableExistsAsync(databasePath, "MovieDirectors");
         if (trimmed.Length > 0) {
-            conditions.Add("""(m.Code LIKE $like ESCAPE '\' OR m.Title LIKE $like ESCAPE '\' OR m.OriginalTitle LIKE $like ESCAPE '\' OR f.FilePath LIKE $like ESCAPE '\' OR EXISTS(SELECT 1 FROM MovieActors ma JOIN Actors a ON a.Id=ma.ActorId WHERE ma.MovieId=m.Id AND a.Name LIKE $like ESCAPE '\') OR EXISTS(SELECT 1 FROM MovieTags mt JOIN Tags t ON t.Id=mt.TagId WHERE mt.MovieId=m.Id AND t.Name LIKE $like ESCAPE '\') OR EXISTS(SELECT 1 FROM MovieStudios ms JOIN Studios st ON st.Id=ms.StudioId WHERE ms.MovieId=m.Id AND st.Name LIKE $like ESCAPE '\') OR EXISTS(SELECT 1 FROM MovieSeries mse JOIN Series se ON se.Id=mse.SeriesId WHERE mse.MovieId=m.Id AND se.Name LIKE $like ESCAPE '\'))""");
+            string directorCondition = hasDirectors ? """ OR EXISTS(SELECT 1 FROM MovieDirectors md JOIN Directors d ON d.Id=md.DirectorId WHERE md.MovieId=m.Id AND d.Name LIKE $like ESCAPE '\')""" : "";
+            conditions.Add($"""(m.Code LIKE $like ESCAPE '\' OR m.Title LIKE $like ESCAPE '\' OR m.OriginalTitle LIKE $like ESCAPE '\' OR f.FilePath LIKE $like ESCAPE '\' OR f.FileName LIKE $like ESCAPE '\' OR EXISTS(SELECT 1 FROM MovieActors ma JOIN Actors a ON a.Id=ma.ActorId WHERE ma.MovieId=m.Id AND a.Name LIKE $like ESCAPE '\'){directorCondition} OR EXISTS(SELECT 1 FROM MovieTags mt JOIN Tags t ON t.Id=mt.TagId WHERE mt.MovieId=m.Id AND t.Name LIKE $like ESCAPE '\') OR EXISTS(SELECT 1 FROM MovieTags mt JOIN Tags t ON t.Id=mt.TagId WHERE mt.MovieId=m.Id AND t.Source='User' AND t.Name LIKE $like ESCAPE '\') OR EXISTS(SELECT 1 FROM MovieStudios ms JOIN Studios st ON st.Id=ms.StudioId WHERE ms.MovieId=m.Id AND st.Name LIKE $like ESCAPE '\') OR EXISTS(SELECT 1 FROM MovieSeries mse JOIN Series se ON se.Id=mse.SeriesId WHERE mse.MovieId=m.Id AND se.Name LIKE $like ESCAPE '\'))""");
             parameters.Add(("$like", $"%{EscapeLike(trimmed)}%"));
         }
         if (actorId.HasValue) { conditions.Add("EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id AND ma.ActorId=$actor)"); parameters.Add(("$actor", actorId.Value)); }
         if (tagId.HasValue) { conditions.Add("EXISTS(SELECT 1 FROM MovieTags mt WHERE mt.MovieId=m.Id AND mt.TagId=$tag)"); parameters.Add(("$tag", tagId.Value)); }
         if (favorite.HasValue) { conditions.Add("COALESCE(s.IsFavorite,0)=$favorite"); parameters.Add(("$favorite", favorite.Value ? 1 : 0)); }
+        if (watched.HasValue) conditions.Add(watched.Value ? "COALESCE(s.PlayCount,0)>0" : "COALESCE(s.PlayCount,0)=0");
         if (ratingMin > 0) { conditions.Add("COALESCE(s.UserRating,0)>=$rating"); parameters.Add(("$rating", ratingMin)); }
         if (metadata == "complete") conditions.Add("m.IsScraped=1"); else if (metadata == "missing") conditions.Add("m.IsScraped=0");
         if (fileStatus == "missing") conditions.Add("f.ExistsState='Missing'"); else if (fileStatus == "available") conditions.Add("f.ExistsState<>'Missing'");
         if (libraryId.HasValue) { conditions.Add("f.LibraryId=$library"); parameters.Add(("$library", libraryId.Value)); }
         string order = sort switch { "code" => "m.Code COLLATE NOCASE,m.Id", "rating" => "s.UserRating DESC,m.Id DESC", "release" => "m.ReleaseDate DESC,m.Id DESC", _ => "m.ImportedAt DESC,m.Id DESC" };
         return await ReadFilteredCardsAsync(databasePath, bridgeUrl, conditions.Count == 0 ? "1=1" : string.Join(" AND ", conditions), parameters, order, limit, offset);
+    }
+
+    private static SearchCondition ParseSearchCondition(string query)
+    {
+        bool? favorite = null;
+        bool? watched = null;
+        double? ratingMin = null;
+        var terms = new List<string>();
+        foreach (string token in query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) {
+            string normalized = token.Trim();
+            string lower = normalized.ToLowerInvariant();
+            if (normalized is "收藏" or "已收藏" || lower is "favorite" or "fav") { favorite = true; continue; }
+            if (normalized is "已观看" or "看过" or "已播放" || lower is "watched" or "played") { watched = true; continue; }
+            if (TryParseRatingCondition(normalized, out double rating)) { ratingMin = rating; continue; }
+            terms.Add(token);
+        }
+        return new(string.Join(' ', terms), favorite, watched, ratingMin);
+    }
+
+    private static bool TryParseRatingCondition(string token, out double rating)
+    {
+        rating = 0;
+        string normalized = token.Trim().Replace("＞", ">").Replace("＝", "=");
+        string prefix = normalized.StartsWith("评分>=", StringComparison.OrdinalIgnoreCase) ? "评分>=" :
+            normalized.StartsWith("rating>=", StringComparison.OrdinalIgnoreCase) ? "rating>=" : "";
+        if (prefix.Length == 0) return false;
+        return double.TryParse(normalized[prefix.Length..], System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out rating);
     }
 
     public static async Task<MetadataOverviewDto> ReadMetadataOverviewAsync(string databasePath)
@@ -456,6 +492,14 @@ public static class ProductReader
     private static async Task<long> ScalarAsync(SqliteConnection connection,string sql){await using var command=connection.CreateCommand();command.CommandText=sql;return Convert.ToInt64(await command.ExecuteScalarAsync()??0);}
     private static async Task<long> CountRowsAsync(SqliteConnection connection,string sql){await using var command=connection.CreateCommand();command.CommandText=sql;await using var reader=await command.ExecuteReaderAsync();long count=0;while(await reader.ReadAsync())count++;return count;}
     private static async Task<SqliteConnection> OpenAsync(string path){var connection=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=path,Mode=SqliteOpenMode.ReadOnly,Cache=SqliteCacheMode.Shared}.ToString());await connection.OpenAsync();return connection;}
+    private static async Task<bool> TableExistsAsync(string databasePath, string table)
+    {
+        await using var connection = await OpenAsync(databasePath);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$table";
+        command.Parameters.AddWithValue("$table", table);
+        return Convert.ToInt64(await command.ExecuteScalarAsync() ?? 0L) > 0;
+    }
     private static string EscapeLike(string value)=>value.Replace("\\","\\\\").Replace("%","\\%").Replace("_","\\_");
     private static string? Text(SqliteDataReader reader,int index)=>reader.IsDBNull(index)?null:reader.GetString(index);
 }

@@ -170,10 +170,10 @@ app.MapGet("/api/collections/{kind}", async (string kind, int? limit, int? offse
     return Results.Ok(await ProductReader.ReadCollectionAsync(databasePath, bridgeUrl, kind, Math.Clamp(limit ?? 48, 1, 96), Math.Max(offset ?? 0, 0)));
 });
 
-app.MapGet("/api/search/advanced", async (string? q, long? actorId, long? tagId, bool? favorite, double? ratingMin,
+app.MapGet("/api/search/advanced", async (string? q, long? actorId, long? tagId, bool? favorite, bool? watched, double? ratingMin,
     string? metadata, string? fileStatus, long? libraryId, string? sort, int? limit, int? offset) => File.Exists(databasePath)
     ? Results.Ok(await ProductReader.AdvancedSearchAsync(databasePath, bridgeUrl, q ?? "", actorId, tagId, favorite,
-        Math.Clamp(ratingMin ?? 0, 0, 5), metadata ?? "all", fileStatus ?? "all", libraryId, sort ?? "newest",
+        watched, Math.Clamp(ratingMin ?? 0, 0, 5), metadata ?? "all", fileStatus ?? "all", libraryId, sort ?? "newest",
         Math.Clamp(limit ?? 48, 1, 96), Math.Max(offset ?? 0, 0)))
     : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
 
