@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.vs/
 src-tauri/target/
 src-tauri/gen/
 src-tauri/resources/bridge/*

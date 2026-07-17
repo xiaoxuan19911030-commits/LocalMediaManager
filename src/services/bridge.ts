@@ -65,6 +65,7 @@ export const bridge = {
   pauseTask: (taskId: number) => request<TaskMutationResult>(`/api/tasks/${taskId}/pause`, { method: 'POST' }),
   resumeTask: (taskId: number) => request<TaskMutationResult>(`/api/tasks/${taskId}/resume`, { method: 'POST' }),
   cancelTask: (taskId: number) => request<TaskMutationResult>(`/api/tasks/${taskId}/cancel`, { method: 'POST' }),
+  cancelSyncTasks: (taskIds: number[]) => request<{ count: number; message: string }>('/api/tasks/batch/cancel-sync', { method: 'POST', body: JSON.stringify(taskIds) }),
   retryTask: (taskId: number) => request<ScanLaunchResult>(`/api/tasks/${taskId}/retry`, { method: 'POST' }),
   entities: (type: 'actors' | 'tags', search = '', sort = 'count', limit = 48, offset = 0) => request<EntityPageResult>(`/api/entities/${type}?${new URLSearchParams({ search, sort, limit: String(limit), offset: String(offset) })}`),
   actor: (id: number) => request<ActorDetail>(`/api/actors/${id}`),
@@ -84,6 +85,8 @@ export const bridge = {
   setUserState: (movieId: number, value: { favorite?: boolean; rating?: number; clearRating?: boolean }) =>
     request<MutationResult>(`/api/videos/${movieId}/state`, { method: 'PATCH', body: JSON.stringify(value) }),
   setBatchFavorite: (movieIds: number[], favorite: boolean) => request<MutationResult>('/api/videos/batch/favorite', { method: 'POST', body: JSON.stringify({ movieIds, favorite }) }),
+  setBatchRating: (movieIds: number[], rating?: number, clearRating = false) => request<MutationResult>('/api/videos/batch/rating', { method: 'POST', body: JSON.stringify({ movieIds, rating: rating ?? null, clearRating }) }),
+  createBatchSync: (movieIds: number[]) => request<{ count: number; message: string }>('/api/videos/batch/sync', { method: 'POST', body: JSON.stringify(movieIds) }),
   createTag: (value: { name: string; description?: string; color?: string }) => request<MutationResult & { id: number }>('/api/tags', { method: 'POST', body: JSON.stringify(value) }),
   updateTag: (tagId: number, value: { name: string; description?: string; color?: string }) => request<MutationResult>(`/api/tags/${tagId}`, { method: 'PUT', body: JSON.stringify(value) }),
   previewDeleteTag: (tagId: number) => request<ImpactPreview>(`/api/tags/${tagId}/delete-preview`),

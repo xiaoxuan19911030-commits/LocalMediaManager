@@ -38,6 +38,21 @@ public sealed class ProductWriterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task BatchRatingPersistsAndCanClearSelectedMovies()
+    {
+        await writer.SetRatingsAsync(new([1, 2, 2], 4.5));
+        Assert.Equal((0L, 4.5d, 1L), await State(1));
+        Assert.Equal((0L, 4.5d, 1L), await State(2));
+
+        await writer.SetRatingsAsync(new([1, 2], null, true));
+
+        Assert.Equal((0L, 0d, 0L), await State(1));
+        Assert.Equal((0L, 0d, 0L), await State(2));
+        await using var connection = await Open();
+        Assert.Equal(2, await Scalar(connection, "SELECT COUNT(*) FROM OperationAudit WHERE OperationType='BatchRating'"));
+    }
+
+    [Fact]
     public async Task TagsSupportCreateBindBatchAndConfirmedDelete()
     {
         var created = await writer.CreateTagAsync(new("My Tag", null, null));

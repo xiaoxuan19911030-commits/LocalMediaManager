@@ -138,3 +138,13 @@ Acceptance: 发布验证记录或独立验收文档
 - Smoke: isolated filesystem/database service smoke passed with physical video samples and the existing migration schema; the installed desktop app opens the Media Libraries page, while a full installed isolated write smoke remains blocked by the environment session-token launch policy documented in `releases/0.5.0-02-INSTALLED-SCAN-SMOKE.md`.
 - Commit: `1971d89`.
 - Status: item 28 remains partially migrated until its required installed end-to-end scan acceptance is executable and recorded.
+
+## 0.5.0-04 Evidence Note
+
+- Scope: existing batch operations only: movie-wall multi-select rating, sync-task creation, and Task Center batch sync cancellation.
+- Bridge: reused current batch endpoints `POST /api/videos/batch/rating`, `POST /api/videos/batch/sync`, and `POST /api/tasks/batch/cancel-sync`; no new Bridge API and no Migration.
+- UI: movie wall multi-select now exposes batch favorite, tag, rating and sync-task creation in one selection bar; Task Center exposes selection and batch cancel only for cancellable sync tasks.
+- Automated: `BatchRatingPersistsAndCanClearSelectedMovies`, `BatchSyncCreatesDistinctTasksAndReusesExistingActiveTask`, and `BatchCancelOnlyCancelsSyncTasks`; Bridge tests pass 36/36.
+- Build: `pnpm build:web` and `dotnet build backend/LocalMediaManager.Bridge/LocalMediaManager.Bridge.csproj` pass.
+- Human acceptance: installed app launch, UI smoke, and final interaction acceptance are reserved for developer verification per `AI_RULES.md` Human Acceptance.
+- Status: batch tooling remains Sprint-local evidence until developer UI acceptance is recorded; no feature is marked fully migrated by this note alone.

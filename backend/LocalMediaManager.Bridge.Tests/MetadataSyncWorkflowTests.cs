@@ -116,8 +116,60 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM TaskLogs WHERE TaskId=1 AND Message LIKE '%异常中断%'"));
     }
 
+    [Fact]
+    public async Task BatchSyncCreatesDistinctTasksAndReusesExistingActiveTask()
+    {
+        await using (var connection = await Open()) {
+            await InsertMovie(connection, 1, "BATCH-001");
+            await InsertMovie(connection, 2, "BATCH-002");
+        }
+        MetadataSyncExecutor executor = CreateExecutor();
+
+        BatchTaskMutationResult result = await executor.EnqueueBatchAsync([1, 2, 2]);
+        BatchTaskMutationResult second = await executor.EnqueueBatchAsync([1]);
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal(1, second.Count);
+        await using SqliteConnection verify = await Open();
+        Assert.Equal(2, await Scalar(verify, "SELECT COUNT(*) FROM Tasks WHERE TaskType='Sync'"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Tasks WHERE TaskType='Sync' AND CurrentMovieId=1"));
+    }
+
+    [Fact]
+    public async Task BatchCancelOnlyCancelsSyncTasks()
+    {
+        await using (var connection = await Open()) {
+            await InsertMovie(connection, 1, "CANCEL-001");
+            await InsertMovie(connection, 2, "CANCEL-002");
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Stage,Provider,Progress,TotalItems,CompletedItems,CreatedAt,UpdatedAt,CurrentMovieId) VALUES(10,'Sync','Pending','Pending','MetaTube',0,1,0,$at,$at,1),(11,'Sync','Running','FetchingMetadata','MetaTube',20,1,0,$at,$at,2),(12,'Scan','Running','Running',NULL,0,1,0,$at,$at,NULL)", ("$at", at));
+        }
+        var service = new TaskCommandService(Database, null!, CreateExecutor(), null!, null!);
+
+        BatchTaskMutationResult result = await service.CancelSyncBatchAsync([10, 11, 11]);
+        await Assert.ThrowsAsync<ArgumentException>(() => service.CancelSyncBatchAsync([12]));
+
+        Assert.Equal(2, result.Count);
+        await using SqliteConnection verify = await Open();
+        Assert.Equal(2, await Scalar(verify, "SELECT COUNT(*) FROM Tasks WHERE TaskType='Sync' AND Status='Cancelled'"));
+        Assert.Equal(2, await Scalar(verify, "SELECT COUNT(*) FROM TaskLogs WHERE Message LIKE '%用户取消%'"));
+        Assert.Equal("Running", await Text(verify, "SELECT Status FROM Tasks WHERE Id=12"));
+    }
+
     public Task DisposeAsync() { try { Directory.Delete(root, true); } catch { } return Task.CompletedTask; }
+    private MetadataSyncExecutor CreateExecutor()
+    {
+        var settings = new MetadataProviderSettingsService(Database);
+        var factory = new FakeHttpClientFactory(_ => new(HttpStatusCode.ServiceUnavailable));
+        return new(Database, root, settings, new MetaTubeProvider(factory),
+            new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database), new TaskLogService(Database));
+    }
     private async Task<SqliteConnection> Open() { var c = new SqliteConnection($"Data Source={Database}"); await c.OpenAsync(); return c; }
+    private static Task InsertMovie(SqliteConnection c, long id, string code)
+    {
+        string at = DateTimeOffset.UtcNow.ToString("O");
+        return Execute(c, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES($id,$code,$code,0,0,'pending','Test',$at,$at)", ("$id", id), ("$code", code), ("$at", at));
+    }
     private static async Task Execute(SqliteConnection c, string sql, params (string,object?)[] values) { await using var x=c.CreateCommand();x.CommandText=sql;foreach(var(n,v)in values)x.Parameters.AddWithValue(n,v??DBNull.Value);await x.ExecuteNonQueryAsync(); }
     private static async Task<long> Scalar(SqliteConnection c,string sql){await using var x=c.CreateCommand();x.CommandText=sql;return Convert.ToInt64(await x.ExecuteScalarAsync()??0L);}
     private static async Task<string?> Text(SqliteConnection c,string sql){await using var x=c.CreateCommand();x.CommandText=sql;return(await x.ExecuteScalarAsync())?.ToString();}

@@ -1,7 +1,9 @@
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
+import SyncRoundedIcon from '@mui/icons-material/SyncRounded'
 import FavoriteBorderRoundedIcon from '@mui/icons-material/FavoriteBorderRounded'
 import FavoriteRoundedIcon from '@mui/icons-material/FavoriteRounded'
+import StarRoundedIcon from '@mui/icons-material/StarRounded'
 import { Alert, Autocomplete, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, InputAdornment, MenuItem, Pagination, Snackbar, Stack, TextField, Typography } from '@mui/material'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
@@ -23,6 +25,7 @@ export default function MediaPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [batchRating, setBatchRating] = useState('5')
   const [selected, setSelected] = useState<number[]>([]); const [tagDialog, setTagDialog] = useState(false); const [tags, setTags] = useState<NamedItem[]>([]); const [addTags, setAddTags] = useState<NamedItem[]>([]); const [removeTags, setRemoveTags] = useState<NamedItem[]>([])
 
   const load = useCallback(() => {
@@ -39,6 +42,8 @@ export default function MediaPage() {
   const batchFavorite = (favorite: boolean) => bridge.setBatchFavorite(selected, favorite).then((result) => { setNotice(result.message); setSelected([]); load() }).catch((reason: Error) => setNotice(reason.message))
   const openBatchTags = () => { setAddTags([]); setRemoveTags([]); setTagDialog(true); bridge.entities('tags', '', 'name', 96, 0).then((result) => setTags(result.items)).catch((reason: Error) => setNotice(reason.message)) }
   const saveBatchTags = () => bridge.updateBatchTags(selected, addTags.map((item) => item.id), removeTags.map((item) => item.id)).then((result) => { setNotice(result.message); setTagDialog(false); setSelected([]); load() }).catch((reason: Error) => setNotice(reason.message))
+  const saveBatchRating = () => bridge.setBatchRating(selected, batchRating === '' ? undefined : Number(batchRating), batchRating === '').then((result) => { setNotice(result.message); setSelected([]); load() }).catch((reason: Error) => setNotice(reason.message))
+  const createBatchSync = () => bridge.createBatchSync(selected).then((result) => { setNotice(result.message); setSelected([]) }).catch((reason: Error) => setNotice(reason.message))
   const play = (item: MediaItem) => {
     bridge.play(item.dataId)
       .then(() => setNotice(`已交给系统播放器：${item.code}`))
@@ -59,7 +64,21 @@ export default function MediaPage() {
         </TextField>
         <Button type="submit" variant="contained">搜索</Button>
       </Box>
-      {selected.length > 0 && <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2, p: 1.25, border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'action.hover' }}><Typography sx={{ fontWeight: 800 }}>已选择 {selected.length} 部</Typography><Button size="small" startIcon={<FavoriteRoundedIcon/>} onClick={() => batchFavorite(true)}>收藏</Button><Button size="small" startIcon={<FavoriteBorderRoundedIcon/>} onClick={() => batchFavorite(false)}>取消收藏</Button><Button size="small" onClick={openBatchTags}>批量添加标签</Button><Button size="small" color="inherit" onClick={() => setSelected([])}>取消选择</Button></Stack>}
+      {selected.length > 0 && (
+        <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2, p: 1.25, border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'action.hover' }}>
+          <Typography sx={{ fontWeight: 800 }}>已选择 {selected.length} 部</Typography>
+          <Button size="small" startIcon={<FavoriteRoundedIcon/>} onClick={() => batchFavorite(true)}>收藏</Button>
+          <Button size="small" startIcon={<FavoriteBorderRoundedIcon/>} onClick={() => batchFavorite(false)}>取消收藏</Button>
+          <Button size="small" onClick={openBatchTags}>批量标签</Button>
+          <TextField select size="small" label="评分" value={batchRating} onChange={event => setBatchRating(event.target.value)} sx={{ width: 116 }}>
+            <MenuItem value="">清除</MenuItem>
+            {[0, 1, 2, 3, 4, 5].map(value => <MenuItem key={value} value={value}>{value}</MenuItem>)}
+          </TextField>
+          <Button size="small" startIcon={<StarRoundedIcon/>} onClick={saveBatchRating}>应用评分</Button>
+          <Button size="small" startIcon={<SyncRoundedIcon/>} onClick={createBatchSync}>创建同步任务</Button>
+          <Button size="small" color="inherit" onClick={() => setSelected([])}>取消选择</Button>
+        </Stack>
+      )}
       {error && <Alert severity="error">{error}</Alert>}
       {loading ? <Box sx={{ display: 'grid', placeItems: 'center', minHeight: 300 }}><CircularProgress /></Box> :
         <MediaCardGrid>

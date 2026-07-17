@@ -5,6 +5,7 @@ using Microsoft.Data.Sqlite;
 namespace LocalMediaManager.Bridge;
 
 public sealed record MetadataSyncLaunchResult(long TaskId, string Status, string Message);
+public sealed record BatchTaskMutationResult(int Count, string Message);
 public sealed record SyncMovie(long Id, string Code, string? Title, string? Description, string? ReleaseDate,
     int DurationSeconds, string? PrimaryFile, string? NfoPath);
 public sealed record SavedImage(string Type, string Path, string SourceUrl, long Size, bool Created,
@@ -291,6 +292,13 @@ public sealed class MetadataSyncExecutor(
         return new(id, "Pending", "同步任务已创建。");
     }
 
+    public async Task<BatchTaskMutationResult> EnqueueBatchAsync(IReadOnlyList<long> movieIds) {
+        long[] ids = movieIds.Distinct().Where(id => id > 0).ToArray();
+        if (ids.Length is 0 or > 500) throw new ArgumentException("Select 1 to 500 movies.");
+        foreach (long id in ids) await EnqueueAsync(id, "Batch");
+        return new(ids.Length, $"Created {ids.Length} sync tasks.");
+    }
+
     private async Task ExecuteOneAsync(long taskId, MetaTubeSettingsDto settings, CancellationToken cancellationToken)
     {
         var createdPaths = new List<string>();
@@ -387,5 +395,6 @@ public sealed class TaskCommandService(string databasePath, LibraryWorkflowServi
     public async Task<TaskMutationResult> ResumeAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.ResumeAsync(id), "ImageCacheRebuild"=>await imageCache.ResumeAsync(id), "Organizer"=>await organizer.ResumeAsync(id), _=>await libraries.ResumeTaskAsync(id) };
     public async Task<TaskMutationResult> CancelAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.CancelAsync(id), "ImageCacheRebuild"=>await imageCache.CancelAsync(id), "Organizer"=>await organizer.CancelAsync(id), _=>await libraries.CancelTaskAsync(id) };
     public async Task<object> RetryAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.RetryAsync(id), "ImageCacheRebuild"=>await imageCache.RetryAsync(id), "Organizer"=>await organizer.RetryAsync(id), _=>await libraries.RetryTaskAsync(id) };
+    public async Task<BatchTaskMutationResult> CancelSyncBatchAsync(IReadOnlyList<long> ids) { long[] values=ids.Distinct().Where(id=>id>0).ToArray(); if(values.Length is 0 or >500) throw new ArgumentException("Select 1 to 500 sync tasks."); foreach(long id in values){if(await TypeAsync(id)!="Sync")throw new ArgumentException("Only sync tasks can be cancelled in batch."); await sync.CancelAsync(id);} return new(values.Length,$"Cancelled {values.Length} sync tasks."); }
     private async Task<string> TypeAsync(long id){await using var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=databasePath,Mode=SqliteOpenMode.ReadOnly}.ToString());await c.OpenAsync();await using var x=c.CreateCommand();x.CommandText="SELECT TaskType FROM Tasks WHERE Id=$id";x.Parameters.AddWithValue("$id",id);return(await x.ExecuteScalarAsync())?.ToString()??throw new KeyNotFoundException("任务不存在。");}
 }

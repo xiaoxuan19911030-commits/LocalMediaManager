@@ -6,6 +6,7 @@ namespace LocalMediaManager.Bridge;
 
 public sealed record UserStateCommand(bool? Favorite, double? Rating, bool ClearRating = false);
 public sealed record BatchFavoriteCommand(IReadOnlyList<long> MovieIds, bool Favorite);
+public sealed record BatchRatingCommand(IReadOnlyList<long> MovieIds, double? Rating, bool ClearRating = false);
 public sealed record TagCommand(string Name, string? Description, string? Color);
 public sealed record MovieTagsCommand(IReadOnlyList<long> AddTagIds, IReadOnlyList<long> RemoveTagIds);
 public sealed record BatchTagsCommand(IReadOnlyList<long> MovieIds, IReadOnlyList<long> AddTagIds, IReadOnlyList<long> RemoveTagIds);
@@ -116,6 +117,19 @@ public sealed class ProductWriter(string databasePath)
             null, new { MovieIds = ids, input.Favorite });
         await transaction.CommitAsync();
         return new(true, audit, $"已更新 {ids.Length} 部影片的收藏状态。");
+    }
+
+    public async Task<MutationResult> SetRatingsAsync(BatchRatingCommand input)
+    {
+        long[] ids = input.MovieIds.Distinct().Where(id => id > 0).ToArray();
+        if (ids.Length is 0 or > 500 || (!input.ClearRating && (input.Rating is null or < 0 or > 5))) throw new ArgumentException("Select 1 to 500 movies and a rating from 0 to 5.");
+        await using var connection = await OpenAsync(); await using var transaction = await connection.BeginTransactionAsync();
+        foreach (long id in ids) {
+            await EnsureMovieAsync(connection, id, transaction);
+            await ExecuteAsync(connection, transaction, "INSERT INTO UserMovieState(MovieId,IsFavorite,UserRating,PlayCount,LastPositionSeconds,UpdatedAt,HasUserRating) VALUES($id,0,$rating,0,0,$at,$has) ON CONFLICT(MovieId) DO UPDATE SET UserRating=excluded.UserRating,HasUserRating=excluded.HasUserRating,UpdatedAt=excluded.UpdatedAt", ("$id", id), ("$rating", input.ClearRating ? 0 : input.Rating), ("$has", input.ClearRating ? 0 : 1), ("$at", Now()));
+        }
+        long audit = await AuditAsync(connection, transaction, "BatchRating", "Movie", null, null, new { MovieIds = ids, input.Rating, input.ClearRating }); await transaction.CommitAsync();
+        return new(true, audit, $"Updated ratings for {ids.Length} movies.");
     }
 
     public async Task<(long Id, MutationResult Result)> CreateTagAsync(TagCommand input)

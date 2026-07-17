@@ -148,7 +148,9 @@ app.MapPost("/api/tasks/{taskId:long}/pause", async (long taskId, TaskCommandSer
 app.MapPost("/api/tasks/{taskId:long}/resume", async (long taskId, TaskCommandService service) => Results.Ok(await service.ResumeAsync(taskId)));
 app.MapPost("/api/tasks/{taskId:long}/cancel", async (long taskId, TaskCommandService service) => Results.Ok(await service.CancelAsync(taskId)));
 app.MapPost("/api/tasks/{taskId:long}/retry", async (long taskId, TaskCommandService service) => Results.Ok(await service.RetryAsync(taskId)));
+app.MapPost("/api/tasks/batch/cancel-sync", async (IReadOnlyList<long> taskIds, TaskCommandService service) => Results.Ok(await service.CancelSyncBatchAsync(taskIds)));
 app.MapPost("/api/videos/{movieId:long}/sync", async (long movieId, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Manual")));
+app.MapPost("/api/videos/batch/sync", async (IReadOnlyList<long> movieIds, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueBatchAsync(movieIds)));
 
 app.MapGet("/api/entities/{entityType}", async (string entityType, string? search, string? sort, int? limit, int? offset) => {
     if (!File.Exists(databasePath)) return Results.Problem($"找不到数据库：{databasePath}", statusCode: 503);
@@ -276,6 +278,7 @@ app.MapPatch("/api/videos/{movieId:long}/state", async (long movieId, UserStateC
 
 app.MapPost("/api/videos/batch/favorite", async (BatchFavoriteCommand command, ProductWriter writer) =>
     Results.Ok(await writer.SetFavoritesAsync(command)));
+app.MapPost("/api/videos/batch/rating", async (BatchRatingCommand command, ProductWriter writer) => Results.Ok(await writer.SetRatingsAsync(command)));
 
 app.MapPost("/api/tags", async (TagCommand command, ProductWriter writer) => {
     var created = await writer.CreateTagAsync(command);
