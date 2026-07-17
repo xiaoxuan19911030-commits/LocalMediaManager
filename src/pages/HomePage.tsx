@@ -17,12 +17,13 @@ import StorageRoundedIcon from '@mui/icons-material/StorageRounded'
 import SyncRoundedIcon from '@mui/icons-material/SyncRounded'
 import TaskAltRoundedIcon from '@mui/icons-material/TaskAltRounded'
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded'
-import { Alert, Box, Button, Chip, CircularProgress, Divider, Paper, Snackbar, Stack, Typography } from '@mui/material'
+import { Alert, Box, Button, Chip, Divider, Paper, Snackbar, Stack, Typography } from '@mui/material'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { MediaCard, MediaCardGrid } from '@/components/MediaCard'
 import { EmptyState, HealthMeter, StatCard, SurfaceSection } from '@/components/ProductComponents'
+import { WorkspaceLoading } from '@/components/workspace/Workspace'
 import { bridge } from '@/services/bridge'
 import type { DashboardActivity, DashboardEntity, DashboardLibrary, DashboardSummary, MediaItem } from '@/types/media'
 
@@ -143,7 +144,7 @@ export default function HomePage() {
 
   return <Box>
     {error && <Alert severity="error">Dashboard 读取失败：{error}</Alert>}
-    {!dashboardView && !error ? <Box sx={{ minHeight: 420, display: 'grid', placeItems: 'center' }}><CircularProgress/></Box> : dashboardView && <Stack spacing={2.5}>
+    {!dashboardView && !error ? <WorkspaceLoading/> : dashboardView && <Stack spacing={2.5}>
       <Paper variant="outlined" sx={{ p: { xs: 2, md: 2.75 }, borderRadius: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ alignItems: { xs: 'stretch', md: 'center' }, justifyContent: 'space-between' }}>
           <Box>
