@@ -7,6 +7,7 @@ import RestoreRoundedIcon from '@mui/icons-material/RestoreRounded'
 import SettingsBackupRestoreRoundedIcon from '@mui/icons-material/SettingsBackupRestoreRounded'
 import UploadFileRoundedIcon from '@mui/icons-material/UploadFileRounded'
 import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, FormControlLabel, List, ListItemButton, ListItemText, MenuItem, Paper, Snackbar, Stack, Switch, TextField, Typography } from '@mui/material'
+import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useBlocker, useNavigate } from 'react-router'
@@ -60,6 +61,7 @@ export default function SettingsPage() {
   const [restoreDefaultsOpen, setRestoreDefaultsOpen] = useState(false)
   const [leavePromptOpen, setLeavePromptOpen] = useState(false)
   const allowWindowCloseRef = useRef(false)
+  const closingAppRef = useRef(false)
   const hasUnsavedChangesRef = useRef(false)
   const leaveIntentRef = useRef<LeaveIntent>('none')
 
@@ -91,6 +93,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
+      if (closingAppRef.current) return
       if (!hasUnsavedChanges) return
       event.preventDefault()
       event.returnValue = ''
@@ -192,8 +195,13 @@ export default function SettingsPage() {
     setLeavePromptOpen(false)
     if (intent === 'window') {
       leaveIntentRef.current = 'none'
+      closingAppRef.current = true
       allowWindowCloseRef.current = true
-      await getCurrentWindow().close()
+      try {
+        await invoke('close_local_media_manager')
+      } catch {
+        await getCurrentWindow().destroy()
+      }
       return
     }
     leaveIntentRef.current = 'none'

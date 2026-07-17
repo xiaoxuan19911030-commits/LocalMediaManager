@@ -1,5 +1,5 @@
 use std::{fs::{self, OpenOptions}, net::{SocketAddr, TcpStream}, path::{Path, PathBuf}, process::{Child, Command, Stdio}, sync::Mutex, time::Duration};
-use tauri::{Manager, RunEvent};
+use tauri::{AppHandle, Manager, RunEvent};
 use uuid::Uuid;
 
 #[cfg(windows)]
@@ -11,6 +11,11 @@ struct BridgeSessionToken(String);
 #[tauri::command]
 fn bridge_session_token(token: tauri::State<'_, BridgeSessionToken>) -> String {
     token.0.clone()
+}
+
+#[tauri::command]
+fn close_local_media_manager(app: AppHandle) {
+    app.exit(0);
 }
 
 fn bridge_candidates(app: &tauri::App) -> Vec<PathBuf> {
@@ -80,7 +85,7 @@ fn bridge_port_is_in_use() -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![bridge_session_token])
+        .invoke_handler(tauri::generate_handler![bridge_session_token, close_local_media_manager])
         .setup(|app| {
             let token = Uuid::new_v4().simple().to_string();
             let bridge_already_running = bridge_port_is_in_use();
