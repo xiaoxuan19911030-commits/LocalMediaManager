@@ -8,7 +8,7 @@ import SettingsBackupRestoreRoundedIcon from '@mui/icons-material/SettingsBackup
 import UploadFileRoundedIcon from '@mui/icons-material/UploadFileRounded'
 import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, FormControlLabel, List, ListItemButton, ListItemText, MenuItem, Paper, Snackbar, Stack, Switch, TextField, Typography } from '@mui/material'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useBlocker, useNavigate } from 'react-router'
 import { BrandMark } from '@/components/BrandMark'
 import { HealthMeter, SurfaceSection } from '@/components/ProductComponents'
@@ -30,6 +30,7 @@ const categories = [
 
 type Category = (typeof categories)[number][0]
 type LeaveAction = 'save' | 'discard'
+type LeavePromptMode = 'route' | 'window'
 const planned = ['计划支持']
 const size = (bytes?: number) => bytes ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : '0 MB'
 const stable = (value: unknown) => JSON.stringify(value)
@@ -58,10 +59,19 @@ export default function SettingsPage() {
   const [confirm, setConfirm] = useState<'backup' | 'cache' | 'restore' | 'thumbs' | 'logs'>()
   const [restoreDefaultsOpen, setRestoreDefaultsOpen] = useState(false)
   const [leavePromptOpen, setLeavePromptOpen] = useState(false)
+  const [leavePromptMode, setLeavePromptMode] = useState<LeavePromptMode>('route')
   const [pendingWindowClose, setPendingWindowClose] = useState(false)
+  const allowWindowCloseRef = useRef(false)
+  const hasUnsavedChangesRef = useRef(false)
+  const pendingWindowCloseRef = useRef(false)
+  const leavePromptModeRef = useRef<LeavePromptMode>('route')
 
   const hasUnsavedChanges = Boolean(original && draft && stable(original) !== stable(draft))
   const blocker = useBlocker(hasUnsavedChanges)
+
+  useEffect(() => {
+    hasUnsavedChangesRef.current = hasUnsavedChanges
+  }, [hasUnsavedChanges])
 
   const load = useCallback(() => {
     setError('')
@@ -75,7 +85,12 @@ export default function SettingsPage() {
   useEffect(() => { void load() }, [load])
 
   useEffect(() => {
-    if (blocker.state === 'blocked') setLeavePromptOpen(true)
+    if (blocker.state === 'blocked') {
+      if (pendingWindowCloseRef.current) return
+      leavePromptModeRef.current = 'route'
+      setLeavePromptMode('route')
+      setLeavePromptOpen(true)
+    }
   }, [blocker.state])
 
   useEffect(() => {
@@ -91,13 +106,17 @@ export default function SettingsPage() {
   useEffect(() => {
     let unlisten: (() => void) | undefined
     getCurrentWindow().onCloseRequested(async (event) => {
-      if (!hasUnsavedChanges) return
+      if (allowWindowCloseRef.current) return
+      if (!hasUnsavedChangesRef.current) return
       event.preventDefault()
+      pendingWindowCloseRef.current = true
+      leavePromptModeRef.current = 'window'
+      setLeavePromptMode('window')
       setPendingWindowClose(true)
       setLeavePromptOpen(true)
     }).then((dispose) => { unlisten = dispose }).catch(() => undefined)
     return () => { unlisten?.() }
-  }, [hasUnsavedChanges])
+  }, [])
 
   const currentTitle = categories.find(([key]) => key === category)?.[1] ?? '设置'
   const legacyFields = useMemo(() => snapshot?.fields.filter(field => {
@@ -159,6 +178,9 @@ export default function SettingsPage() {
   const closeLeavePrompt = () => {
     setLeavePromptOpen(false)
     setPendingWindowClose(false)
+    pendingWindowCloseRef.current = false
+    leavePromptModeRef.current = 'route'
+    setLeavePromptMode('route')
     if (blocker.state === 'blocked') blocker.reset()
   }
   const finishLeave = async (action: LeaveAction) => {
@@ -168,9 +190,11 @@ export default function SettingsPage() {
       setMode(original.appearance.themeMode)
     }
     setLeavePromptOpen(false)
-    if (pendingWindowClose) {
+    if (leavePromptModeRef.current === 'window' || pendingWindowCloseRef.current || pendingWindowClose || leavePromptMode === 'window' || blocker.state !== 'blocked') {
+      pendingWindowCloseRef.current = false
       setPendingWindowClose(false)
-      await getCurrentWindow().close()
+      allowWindowCloseRef.current = true
+      await getCurrentWindow().destroy()
       return
     }
     if (blocker.state === 'blocked') blocker.proceed()

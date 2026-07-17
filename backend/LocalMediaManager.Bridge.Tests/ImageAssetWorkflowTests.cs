@@ -148,12 +148,16 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
         var service = new ImageWorkflowService(Database, ImageRoot);
 
         ImageMutationResult replaced = await service.ReplaceAsync(1, "Poster", source);
-        await using SqliteConnection verifyReplace = await Open();
-        long imageId = await Scalar(verifyReplace, "SELECT Id FROM Images WHERE MovieId=1 AND ImageType='Poster'");
-        string? copied = await Text(verifyReplace, "SELECT FilePath FROM Images WHERE MovieId=1 AND ImageType='Poster'");
-        Assert.True(replaced.Changed);
-        Assert.Equal(1, await Scalar(verifyReplace, "SELECT IsLocked FROM Images WHERE Id=" + imageId));
-        Assert.True(File.Exists(copied));
+        long imageId;
+        string? copied;
+        await using (SqliteConnection verifyReplace = await Open())
+        {
+            imageId = await Scalar(verifyReplace, "SELECT Id FROM Images WHERE MovieId=1 AND ImageType='Poster'");
+            copied = await Text(verifyReplace, "SELECT FilePath FROM Images WHERE MovieId=1 AND ImageType='Poster'");
+            Assert.True(replaced.Changed);
+            Assert.Equal(1, await Scalar(verifyReplace, "SELECT IsLocked FROM Images WHERE Id=" + imageId));
+            Assert.True(File.Exists(copied));
+        }
 
         ImageDeletePreview preview = await service.PreviewDeleteAsync(imageId);
         ImageMutationResult deleted = await service.DeleteAsync(imageId, preview.ConfirmationToken);
