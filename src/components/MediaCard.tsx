@@ -16,7 +16,7 @@ export function MediaCardGrid({ children, minWidth = 148 }: { children: ReactNod
   return <Box sx={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${minWidth}px, 1fr))`, gap: { xs: 1.25, md: 1.5 } }}>{children}</Box>
 }
 
-export function MediaCard({ item, onPlay, onOpen, selected, onSelect }: { item: MediaItem; onPlay: (item: MediaItem) => void; onOpen?: (item: MediaItem) => void; selected?: boolean; onSelect?: (item: MediaItem, selected: boolean) => void }) {
+export function MediaCard({ item, onPlay, onOpen, selected, onSelect, onRatingClick }: { item: MediaItem; onPlay: (item: MediaItem) => void; onOpen?: (item: MediaItem) => void; selected?: boolean; onSelect?: (item: MediaItem, selected: boolean) => void; onRatingClick?: (item: MediaItem) => void }) {
   const [coverFailed, setCoverFailed] = useState(false)
   useEffect(() => setCoverFailed(false), [item.coverUrl])
   const recent = isRecent(item.importedAt)
@@ -64,7 +64,9 @@ export function MediaCard({ item, onPlay, onOpen, selected, onSelect }: { item: 
         <Typography variant="body2" color="text.secondary" noWrap sx={{ mt: 0.7 }}>
           {item.importedAt?.slice(0, 10) || '日期未知'}
         </Typography>
-        <Rating size="small" value={Math.max(0, Math.min(5, item.grade))} readOnly sx={{ mt: 0.55, display: 'flex' }} />
+        <Box onClick={(event) => { if (onRatingClick) { event.stopPropagation(); onRatingClick(item) } }} sx={{ display: 'inline-flex' }}>
+          <Rating size="small" value={Math.max(0, Math.min(5, item.grade))} readOnly sx={{ mt: 0.55, display: 'flex' }} />
+        </Box>
       </CardContent>
     </Card>
   )

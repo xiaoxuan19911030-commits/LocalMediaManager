@@ -26,6 +26,7 @@ export default function MediaPage() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [batchRating, setBatchRating] = useState('5')
+  const [ratingDialog, setRatingDialog] = useState(false)
   const [selected, setSelected] = useState<number[]>([]); const [tagDialog, setTagDialog] = useState(false); const [tags, setTags] = useState<NamedItem[]>([]); const [addTags, setAddTags] = useState<NamedItem[]>([]); const [removeTags, setRemoveTags] = useState<NamedItem[]>([])
 
   const load = useCallback(() => {
@@ -42,7 +43,7 @@ export default function MediaPage() {
   const batchFavorite = (favorite: boolean) => bridge.setBatchFavorite(selected, favorite).then((result) => { setNotice(result.message); setSelected([]); load() }).catch((reason: Error) => setNotice(reason.message))
   const openBatchTags = () => { setAddTags([]); setRemoveTags([]); setTagDialog(true); bridge.entities('tags', '', 'name', 96, 0).then((result) => setTags(result.items)).catch((reason: Error) => setNotice(reason.message)) }
   const saveBatchTags = () => bridge.updateBatchTags(selected, addTags.map((item) => item.id), removeTags.map((item) => item.id)).then((result) => { setNotice(result.message); setTagDialog(false); setSelected([]); load() }).catch((reason: Error) => setNotice(reason.message))
-  const saveBatchRating = () => bridge.setBatchRating(selected, batchRating === '' ? undefined : Number(batchRating), batchRating === '').then((result) => { setNotice(result.message); setSelected([]); load() }).catch((reason: Error) => setNotice(reason.message))
+  const saveBatchRating = () => bridge.setBatchRating(selected, batchRating === '' ? undefined : Number(batchRating), batchRating === '').then((result) => { setNotice(result.message); setRatingDialog(false); setSelected([]); load() }).catch((reason: Error) => setNotice(reason.message))
   const createBatchSync = () => bridge.createBatchSync(selected).then((result) => { setNotice(result.message); setSelected([]) }).catch((reason: Error) => setNotice(reason.message))
   const play = (item: MediaItem) => {
     bridge.play(item.dataId)
@@ -74,20 +75,21 @@ export default function MediaPage() {
             <MenuItem value="">清除</MenuItem>
             {[0, 1, 2, 3, 4, 5].map(value => <MenuItem key={value} value={value}>{value}</MenuItem>)}
           </TextField>
-          <Button size="small" startIcon={<StarRoundedIcon/>} onClick={saveBatchRating}>应用评分</Button>
-          <Button size="small" startIcon={<SyncRoundedIcon/>} onClick={createBatchSync}>创建同步任务</Button>
+          <Button size="small" startIcon={<StarRoundedIcon/>} onClick={() => setRatingDialog(true)}>应用评分</Button>
+          <Button size="small" startIcon={<SyncRoundedIcon/>} onClick={createBatchSync}>同步信息</Button>
           <Button size="small" color="inherit" onClick={() => setSelected([])}>取消选择</Button>
         </Stack>
       )}
       {error && <Alert severity="error">{error}</Alert>}
       {loading ? <Box sx={{ display: 'grid', placeItems: 'center', minHeight: 300 }}><CircularProgress /></Box> :
         <MediaCardGrid>
-          {items.map((item) => <MediaCard key={item.dataId} item={item} selected={selected.includes(item.dataId)} onSelect={(value, checked) => setSelected((current) => checked ? [...current, value.dataId] : current.filter((id) => id !== value.dataId))} onPlay={play} onOpen={() => navigate(`/movies/${item.dataId}`, { state: { context: { search: query, sort } } })} />)}
+          {items.map((item) => <MediaCard key={item.dataId} item={item} selected={selected.includes(item.dataId)} onSelect={(value, checked) => setSelected((current) => checked ? [...current, value.dataId] : current.filter((id) => id !== value.dataId))} onRatingClick={selected.length > 0 ? () => setRatingDialog(true) : undefined} onPlay={play} onOpen={() => navigate(`/movies/${item.dataId}`, { state: { context: { search: query, sort } } })} />)}
         </MediaCardGrid>}
       {total > pageSize && <Box sx={{ display: 'flex', justifyContent: 'center', pt: 3 }}>
         <Pagination count={Math.ceil(total / pageSize)} page={page} onChange={(_, value) => setPage(value)} color="primary" />
       </Box>}
       <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice} />
+      <Dialog open={ratingDialog} onClose={() => setRatingDialog(false)} fullWidth maxWidth="xs"><DialogTitle>批量评分</DialogTitle><DialogContent><TextField select fullWidth margin="normal" label="评分" value={batchRating} onChange={event => setBatchRating(event.target.value)}><MenuItem value="">清除评分</MenuItem>{[0, 1, 2, 3, 4, 5].map(value => <MenuItem key={value} value={value}>{value}</MenuItem>)}</TextField></DialogContent><DialogActions><Button onClick={() => setRatingDialog(false)}>取消</Button><Button variant="contained" onClick={saveBatchRating}>应用到 {selected.length} 部影片</Button></DialogActions></Dialog>
       <Dialog open={tagDialog} onClose={() => setTagDialog(false)} fullWidth maxWidth="sm"><DialogTitle>批量编辑标签</DialogTitle><DialogContent><Autocomplete multiple options={tags.filter((tag) => !removeTags.some((item) => item.id === tag.id))} value={addTags} isOptionEqualToValue={(a, b) => a.id === b.id} getOptionLabel={(option) => option.name} onChange={(_, value) => setAddTags(value)} renderInput={(params) => <TextField {...params} label="添加标签" margin="normal"/>}/><Autocomplete multiple options={tags.filter((tag) => !addTags.some((item) => item.id === tag.id))} value={removeTags} isOptionEqualToValue={(a, b) => a.id === b.id} getOptionLabel={(option) => option.name} onChange={(_, value) => setRemoveTags(value)} renderInput={(params) => <TextField {...params} label="解绑标签" margin="normal" helperText="只解除关系，不删除标签"/>}/></DialogContent><DialogActions><Button onClick={() => setTagDialog(false)}>取消</Button><Button variant="contained" disabled={!addTags.length && !removeTags.length} onClick={saveBatchTags}>应用到 {selected.length} 部影片</Button></DialogActions></Dialog>
     </Box>
   )
