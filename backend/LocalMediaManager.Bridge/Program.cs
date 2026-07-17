@@ -37,6 +37,12 @@ builder.Services.AddSingleton(new DataSafetyService(databasePath, configDatabase
 builder.Services.AddSingleton<PlatformCommandService>();
 builder.Services.AddSingleton<ImageDownloadService>();
 builder.Services.AddSingleton(new NfoService(databasePath));
+builder.Services.AddSingleton(serviceProvider => new SettingsSaveCoordinator(
+    databasePath,
+    serviceProvider.GetRequiredService<MetadataProviderSettingsService>(),
+    serviceProvider.GetRequiredService<NfoService>(),
+    serviceProvider.GetRequiredService<PlaybackSettingsService>(),
+    serviceProvider.GetRequiredService<RatingHistoryService>()));
 builder.Services.AddSingleton<IMetadataProvider, MetaTubeProvider>();
 builder.Services.AddSingleton(serviceProvider => new MetadataSyncExecutor(
     databasePath, imageRoot,
@@ -130,6 +136,12 @@ app.MapGet("/health", () => Results.Ok(new {
 
 app.MapGet("/api/settings", async (MetadataProviderSettingsService settings) =>
     Results.Ok(await SettingsReader.ReadAsync(configDatabasePath, await settings.ReadMetaTubeAsync())));
+app.MapGet("/api/settings/all", async (SettingsSaveCoordinator coordinator, CancellationToken token) =>
+    Results.Ok(await coordinator.ReadAsync(token)));
+app.MapGet("/api/settings/defaults", () =>
+    Results.Ok(SettingsSaveCoordinator.Defaults()));
+app.MapPut("/api/settings/all", async (UnifiedSettingsDto input, SettingsSaveCoordinator coordinator, CancellationToken token) =>
+    Results.Ok(await coordinator.SaveAsync(input, token)));
 app.MapPut("/api/settings/providers/metatube", async (MetaTubeSettingsDto input, MetadataProviderSettingsService settings) =>
     Results.Ok(await settings.SaveMetaTubeAsync(input)));
 app.MapPost("/api/settings/providers/metatube/test", async (MetaTubeSettingsDto input, IMetadataProvider provider) =>

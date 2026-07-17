@@ -23,15 +23,16 @@ public sealed class NfoService(string databasePath)
 {
     public async Task<NfoSettingsDto> ReadSettingsAsync(CancellationToken cancellationToken = default)
     {
+        NfoSettingsDto defaults = SettingsDefaults.Unified.Nfo;
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadOnly, cancellationToken);
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT Key,ValueJson FROM AppSettings WHERE Key LIKE 'nfo.%'";
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) values[reader.GetString(0)] = reader.GetString(1);
-        return new(TextSetting(values, "nfo.export.policy", "SkipExisting"),
-            TextSetting(values, "nfo.export.outputDirectory", ""), true,
-            BoolSetting(values, "nfo.export.includeImages", true));
+        return new(TextSetting(values, "nfo.export.policy", defaults.ExportPolicy),
+            TextSetting(values, "nfo.export.outputDirectory", defaults.OutputDirectory), true,
+            BoolSetting(values, "nfo.export.includeImages", defaults.IncludeImages));
     }
 
     public async Task<NfoSettingsDto> SaveSettingsAsync(NfoSettingsDto input, CancellationToken cancellationToken = default)

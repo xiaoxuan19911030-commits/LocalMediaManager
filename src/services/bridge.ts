@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateResults, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageDeletePreview, ImageMutationResult, ImageTaskLaunchResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, PlatformOpenResult, SafeDeleteLaunchResult, SafeDeletePreview, SafeDeletePreviewCommand, ScanLaunchResult, TaskCleanupResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
-import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, MetaTubeSettings, NfoSettings, PlaybackSettings, ProviderConnectionResult, RatingRetentionSettings, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic } from '@/types/settings'
+import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, MetaTubeSettings, ProviderConnectionResult, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings, UnifiedSettingsSaveResult } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
 
@@ -32,6 +32,9 @@ export const bridge = {
     return request<MediaPageResult>(`/api/videos?${query}`)
   },
   settings: () => request<SettingsSnapshot>('/api/settings'),
+  allSettings: () => request<UnifiedSettings>('/api/settings/all'),
+  defaultSettings: () => request<UnifiedSettings>('/api/settings/defaults'),
+  saveAllSettings: (value: UnifiedSettings) => request<UnifiedSettingsSaveResult>('/api/settings/all', { method: 'PUT', body: JSON.stringify(value) }),
   dataSafetyOverview: () => request<DataSafetyOverview>('/api/settings/data-safety/overview'),
   createBackup: (value: BackupCreateCommand) => request<BackupResult>('/api/settings/data-safety/backup', { method: 'POST', body: JSON.stringify(value) }),
   validateBackup: (path: string) => request<BackupValidation>(`/api/settings/data-safety/backup/validate?${new URLSearchParams({ path })}`),
@@ -39,14 +42,7 @@ export const bridge = {
   exportSettings: () => request<SettingsExport>('/api/settings/export'),
   previewSettingsImport: (value: unknown) => request<SettingsImportPreview>('/api/settings/import-preview', { method: 'POST', body: JSON.stringify(value) }),
   settingsDiagnostics: () => request<SystemDiagnostic>('/api/settings/diagnostics'),
-  saveMetaTubeSettings: (value: MetaTubeSettings) => request<MetaTubeSettings>('/api/settings/providers/metatube', { method: 'PUT', body: JSON.stringify(value) }),
   testMetaTube: (value: MetaTubeSettings) => request<ProviderConnectionResult>('/api/settings/providers/metatube/test', { method: 'POST', body: JSON.stringify(value) }),
-  nfoSettings: () => request<NfoSettings>('/api/settings/nfo'),
-  saveNfoSettings: (value: NfoSettings) => request<NfoSettings>('/api/settings/nfo', { method: 'PUT', body: JSON.stringify(value) }),
-  playbackSettings: () => request<PlaybackSettings>('/api/settings/playback'),
-  savePlaybackSettings: (value: PlaybackSettings) => request<PlaybackSettings>('/api/settings/playback', { method: 'PUT', body: JSON.stringify(value) }),
-  ratingRetentionSettings: () => request<RatingRetentionSettings>('/api/settings/rating-history'),
-  saveRatingRetentionSettings: (value: RatingRetentionSettings) => request<RatingRetentionSettings>('/api/settings/rating-history', { method: 'PUT', body: JSON.stringify(value) }),
   movie: (id: number) => request<MovieDetail>(`/api/videos/${id}`),
   movieImages: (id: number) => request<ImageAsset[]>(`/api/videos/${id}/images`),
   movieImageStatus: (id: number) => request<ImageCenterStatus>(`/api/videos/${id}/images/status`),

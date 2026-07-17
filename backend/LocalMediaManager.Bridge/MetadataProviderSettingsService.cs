@@ -18,6 +18,7 @@ public sealed class MetadataProviderSettingsService(string databasePath)
 {
     public async Task<MetaTubeSettingsDto> ReadMetaTubeAsync()
     {
+        MetaTubeSettingsDto defaults = SettingsDefaults.Unified.MetaTube;
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         await using var connection = await OpenAsync(SqliteOpenMode.ReadOnly);
         await using var command = connection.CreateCommand();
@@ -25,13 +26,13 @@ public sealed class MetadataProviderSettingsService(string databasePath)
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync()) values[reader.GetString(0)] = reader.GetString(1);
         return new(
-            Bool(values, "metadata.metatube.enabled", true),
-            NormalizeBaseUrl(Text(values, "metadata.metatube.baseUrl", "http://127.0.0.1:8080/")),
-            Math.Clamp(Int(values, "metadata.metatube.timeoutSeconds", 30), 15, 180),
-            Bool(values, "metadata.metatube.downloadImages", true),
-            Bool(values, "metadata.metatube.writeNfo", false),
-            Bool(values, "metadata.metatube.autoExecute", true),
-            Bool(values, "metadata.metatube.nonDestructive", true));
+            Bool(values, "metadata.metatube.enabled", defaults.Enabled),
+            NormalizeBaseUrl(Text(values, "metadata.metatube.baseUrl", defaults.BaseUrl)),
+            Math.Clamp(Int(values, "metadata.metatube.timeoutSeconds", defaults.TimeoutSeconds), 15, 180),
+            Bool(values, "metadata.metatube.downloadImages", defaults.DownloadImages),
+            Bool(values, "metadata.metatube.writeNfo", defaults.WriteNfo),
+            Bool(values, "metadata.metatube.autoExecute", defaults.AutoExecute),
+            Bool(values, "metadata.metatube.nonDestructive", defaults.NonDestructive));
     }
 
     public async Task<MetaTubeSettingsDto> SaveMetaTubeAsync(MetaTubeSettingsDto input)

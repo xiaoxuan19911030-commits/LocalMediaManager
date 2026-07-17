@@ -32,6 +32,15 @@ export interface ProviderConnectionResult { success: boolean; provider: string; 
 export interface NfoSettings { exportPolicy: 'SkipExisting' | 'SeparateFile'; outputDirectory: string; fillEmptyOnly: boolean; includeImages: boolean }
 export interface PlaybackSettings { playerPath: string; useSystemDefault: boolean }
 export interface RatingRetentionSettings { enabled: boolean }
+export interface AppearanceSettings { themeMode: 'light' | 'dark' }
+export interface UnifiedSettings {
+  metaTube: MetaTubeSettings
+  nfo: NfoSettings
+  playback: PlaybackSettings
+  ratingRetention: RatingRetentionSettings
+  appearance: AppearanceSettings
+}
+export interface UnifiedSettingsSaveResult { settings: UnifiedSettings; changedFields: string[]; message: string }
 
 export interface DataSafetyOverview {
   databasePath: string; databaseBytes: number; configDatabasePath: string

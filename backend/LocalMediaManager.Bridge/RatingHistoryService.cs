@@ -99,13 +99,13 @@ public sealed class RatingHistoryService(string databasePath)
     private static async Task<bool> EnabledAsync(SqliteConnection connection, CancellationToken token)
     {
         string? raw = await ScalarTextAsync(connection, "SELECT ValueJson FROM AppSettings WHERE Key='ratingHistory.enabled'", token);
-        return ParseBool(raw, true);
+        return ParseBool(raw, SettingsDefaults.Unified.RatingRetention.Enabled);
     }
 
     private static async Task<bool> EnabledAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction)
     {
         string? raw = await ScalarTextAsync(connection, transaction, "SELECT ValueJson FROM AppSettings WHERE Key='ratingHistory.enabled'");
-        return ParseBool(raw, true);
+        return ParseBool(raw, SettingsDefaults.Unified.RatingRetention.Enabled);
     }
 
     private static bool ParseBool(string? raw, bool fallback)
