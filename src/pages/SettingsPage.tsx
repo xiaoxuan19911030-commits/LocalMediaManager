@@ -14,8 +14,10 @@ import { HealthMeter, SurfaceSection } from '@/components/ProductComponents'
 import { DangerConfirmDialog } from '@/components/workspace/DangerConfirmDialog'
 import { StatusBadge } from '@/components/workspace/StatusBadges'
 import { WorkspacePage, refreshAction } from '@/components/workspace/Workspace'
+import { buildInfo } from '@/buildInfo'
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
+import type { BridgeHealth } from '@/types/media'
 import type { BackupValidation, DataSafetyOverview, DiagnosticCheck, MetaTubeSettings, NfoSettings, PlaybackSettings, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 
@@ -33,6 +35,7 @@ export default function SettingsPage() {
   const { mode, setMode } = useColorMode()
   const [category, setCategory] = useState<(typeof categories)[number][0]>('general')
   const [snapshot, setSnapshot] = useState<SettingsSnapshot>()
+  const [health, setHealth] = useState<BridgeHealth>()
   const [overview, setOverview] = useState<DataSafetyOverview>()
   const [metaTube, setMetaTube] = useState<MetaTubeSettings>()
   const [nfo, setNfo] = useState<NfoSettings>()
@@ -51,8 +54,8 @@ export default function SettingsPage() {
 
   const load = useCallback(() => {
     setError('')
-    return Promise.all([bridge.settings(), bridge.dataSafetyOverview(), bridge.nfoSettings(), bridge.playbackSettings()])
-      .then(([settings, data, nfoValue, playbackValue]) => { setSnapshot(settings); setOverview(data); setMetaTube(settings.metaTube); setNfo(nfoValue); setPlayback(playbackValue) })
+    return Promise.all([bridge.settings(), bridge.dataSafetyOverview(), bridge.nfoSettings(), bridge.playbackSettings(), bridge.health()])
+      .then(([settings, data, nfoValue, playbackValue, healthValue]) => { setSnapshot(settings); setOverview(data); setMetaTube(settings.metaTube); setNfo(nfoValue); setPlayback(playbackValue); setHealth(healthValue) })
       .catch((reason: Error) => setError(reason.message))
   }, [])
   useEffect(() => { void load() }, [load])
@@ -109,7 +112,7 @@ export default function SettingsPage() {
         {category === 'appearance' && <AppearanceSection mode={mode} setMode={setMode}/>}
         {category === 'data' && <DataSection overview={overview} backupPath={backupPath} setBackupPath={setBackupPath} restoreMode={restoreMode} setRestoreMode={setRestoreMode} validation={backupValidation} setValidation={setBackupValidation} importJson={importJson} setImportJson={setImportJson} importPreview={importPreview} previewImport={previewImport} onBackup={() => setConfirm('backup')} onRestore={() => setConfirm('restore')}/>}
         {category === 'logs' && <LogsSection diagnostics={diagnostics} runDiagnostics={() => bridge.settingsDiagnostics().then(setDiagnostics).catch((reason: Error) => setError(reason.message))} onCleanLogs={() => setConfirm('logs')}/>}
-        {category === 'about' && <AboutSection overview={overview}/>}
+        {category === 'about' && <AboutSection overview={overview} health={health}/>}
         {legacyFields.length > 0 && category !== 'metadata' && category !== 'playback' && category !== 'images' && <LegacyFields fields={legacyFields}/>}
       </Stack>
     </Box>
@@ -159,8 +162,13 @@ function LogsSection({ diagnostics, runDiagnostics, onCleanLogs }: { diagnostics
 function DiagnosticRow({ check }: { check: DiagnosticCheck }) {
   return <Card variant="outlined"><CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}><Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}><StatusBadge tone={check.status === 'success' ? 'success' : check.status === 'error' ? 'error' : 'warning'} label={check.label}/><Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{check.detail}</Typography></Stack></CardContent></Card>
 }
-function AboutSection({ overview }: { overview: DataSafetyOverview }) {
-  return <SurfaceSection title="关于" description="本地优先、可维护的现代媒体管理工具。"><Stack spacing={1}><BrandMark/><Typography>版本 0.4.3</Typography><Typography color="text.secondary">数据目录：{overview.databasePath}</Typography><HealthMeter label="数据安全中心" value={100} detail="已启用" tone="success"/></Stack></SurfaceSection>
+function AboutSection({ overview, health }: { overview: DataSafetyOverview; health?: BridgeHealth }) {
+  return <SurfaceSection title="关于" description="本地优先、可维护的现代媒体管理工具。"><Stack spacing={1}><BrandMark/>
+    <Typography>Version: {buildInfo.version}</Typography>
+    <Typography>Commit: {buildInfo.commit}</Typography>
+    <Typography>Build: {buildInfo.buildTime}</Typography>
+    <Typography>Bridge: {health?.version ?? 'unknown'} · {health?.writeEnabled ? '写入已启用' : '只读或会话未启用'}</Typography>
+    <Typography color="text.secondary">数据目录：{overview.databasePath}</Typography><HealthMeter label="数据安全中心" value={100} detail="已启用" tone="success"/></Stack></SurfaceSection>
 }
 function LegacyFields({ fields }: { fields: { key: string; label: string; value: unknown; readStatus: string; requiresRestart: boolean; safeToWrite: boolean }[] }) {
   return <SurfaceSection title="已读取的兼容设置" description="这些字段来自现有配置体系；不可安全写入的字段仅展示。"><Stack spacing={1}>{fields.slice(0, 24).map(field => <Card key={field.key} variant="outlined"><CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}><Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ justifyContent: 'space-between' }}><Box><Typography sx={{ fontWeight: 750 }}>{field.label}</Typography><Typography variant="caption" color="text.secondary">{field.key}</Typography></Box><Stack direction="row" spacing={1}><StatusBadge tone={field.readStatus === 'ok' ? 'success' : 'warning'} label={field.readStatus}/>{field.requiresRestart && <StatusBadge tone="warning" label="需重启"/>}<Typography variant="body2">{String(field.value ?? '')}</Typography></Stack></Stack></CardContent></Card>)}</Stack></SurfaceSection>

@@ -34,6 +34,8 @@ export interface MediaPageResult {
 }
 
 export interface BridgeHealth {
+  product?: string
+  version?: string
   status: string
   databaseAvailable: boolean
   databasePath: string

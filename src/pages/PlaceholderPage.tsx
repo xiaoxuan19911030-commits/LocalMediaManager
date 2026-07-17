@@ -1,15 +1,14 @@
 import ConstructionRoundedIcon from '@mui/icons-material/ConstructionRounded'
-import { Box, Card, CardContent, Typography } from '@mui/material'
-import { PageHeader } from '@/components/PageHeader'
+import { Box } from '@mui/material'
+import { EmptyState } from '@/components/ProductComponents'
+import { WorkspacePage } from '@/components/workspace/Workspace'
 
 export default function PlaceholderPage({ title }: { title: string }) {
-  return <Box>
-    <PageHeader title={title} description="旧 WPF 功能仍然保留，本页将在对应迁移阶段接入。" />
-    <Card><CardContent sx={{ py: 6, textAlign: 'center' }}>
-      <ConstructionRoundedIcon color="primary" sx={{ fontSize: 48 }} />
-      <Typography variant="h6" sx={{ mt: 1 }}>尚未迁移，不提供虚假操作</Typography>
-      <Typography color="text.secondary">当前原型仅验证桌面壳、数据库只读访问、影片列表和播放器调用。</Typography>
-    </CardContent></Card>
-  </Box>
+  const empty = <Box sx={{ color: 'text.disabled', mb: 1 }}><ConstructionRoundedIcon sx={{ fontSize: 48 }}/></Box>
+  return <WorkspacePage title={title} description="旧 WPF 功能仍然保留，本页将在对应迁移阶段接入。">
+    <Box sx={{ '& .MuiCardContent-root > div': { display: 'grid', justifyItems: 'center' } }}>
+      {empty}
+      <EmptyState title="尚未迁移，不提供虚假操作" description="当前仅展示真实已接入能力；未完成能力会在对应迁移阶段接入。"/>
+    </Box>
+  </WorkspacePage>
 }
-

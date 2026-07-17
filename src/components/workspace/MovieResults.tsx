@@ -1,9 +1,10 @@
 import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
-import { Box, Button, Card, CardContent, Chip, Pagination, Rating, Stack, Tooltip, Typography } from '@mui/material'
+import { Box, Button, Card, CardContent, Pagination, Rating, Stack, Tooltip, Typography } from '@mui/material'
 import { useNavigate } from 'react-router'
 import { MediaCard, MediaCardGrid } from '@/components/MediaCard'
 import { EmptyState, SectionTitle } from '@/components/ProductComponents'
+import { MetadataStatusBadge, StatusBadge } from '@/components/workspace/StatusBadges'
 import type { MediaItem } from '@/types/media'
 import type { WorkspaceViewMode } from '@/components/workspace/Workspace'
 
@@ -79,8 +80,8 @@ export function MovieList({ items, onPlay, onOpen }: { items: MediaItem[]; onPla
           <Tooltip title={title}><Typography noWrap>{title}</Typography></Tooltip>
           <Rating size="small" value={Math.max(0, Math.min(5, item.grade || 0))} readOnly/>
           <Stack direction="row" spacing={.5} useFlexGap sx={{ flexWrap: 'wrap' }}>
-            {item.favorite && <Chip size="small" color="error" label="收藏"/>}
-            {item.metadataStatus && <Chip size="small" color={item.metadataStatus.state === 'complete' ? 'success' : item.metadataStatus.state === 'unscraped' ? 'error' : 'warning'} label={item.metadataStatus.label}/>}
+            {item.favorite && <StatusBadge tone="error" label="收藏"/>}
+            {item.metadataStatus && <MetadataStatusBadge status={item.metadataStatus}/>}
           </Stack>
           <Stack direction="row" spacing={.5} sx={{ justifyContent: 'flex-end' }}>
             <Button size="small" startIcon={<PlayArrowRoundedIcon/>} onClick={() => onPlay(item)}>播放</Button>

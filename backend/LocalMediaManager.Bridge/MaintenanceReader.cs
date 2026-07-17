@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using System.Diagnostics;
 
 namespace LocalMediaManager.Bridge;
 
@@ -14,17 +15,19 @@ public static class MaintenanceReader
 {
     private static readonly string[] VideoExtensions = [".mp4",".mkv",".avi",".wmv",".mov",".ts",".m2ts",".flv",".webm",".vob",".mpg",".mpeg"];
     private static readonly string[] SidecarExtensions = [".jpg",".jpeg",".png",".webp",".gif",".nfo",".srt",".ass",".ssa",".vtt"];
+    private const int FileSystemScanBudgetMs = 3500;
 
     public static async Task<MaintenanceReportDto> ReadAsync(string databasePath, string imageRoot, string bridgeUrl, int limit, int offset)
     {
         await using var connection = await OpenAsync(databasePath);
         var issues = new List<MaintenanceIssueDto>();
+        var fileSystemBudget = Stopwatch.StartNew();
         long total = await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies");
         await AddMovieIssuesAsync(connection, issues);
-        var orphans = await ReadOrphanFilesAsync(connection, imageRoot, limit, offset);
-        var directories = await ReadDirectoryIssuesAsync(connection, imageRoot, limit, offset);
-        long cacheProblems = await CountInvalidCacheAsync(connection);
-        foreach (var cache in await ReadInvalidCacheAsync(connection, limit))
+        var orphans = await ReadOrphanFilesAsync(connection, imageRoot, limit, offset, fileSystemBudget);
+        var directories = await ReadDirectoryIssuesAsync(connection, imageRoot, limit, offset, fileSystemBudget);
+        long cacheProblems = await CountInvalidCacheAsync(connection, fileSystemBudget);
+        foreach (var cache in await ReadInvalidCacheAsync(connection, limit, fileSystemBudget))
             issues.Add(new("图片缓存失效", "warning", "图片缓存失效", "缓存记录对应的文件不存在或超出缓存目录。", null, cache));
         DuplicateResultsDto duplicates = await ProductReader.ReadDuplicateResultsAsync(databasePath, "all", 100);
         long duplicateMovies = duplicates.Groups.SelectMany(group => group.Items.Select(item => item.MovieId)).Distinct().LongCount();
@@ -57,7 +60,7 @@ public static class MaintenanceReader
             string name = reader.GetString(1); if (string.IsNullOrWhiteSpace(name)) name = reader.GetString(2);
             string path = reader.GetString(3);
             if (path.Length == 0) issues.Add(new("数据库记录不存在", "error", "缺少主视频文件记录", name, id, null));
-            else if (reader.GetString(4) == "Missing" || !File.Exists(path)) issues.Add(new("视频文件不存在", "error", "视频文件不存在", name, id, path));
+            else if (reader.GetString(4) == "Missing") issues.Add(new("视频文件不存在", "error", "视频文件不存在", name, id, path));
             if (reader.GetString(5).Length == 0) issues.Add(new("NFO 缺失", "warning", "NFO 缺失", name, id, path));
             if (reader.GetInt64(6) == 0 || reader.GetString(7).Trim().Length == 0) issues.Add(new("Metadata 状态异常", "warning", "Metadata 状态异常", name, id, path));
             if (reader.GetInt64(8) == 0) issues.Add(new("封面缺失", "warning", "封面缺失", name, id, path));
@@ -65,7 +68,6 @@ public static class MaintenanceReader
             if (reader.GetInt64(10) == 0) issues.Add(new("ExtraPic 缺失", "warning", "ExtraPic 缺失", name, id, path));
             if (reader.GetInt64(11) == 0) issues.Add(new("演员缺失", "warning", "演员缺失", name, id, path));
             if (reader.GetInt64(12) == 0) issues.Add(new("标签缺失", "warning", "标签缺失", name, id, path));
-            if (path.Length > 0 && !HasSubtitle(path)) issues.Add(new("字幕缺失", "info", "字幕缺失", name, id, Path.GetDirectoryName(path)));
         }
         if (await TableExistsAsync(connection, "Actors"))
             foreach (var issue in await ActorAvatarIssuesAsync(connection)) issues.Add(issue);
@@ -81,14 +83,14 @@ public static class MaintenanceReader
         return result;
     }
 
-    private static async Task<IReadOnlyList<MaintenancePathDto>> ReadOrphanFilesAsync(SqliteConnection connection, string imageRoot, int limit, int offset)
+    private static async Task<IReadOnlyList<MaintenancePathDto>> ReadOrphanFilesAsync(SqliteConnection connection, string imageRoot, int limit, int offset, Stopwatch budget)
     {
         var knownCodes = await ReadSetAsync(connection, "SELECT lower(Code) FROM Movies WHERE trim(COALESCE(Code,''))<>''");
         var knownPaths = await ReadSetAsync(connection, "SELECT lower(FilePath) FROM MediaFiles");
         var result = new List<MaintenancePathDto>();
         foreach (string root in CandidateRoots(connection, imageRoot).Distinct(StringComparer.OrdinalIgnoreCase)) {
             if (!Directory.Exists(root)) continue;
-            foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Take(5000)) {
+            foreach (string file in EnumerateFilesBounded(root, budget, maxDirectories: 400, maxFiles: 5000)) {
                 string ext = Path.GetExtension(file).ToLowerInvariant();
                 if (!SidecarExtensions.Contains(ext) || knownPaths.Contains(file.ToLowerInvariant())) continue;
                 string name = Path.GetFileNameWithoutExtension(file).ToLowerInvariant();
@@ -98,12 +100,12 @@ public static class MaintenanceReader
         return result.Skip(offset).Take(limit).ToList();
     }
 
-    private static async Task<IReadOnlyList<MaintenancePathDto>> ReadDirectoryIssuesAsync(SqliteConnection connection, string imageRoot, int limit, int offset)
+    private static async Task<IReadOnlyList<MaintenancePathDto>> ReadDirectoryIssuesAsync(SqliteConnection connection, string imageRoot, int limit, int offset, Stopwatch budget)
     {
         var result = new List<MaintenancePathDto>();
         foreach (string root in CandidateRoots(connection, imageRoot).Distinct(StringComparer.OrdinalIgnoreCase)) {
             if (!Directory.Exists(root)) continue;
-            foreach (string directory in Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories).Take(3000)) {
+            foreach (string directory in EnumerateDirectoriesBounded(root, budget, maxDirectories: 3000)) {
                 string[] files;
                 try { files = Directory.GetFiles(directory); } catch { continue; }
                 if (files.Length == 0) result.Add(new("空目录", directory, "空目录"));
@@ -118,6 +120,38 @@ public static class MaintenanceReader
         return result.Skip(offset).Take(limit).ToList();
     }
 
+    private static IEnumerable<string> EnumerateFilesBounded(string root, Stopwatch budget, int maxDirectories, int maxFiles)
+    {
+        int fileCount = 0;
+        foreach (string directory in EnumerateDirectoriesBounded(root, budget, maxDirectories)) {
+            if (budget.ElapsedMilliseconds > FileSystemScanBudgetMs || fileCount >= maxFiles) yield break;
+            string[] files;
+            try { files = Directory.GetFiles(directory); } catch { continue; }
+            foreach (string file in files) {
+                if (budget.ElapsedMilliseconds > FileSystemScanBudgetMs || fileCount++ >= maxFiles) yield break;
+                yield return file;
+            }
+        }
+    }
+
+    private static IEnumerable<string> EnumerateDirectoriesBounded(string root, Stopwatch budget, int maxDirectories)
+    {
+        var pending = new Queue<string>();
+        pending.Enqueue(root);
+        int visited = 0;
+        while (pending.Count > 0 && visited < maxDirectories && budget.ElapsedMilliseconds <= FileSystemScanBudgetMs) {
+            string directory = pending.Dequeue();
+            visited++;
+            yield return directory;
+            string[] children;
+            try { children = Directory.GetDirectories(directory); } catch { continue; }
+            foreach (string child in children) {
+                if (visited + pending.Count >= maxDirectories || budget.ElapsedMilliseconds > FileSystemScanBudgetMs) break;
+                pending.Enqueue(child);
+            }
+        }
+    }
+
     private static IEnumerable<string> CandidateRoots(SqliteConnection connection, string imageRoot)
     {
         if (!string.IsNullOrWhiteSpace(imageRoot)) yield return imageRoot;
@@ -127,8 +161,8 @@ public static class MaintenanceReader
         while (reader.Read()) yield return reader.GetString(0);
     }
 
-    private static async Task<long> CountInvalidCacheAsync(SqliteConnection connection) => (await ReadInvalidCacheAsync(connection, 10000)).Count;
-    private static async Task<IReadOnlyList<string>> ReadInvalidCacheAsync(SqliteConnection connection, int limit)
+    private static async Task<long> CountInvalidCacheAsync(SqliteConnection connection, Stopwatch budget) => (await ReadInvalidCacheAsync(connection, 200, budget)).Count;
+    private static async Task<IReadOnlyList<string>> ReadInvalidCacheAsync(SqliteConnection connection, int limit, Stopwatch budget)
     {
         var result = new List<string>();
         await using var command = connection.CreateCommand();
@@ -136,17 +170,11 @@ public static class MaintenanceReader
         command.Parameters.AddWithValue("$limit", limit);
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync()) {
+            if (budget.ElapsedMilliseconds > FileSystemScanBudgetMs) break;
             string path = reader.GetString(0);
             if (!File.Exists(path)) result.Add(path);
         }
         return result;
-    }
-
-    private static bool HasSubtitle(string videoPath)
-    {
-        string directory = Path.GetDirectoryName(videoPath) ?? "";
-        string stem = Path.GetFileNameWithoutExtension(videoPath);
-        return Directory.Exists(directory) && new[] { ".srt",".ass",".ssa",".vtt" }.Any(ext => File.Exists(Path.Combine(directory, stem + ext)));
     }
 
     private static async Task<HashSet<string>> ReadSetAsync(SqliteConnection connection, string sql)
