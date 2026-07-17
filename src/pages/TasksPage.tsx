@@ -16,7 +16,7 @@ import { WorkspacePage, refreshAction } from '@/components/workspace/Workspace'
 import type { TaskItem, TaskLogItem } from '@/types/media'
 import { bridge } from '@/services/bridge'
 
-const taskNames: Record<string, string> = { Download: '下载任务', Screenshot: '截图任务', Scan: '扫描任务', Sync: '同步任务', Crop: '裁切任务', AI: 'AI 任务', ActorRepair: '演员修复', ImageCacheRebuild: '图片缓存重建', Organizer: '文件整理' }
+const taskNames: Record<string, string> = { Download: '下载任务', Poster: '封面任务', Preview: '预览图任务', Screenshot: '截图任务', GIF: 'GIF 任务', Scan: '扫描任务', Sync: '同步任务', Crop: '裁切任务', AI: 'AI 任务', ActorRepair: '演员修复', ImageCacheRebuild: '图片缓存重建', Organizer: '文件整理' }
 const statusNames: Record<string, string> = { Pending: '等待中', Preparing: '准备中', FetchingMetadata: '获取元数据', DownloadingImages: '下载图片', WritingMetadata: '写入元数据', WritingNfo: '写入 NFO', Retrying: '等待重试', Running: '进行中', Paused: '已暂停', Completed: '已完成', Failed: '失败', Cancelled: '已取消' }
 const activeStates = ['Pending', 'Preparing', 'FetchingMetadata', 'DownloadingImages', 'WritingMetadata', 'WritingNfo', 'Retrying', 'Running', 'Paused']
 

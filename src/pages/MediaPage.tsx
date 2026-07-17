@@ -68,7 +68,7 @@ export default function MediaPage() {
   const [contextMenu, setContextMenu] = useState<{ mouseX: number; mouseY: number; item: MediaItem }>()
   const [deletePreview, setDeletePreview] = useState<MovieDeletePreview>()
   const [editMode, setEditMode] = useState(false)
-  const [subMenu, setSubMenu] = useState<{ kind: 'edit' | 'extend' | 'open'; anchor: HTMLElement }>()
+  const [subMenu, setSubMenu] = useState<{ kind: 'edit' | 'image' | 'open'; anchor: HTMLElement }>()
   const movieActions = useMovieActions({ onNotice: setNotice, play: bridge.play })
 
   const load = useCallback(() => {
@@ -121,6 +121,8 @@ export default function MediaPage() {
   const openContextMenu = (event: MouseEvent, item: MediaItem) => { event.preventDefault(); setContextMenu({ mouseX: event.clientX + 2, mouseY: event.clientY - 6, item }) }
   const closeContextMenu = () => { setContextMenu(undefined); setSubMenu(undefined) }
   const syncContextMovie = () => { const item = contextMenu?.item; closeContextMenu(); if (item) bridge.syncMovie(item.dataId).then((result) => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message)) }
+  const generateContextImage = (type: string) => { const item = contextMenu?.item; closeContextMenu(); if (item) bridge.generateMovieImage(item.dataId, type).then((result) => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message)) }
+  const createBatchImageTasks = (type: string) => Promise.all(selected.map((id) => bridge.generateMovieImage(id, type))).then((results) => { setNotice(`已创建 ${results.length} 个${type === 'GIF' ? ' GIF' : '截图'}任务，可在任务中心查看进度。`); setSelected([]) }).catch((reason: Error) => setNotice(reason.message))
   const openContextMovie = () => { const item = contextMenu?.item; closeContextMenu(); if (item) movieActions.openMovie(item, { search: query, sort }) }
   const openContextLocation = () => { const item = contextMenu?.item; closeContextMenu(); if (item?.path) bridge.revealFile(item.path).then((result) => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message)); else setNotice('没有可定位的影片文件') }
   const previewDeleteContextMovie = () => { const item = contextMenu?.item; closeContextMenu(); if (item) bridge.previewDeleteMovie(item.dataId).then(setDeletePreview).catch((reason: Error) => setNotice(reason.message)) }
@@ -183,8 +185,8 @@ export default function MediaPage() {
       {editMode && selected.length > 0 ? [
         <MenuItem key="batch-sync" onClick={() => { closeContextMenu(); void createBatchSync() }}><ListItemIcon><SyncRoundedIcon fontSize="small"/></ListItemIcon>全部同步信息</MenuItem>,
         <Divider key="batch-divider-1"/>,
-        <MenuItem key="batch-screenshot" disabled>批量生成截图（开发中：缺少截图任务 Runner）</MenuItem>,
-        <MenuItem key="batch-gif" disabled>批量生成 GIF（开发中：缺少 GIF 任务 Runner）</MenuItem>,
+        <MenuItem key="batch-screenshot" onClick={() => { closeContextMenu(); void createBatchImageTasks('Screenshot') }}>批量生成截图</MenuItem>,
+        <MenuItem key="batch-gif" onClick={() => { closeContextMenu(); void createBatchImageTasks('GIF') }}>批量生成 GIF</MenuItem>,
         <Divider key="batch-divider-2"/>,
         <MenuItem key="batch-delete-info" disabled>删除信息（开发中：缺少批量预览）</MenuItem>,
         <MenuItem key="batch-delete-file" disabled>删除影片（开发中：缺少安全文件删除工作流）</MenuItem>,
@@ -193,7 +195,7 @@ export default function MediaPage() {
         <Divider key="divider-1"/>,
         <MenuItem key="edit" onMouseEnter={(event) => setSubMenu({ kind: 'edit', anchor: event.currentTarget })} onClick={(event) => setSubMenu({ kind: 'edit', anchor: event.currentTarget })}><ListItemIcon><EditRoundedIcon fontSize="small"/></ListItemIcon>编辑</MenuItem>,
         <Divider key="divider-2"/>,
-        <MenuItem key="extend" onMouseEnter={(event) => setSubMenu({ kind: 'extend', anchor: event.currentTarget })} onClick={(event) => setSubMenu({ kind: 'extend', anchor: event.currentTarget })}>扩展功能</MenuItem>,
+        <MenuItem key="image" onMouseEnter={(event) => setSubMenu({ kind: 'image', anchor: event.currentTarget })} onClick={(event) => setSubMenu({ kind: 'image', anchor: event.currentTarget })}>图片</MenuItem>,
         <Divider key="divider-3"/>,
         <MenuItem key="location" onMouseEnter={(event) => setSubMenu({ kind: 'open', anchor: event.currentTarget })} onClick={(event) => setSubMenu({ kind: 'open', anchor: event.currentTarget })}><ListItemIcon><FolderRoundedIcon fontSize="small"/></ListItemIcon>打开位置</MenuItem>,
         <Divider key="divider"/>,
@@ -203,7 +205,7 @@ export default function MediaPage() {
     </Menu>
     <Menu open={Boolean(subMenu)} anchorEl={subMenu?.anchor} onClose={() => setSubMenu(undefined)} anchorOrigin={{ vertical: 'top', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'left' }}>
       {subMenu?.kind === 'edit' && [<MenuItem key="info" onClick={openContextMovie}>编辑信息</MenuItem>, <MenuItem key="recognize" disabled>重新识别主画面（开发中：缺少智能卡图 Runner）</MenuItem>, <MenuItem key="left" disabled>居左裁切（开发中：缺少裁切预览）</MenuItem>, <MenuItem key="center" disabled>居中裁切（开发中：缺少裁切预览）</MenuItem>, <MenuItem key="right" disabled>居右裁切（开发中：缺少裁切预览）</MenuItem>]}
-      {subMenu?.kind === 'extend' && [<MenuItem key="screenshot" disabled>生成截图（开发中：缺少截图任务 Runner）</MenuItem>, <MenuItem key="gif" disabled>生成 GIF（开发中：缺少 GIF 任务 Runner）</MenuItem>, <MenuItem key="rename" onClick={openContextMovie}>重命名影片</MenuItem>]}
+      {subMenu?.kind === 'image' && [<MenuItem key="poster" onClick={() => generateContextImage('Poster')}>生成封面</MenuItem>, <MenuItem key="preview" onClick={() => generateContextImage('Preview')}>生成预览图</MenuItem>, <MenuItem key="screenshot" onClick={() => generateContextImage('Screenshot')}>生成截图</MenuItem>, <MenuItem key="gif" onClick={() => generateContextImage('GIF')}>生成 GIF</MenuItem>]}
       {subMenu?.kind === 'open' && [<MenuItem key="movie" disabled={!contextMenu?.item.path} onClick={openContextLocation}>影片{contextMenu?.item.path ? '' : '（无文件路径）'}</MenuItem>, <MenuItem key="poster" disabled>海报（请在详情页图片资源中打开）</MenuItem>, <MenuItem key="preview" disabled>预览图（请在详情页图片资源中打开）</MenuItem>, <MenuItem key="thumb" disabled>缩略图（请在详情页图片资源中打开）</MenuItem>, <MenuItem key="screenshot" disabled>截图（尚无可定位资源）</MenuItem>, <MenuItem key="gif" disabled>GIF（尚无可定位资源）</MenuItem>]}
     </Menu>
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>

@@ -30,6 +30,7 @@ builder.Services.AddSingleton(new MetadataProviderSettingsService(databasePath))
 builder.Services.AddSingleton(new MetadataWriteService(databasePath));
 builder.Services.AddSingleton(new TaskLogService(databasePath));
 builder.Services.AddSingleton(new ImageAssetService(databasePath, imageRoot));
+builder.Services.AddSingleton(new ImageWorkflowService(databasePath, imageRoot));
 builder.Services.AddSingleton(new DataSafetyService(databasePath, configDatabasePath, imageRoot));
 builder.Services.AddSingleton<PlatformCommandService>();
 builder.Services.AddSingleton<ImageDownloadService>();
@@ -49,6 +50,12 @@ builder.Services.AddSingleton(serviceProvider => new ImageCacheTaskService(
     serviceProvider.GetRequiredService<ImageAssetService>(),
     serviceProvider.GetRequiredService<TaskLogService>()));
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<ImageCacheTaskService>());
+builder.Services.AddSingleton(serviceProvider => new ImageGenerationTaskService(
+    databasePath,
+    imageRoot,
+    serviceProvider.GetRequiredService<ImageWorkflowService>(),
+    serviceProvider.GetRequiredService<TaskLogService>()));
+builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<ImageGenerationTaskService>());
 builder.Services.AddSingleton(serviceProvider => new FileOrganizerService(
     databasePath, serviceProvider.GetRequiredService<TaskLogService>()));
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<FileOrganizerService>());
@@ -56,7 +63,8 @@ builder.Services.AddSingleton(serviceProvider => new TaskCommandService(database
     serviceProvider.GetRequiredService<LibraryWorkflowService>(),
     serviceProvider.GetRequiredService<MetadataSyncExecutor>(),
     serviceProvider.GetRequiredService<ImageCacheTaskService>(),
-    serviceProvider.GetRequiredService<FileOrganizerService>()));
+    serviceProvider.GetRequiredService<FileOrganizerService>(),
+    serviceProvider.GetRequiredService<ImageGenerationTaskService>()));
 
 var app = builder.Build();
 app.UseCors();
@@ -169,6 +177,18 @@ app.MapPost("/api/tasks/cleanup", async (TaskCleanupCommand command, TaskCommand
 app.MapPost("/api/tasks/batch/cancel-sync", async (IReadOnlyList<long> taskIds, TaskCommandService service) => Results.Ok(await service.CancelSyncBatchAsync(taskIds)));
 app.MapPost("/api/videos/{movieId:long}/sync", async (long movieId, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Manual")));
 app.MapPost("/api/videos/batch/sync", async (IReadOnlyList<long> movieIds, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueBatchAsync(movieIds)));
+app.MapPost("/api/videos/{movieId:long}/images/{imageType}/replace", async (long movieId, string imageType, ImageReplaceCommand command, ImageWorkflowService service, CancellationToken token) =>
+    Results.Ok(await service.ReplaceAsync(movieId, imageType, command.Path, token)));
+app.MapPost("/api/videos/{movieId:long}/images/{imageType}/generate", async (long movieId, string imageType, ImageGenerationTaskService service, CancellationToken token) =>
+    Results.Ok(await service.EnqueueAsync(movieId, imageType, token)));
+app.MapGet("/api/image-assets/{imageId:long}/delete-preview", async (long imageId, ImageWorkflowService service, CancellationToken token) =>
+    Results.Ok(await service.PreviewDeleteAsync(imageId, token)));
+app.MapPost("/api/image-assets/{imageId:long}/delete", async (long imageId, ImageDeleteCommand command, ImageWorkflowService service, CancellationToken token) =>
+    Results.Ok(await service.DeleteAsync(imageId, command.ConfirmationToken, token)));
+app.MapPost("/api/image-assets/{imageId:long}/reveal", async (long imageId, ImageWorkflowService service, PlatformCommandService platform, CancellationToken token) =>
+    Results.Ok(await service.RevealAsync(imageId, platform, token)));
+app.MapPost("/api/image-assets/{imageId:long}/open-directory", async (long imageId, ImageWorkflowService service, PlatformCommandService platform, CancellationToken token) =>
+    Results.Ok(await service.OpenDirectoryAsync(imageId, platform, token)));
 
 app.MapPost("/api/platform/open-directory", (PlatformPathCommand command, PlatformCommandService platform) =>
     Results.Ok(platform.OpenDirectory(command.Path)));

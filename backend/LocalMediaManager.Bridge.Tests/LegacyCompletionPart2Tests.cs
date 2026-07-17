@@ -28,7 +28,7 @@ public sealed class LegacyCompletionPart2Tests : IAsyncLifetime
         string at = DateTimeOffset.UtcNow.ToString("O");
         await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Progress,TotalItems,CompletedItems,CreatedAt,UpdatedAt) VALUES(1,'Sync','Completed',100,1,1,$at,$at),(2,'Scan','Failed',100,1,0,$at,$at),(3,'Organizer','Cancelled',20,2,1,$at,$at),(4,'Sync','Running',50,2,1,$at,$at)", ("$at", at));
         await Execute(connection, "INSERT INTO TaskLogs(TaskId,Level,Message,CreatedAt) VALUES(1,'Info','done',$at),(2,'Error','failed',$at),(4,'Info','running',$at)", ("$at", at));
-        var service = new TaskCommandService(Database, null!, null!, null!, null!);
+        var service = new TaskCommandService(Database, null!, null!, null!, null!, null!);
 
         TaskCleanupResult completed = await service.CleanupAsync("completed");
         Assert.Equal(1, completed.Count);

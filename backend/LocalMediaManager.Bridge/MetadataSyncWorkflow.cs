@@ -389,13 +389,15 @@ public sealed class MetadataSyncExecutor(
 }
 
 public sealed class TaskCommandService(string databasePath, LibraryWorkflowService libraries,
-    MetadataSyncExecutor sync, ImageCacheTaskService imageCache, FileOrganizerService organizer)
+    MetadataSyncExecutor sync, ImageCacheTaskService imageCache, FileOrganizerService organizer,
+    ImageGenerationTaskService imageGeneration)
 {
     private static readonly HashSet<string> TerminalStatuses = new(StringComparer.OrdinalIgnoreCase) { "Completed", "Failed", "Cancelled" };
-    public async Task<TaskMutationResult> PauseAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.PauseAsync(id), "ImageCacheRebuild"=>await imageCache.PauseAsync(id), "Organizer"=>await organizer.PauseAsync(id), _=>await libraries.PauseTaskAsync(id) };
-    public async Task<TaskMutationResult> ResumeAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.ResumeAsync(id), "ImageCacheRebuild"=>await imageCache.ResumeAsync(id), "Organizer"=>await organizer.ResumeAsync(id), _=>await libraries.ResumeTaskAsync(id) };
-    public async Task<TaskMutationResult> CancelAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.CancelAsync(id), "ImageCacheRebuild"=>await imageCache.CancelAsync(id), "Organizer"=>await organizer.CancelAsync(id), _=>await libraries.CancelTaskAsync(id) };
-    public async Task<object> RetryAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.RetryAsync(id), "ImageCacheRebuild"=>await imageCache.RetryAsync(id), "Organizer"=>await organizer.RetryAsync(id), _=>await libraries.RetryTaskAsync(id) };
+    private static bool IsImageGeneration(string type) => type is "Poster" or "Preview" or "Screenshot" or "GIF";
+    public async Task<TaskMutationResult> PauseAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.PauseAsync(id), "ImageCacheRebuild"=>await imageCache.PauseAsync(id), "Organizer"=>await organizer.PauseAsync(id), var type when IsImageGeneration(type)=>await imageGeneration.PauseAsync(id), _=>await libraries.PauseTaskAsync(id) };
+    public async Task<TaskMutationResult> ResumeAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.ResumeAsync(id), "ImageCacheRebuild"=>await imageCache.ResumeAsync(id), "Organizer"=>await organizer.ResumeAsync(id), var type when IsImageGeneration(type)=>await imageGeneration.ResumeAsync(id), _=>await libraries.ResumeTaskAsync(id) };
+    public async Task<TaskMutationResult> CancelAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.CancelAsync(id), "ImageCacheRebuild"=>await imageCache.CancelAsync(id), "Organizer"=>await organizer.CancelAsync(id), var type when IsImageGeneration(type)=>await imageGeneration.CancelAsync(id), _=>await libraries.CancelTaskAsync(id) };
+    public async Task<object> RetryAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.RetryAsync(id), "ImageCacheRebuild"=>await imageCache.RetryAsync(id), "Organizer"=>await organizer.RetryAsync(id), var type when IsImageGeneration(type)=>await imageGeneration.RetryAsync(id), _=>await libraries.RetryTaskAsync(id) };
     public async Task<TaskCleanupResult> DeleteAsync(long id)
     {
         TaskSnapshot task = await SnapshotAsync(id);

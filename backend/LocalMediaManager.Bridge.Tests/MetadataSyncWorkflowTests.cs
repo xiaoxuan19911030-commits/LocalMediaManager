@@ -144,7 +144,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
             string at = DateTimeOffset.UtcNow.ToString("O");
             await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Stage,Provider,Progress,TotalItems,CompletedItems,CreatedAt,UpdatedAt,CurrentMovieId) VALUES(10,'Sync','Pending','Pending','MetaTube',0,1,0,$at,$at,1),(11,'Sync','Running','FetchingMetadata','MetaTube',20,1,0,$at,$at,2),(12,'Scan','Running','Running',NULL,0,1,0,$at,$at,NULL)", ("$at", at));
         }
-        var service = new TaskCommandService(Database, null!, CreateExecutor(), null!, null!);
+        var service = new TaskCommandService(Database, null!, CreateExecutor(), null!, null!, null!);
 
         BatchTaskMutationResult result = await service.CancelSyncBatchAsync([10, 11, 11]);
         await Assert.ThrowsAsync<ArgumentException>(() => service.CancelSyncBatchAsync([12]));

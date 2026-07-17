@@ -136,6 +136,55 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
         Assert.True(File.Exists(portrait));
     }
 
+    [Fact]
+    public async Task LocalReplaceLocksImageAndDeleteUsesPreviewToken()
+    {
+        string source = Path.Combine(root, "local.png");
+        await File.WriteAllBytesAsync(source, CreatePng(64, 96, SKColors.DarkCyan));
+        await using (SqliteConnection connection = await Open()) {
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES(1,'IMG-001','Image',0,0,'pending','Test',$at,$at)", ("$at", at));
+        }
+        var service = new ImageWorkflowService(Database, ImageRoot);
+
+        ImageMutationResult replaced = await service.ReplaceAsync(1, "Poster", source);
+        await using SqliteConnection verifyReplace = await Open();
+        long imageId = await Scalar(verifyReplace, "SELECT Id FROM Images WHERE MovieId=1 AND ImageType='Poster'");
+        string? copied = await Text(verifyReplace, "SELECT FilePath FROM Images WHERE MovieId=1 AND ImageType='Poster'");
+        Assert.True(replaced.Changed);
+        Assert.Equal(1, await Scalar(verifyReplace, "SELECT IsLocked FROM Images WHERE Id=" + imageId));
+        Assert.True(File.Exists(copied));
+
+        ImageDeletePreview preview = await service.PreviewDeleteAsync(imageId);
+        ImageMutationResult deleted = await service.DeleteAsync(imageId, preview.ConfirmationToken);
+
+        await using SqliteConnection verifyDelete = await Open();
+        Assert.True(deleted.Changed);
+        Assert.Equal(0, await Scalar(verifyDelete, "SELECT COUNT(*) FROM Images WHERE Id=" + imageId));
+        Assert.False(File.Exists(copied));
+    }
+
+    [Fact]
+    public async Task ImageGenerationEnqueuesTaskCenterItem()
+    {
+        string video = Path.Combine(root, "movie.mp4");
+        await File.WriteAllBytesAsync(video, new byte[] { 0, 1, 2, 3, 4 });
+        await using (SqliteConnection connection = await Open()) {
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES(1,'GEN-001','Generate',0,0,'pending','Test',$at,$at)", ("$at", at));
+            await Execute(connection, "INSERT INTO MediaFiles(Id,MovieId,FilePath,NormalizedPath,FileName,Extension,MediaType,SourceType,FileSize,ExistsState,IsPrimary,CreatedAt,UpdatedAt) VALUES(1,1,$path,$path,'movie.mp4','.mp4','Video','Test',5,'Exists',1,$at,$at)", ("$path", video), ("$at", at));
+        }
+        var workflow = new ImageWorkflowService(Database, ImageRoot);
+        var generator = new ImageGenerationTaskService(Database, ImageRoot, workflow, new TaskLogService(Database));
+
+        ImageTaskLaunchResult launch = await generator.EnqueueAsync(1, "Screenshot");
+
+        Assert.Equal("Screenshot", launch.Type);
+        await using SqliteConnection verify = await Open();
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Tasks WHERE Id=" + launch.TaskId + " AND TaskType='Screenshot' AND Status='Pending'"));
+        Assert.True(await Scalar(verify, $"SELECT COUNT(*) FROM TaskLogs WHERE TaskId={launch.TaskId}") >= 1);
+    }
+
     public Task DisposeAsync() { try { Directory.Delete(root, true); } catch { } return Task.CompletedTask; }
     private async Task<SqliteConnection> Open() { var connection = new SqliteConnection($"Data Source={Database}"); await connection.OpenAsync(); return connection; }
     private static async Task Execute(SqliteConnection connection, string sql, params (string, object?)[] values) { await using var command=connection.CreateCommand();command.CommandText=sql;foreach((string name,object? value) in values)command.Parameters.AddWithValue(name,value??DBNull.Value);await command.ExecuteNonQueryAsync(); }

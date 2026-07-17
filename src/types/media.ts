@@ -314,6 +314,8 @@ export interface ImageCenterStatus {
   assets: ImageAssetStatus[]
 }
 export interface ImageMutationResult { changed: boolean; message: string }
+export interface ImageDeletePreview { imageId: number; type: string; fileName: string; path?: string; fileWillBeDeleted: boolean; confirmationToken: string; warnings: string[] }
+export interface ImageTaskLaunchResult { taskId: number; status: string; type: string; message: string }
 export interface ImageCachePreview {
   entries: number; existingEntries: number; missingEntries: number; bytes: number
   confirmationToken: string; warnings: string[]

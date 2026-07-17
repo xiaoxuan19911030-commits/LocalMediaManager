@@ -25,7 +25,7 @@ import { useLocation, useNavigate, useParams } from 'react-router'
 import { SurfaceSection } from '@/components/ProductComponents'
 import { SmartImage, clearImageMemoryCache } from '@/components/SmartImage'
 import { bridge } from '@/services/bridge'
-import type { ImageAsset, ImageCenterStatus, MovieDeletePreview, MovieDetail, NamedItem, NfoPreview, OrganizerPreview } from '@/types/media'
+import type { ImageAsset, ImageCenterStatus, ImageDeletePreview, MovieDeletePreview, MovieDetail, NamedItem, NfoPreview, OrganizerPreview } from '@/types/media'
 
 const formatDuration = (seconds: number) => {
   if (!seconds) return '时长未知'
@@ -35,6 +35,9 @@ const formatDuration = (seconds: number) => {
 const formatSize = (bytes: number) => bytes ? `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB` : '大小未知'
 const formatImageSize = (bytes: number) => bytes ? bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB` : '大小待校验'
 const date = (value?: string) => value?.slice(0, 10) || '未知'
+const imageTypes = ['Poster', 'Thumbnail', 'Fanart', 'Preview', 'Screenshot', 'GIF']
+const imageLabel = (type: string) => ({ Poster: '封面', Thumbnail: '缩略图', Fanart: '背景图', Preview: '预览图', Screenshot: '截图', GIF: 'GIF' }[type] ?? type)
+const imageStatusLabel = (status?: string) => status === 'Normal' ? '图片正常' : status === 'Failed' ? '读取失败' : '暂无图片'
 
 function Fact({ icon, label }: { icon: ReactNode; label: string }) {
   return <Box sx={{ display: 'flex', alignItems: 'center', gap: .75, color: 'text.secondary' }}><Box sx={{ display: 'flex', color: 'primary.main' }}>{icon}</Box><Typography variant="body2">{label}</Typography></Box>
@@ -64,6 +67,8 @@ export default function MovieDetailPage() {
   const [actorOptions, setActorOptions] = useState<NamedItem[]>([]); const [selectedActors, setSelectedActors] = useState<NamedItem[]>([]); const [actorSearch, setActorSearch] = useState('')
   const [imageAssets, setImageAssets] = useState<ImageAsset[]>([]); const [posterFailed, setPosterFailed] = useState(false)
   const [imageStatus, setImageStatus] = useState<ImageCenterStatus>(); const [viewer, setViewer] = useState<ImageAsset>(); const [zoom, setZoom] = useState(1)
+  const [replaceTarget, setReplaceTarget] = useState<ImageAsset>(); const [replacePath, setReplacePath] = useState('')
+  const [imageDeletePreview, setImageDeletePreview] = useState<ImageDeletePreview>()
   const [neighbors, setNeighbors] = useState<{ previousId?: number; nextId?: number }>({})
   const [deletePreview, setDeletePreview] = useState<MovieDeletePreview>()
   const [nfoPreview, setNfoPreview] = useState<NfoPreview>(); const [nfoMode, setNfoMode] = useState<'import' | 'export'>('export')
@@ -96,11 +101,30 @@ export default function MovieDetailPage() {
     if (!directory) { openMovieFolder(); return }
     bridge.openDirectory(directory).then((result) => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))
   }
-  const setImageLock = (asset: ImageAsset) => bridge.setImageLock(asset.id, !asset.locked).then(result => { setNotice(result.message); return movie ? bridge.movieImages(movie.id).then(setImageAssets) : undefined }).catch((reason: Error) => setNotice(reason.message))
+  const setImageLock = (asset: ImageAsset) => asset.id > 0 && bridge.setImageLock(asset.id, !asset.locked).then(result => { setNotice(result.message); return movie ? loadMovie(movie.id) : undefined }).catch((reason: Error) => setNotice(reason.message))
+  const openAssetDirectory = (asset: ImageAsset) => asset.id > 0 ? bridge.openImageDirectory(asset.id).then((result) => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message)) : setNotice('暂无图片目录')
+  const revealAsset = (asset: ImageAsset) => asset.id > 0 ? bridge.revealImage(asset.id).then((result) => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message)) : setNotice('暂无图片文件')
+  const generateImage = (type: string) => movie && bridge.generateMovieImage(movie.id, type).then((result) => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message))
+  const openReplace = (asset: ImageAsset) => { setReplaceTarget(asset); setReplacePath('') }
+  const confirmReplace = () => {
+    if (!movie || !replaceTarget) return
+    setBusy(true)
+    bridge.replaceMovieImage(movie.id, replaceTarget.type, replacePath).then((result) => { setNotice(result.message); setReplaceTarget(undefined); clearImageMemoryCache(); return loadMovie(movie.id) }).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false))
+  }
+  const previewDeleteImage = (asset: ImageAsset) => asset.id > 0 ? bridge.previewDeleteImage(asset.id).then(setImageDeletePreview).catch((reason: Error) => setNotice(reason.message)) : setNotice('暂无图片可删除')
+  const confirmDeleteImage = () => {
+    if (!movie || !imageDeletePreview) return
+    setBusy(true)
+    bridge.deleteImage(imageDeletePreview.imageId, imageDeletePreview.confirmationToken).then((result) => { setNotice(result.message); setImageDeletePreview(undefined); clearImageMemoryCache(); return loadMovie(movie.id) }).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false))
+  }
   const previewNfo = (mode: 'import' | 'export') => { if (!movie) return; setBusy(true); setNfoMode(mode); (mode === 'import' ? bridge.previewNfoImport(movie.id) : bridge.previewNfoExport(movie.id)).then(setNfoPreview).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false)) }
   const confirmNfo = (separateWhenLocked = false) => { if (!movie || !nfoPreview) return; setBusy(true); const action = nfoMode === 'import' ? bridge.importNfo(movie.id, nfoPreview.confirmationToken) : bridge.exportNfo(movie.id, nfoPreview.confirmationToken, separateWhenLocked); action.then(result => { setNfoPreview(undefined); setNotice(result.message); return loadMovie(movie.id) }).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false)) }
   const dryRunOrganizer = () => { if (!movie) return; setBusy(true); bridge.organizerDryRun([movie.id], organizerTemplate, organizerDestination).then(setOrganizerPreview).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false)) }
   const executeOrganizer = () => { if (!organizerPreview) return; setBusy(true); bridge.executeOrganizer(organizerPreview.taskId, organizerPreview.confirmationToken).then(result => { setOrganizerOpen(false); setOrganizerPreview(undefined); setNotice(`${result.message} 可在任务中心查看进度。`) }).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false)) }
+  const imageResources = imageTypes.map((type) => imageAssets.find((asset) => asset.type === type) ?? {
+    id: 0, type, ownership: 'Missing', locked: false, derived: false, primary: false, validationStatus: 'Missing',
+    width: 0, height: 0, fileSize: 0,
+  } satisfies ImageAsset)
 
   return <Box sx={{ '@keyframes detailIn': { from: { opacity: 0, transform: 'translateY(10px)' }, to: { opacity: 1, transform: 'translateY(0)' } } }}>
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: 2 }}>
@@ -162,7 +186,7 @@ export default function MovieDetailPage() {
             </Box>
             {movie.description && <><Divider sx={{ my: 2.25 }}/><Typography variant="subtitle2" sx={{ fontWeight: 800, mb: .75 }}>内容简介</Typography><Typography color="text.secondary" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.85 }}>{movie.description}</Typography></>}
           </SurfaceSection>
-          <SurfaceSection title="图片资源" description="源图按需读取；锁定的用户图片不会被同步或缓存重建覆盖">
+          <SurfaceSection title="图片资源" description="封面、缩略图、背景图、预览图、截图和 GIF 使用同一套查看、生成、替换、删除与缓存刷新工作流">
             <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', mb: 1.5 }}>
               <Chip size="small" color={imageStatus?.missingImages || imageStatus?.failedImages ? 'warning' : 'success'} label={`正常 ${imageStatus?.normalImages ?? 0} / ${imageStatus?.totalImages ?? 0}`}/>
               {Boolean(imageStatus?.invalidCacheEntries) && <Chip size="small" color="warning" label={`缓存失效 ${imageStatus?.invalidCacheEntries}`}/>}
@@ -171,17 +195,26 @@ export default function MovieDetailPage() {
               <Button size="small" startIcon={<FolderRoundedIcon/>} onClick={openImageFolder}>打开图片目录</Button>
               <Button size="small" startIcon={<SyncRoundedIcon/>} onClick={syncMetadata}>重新下载图片</Button>
             </Stack>
-            {imageAssets.length ? <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2,minmax(0,1fr))', sm: 'repeat(3,minmax(0,1fr))' }, gap: 1.5 }}>
-              {imageAssets.map(asset => { const status = imageStatus?.assets.find(item => item.id === asset.id); return <Card key={asset.id} variant="outlined" sx={{ overflow: 'hidden' }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(1,minmax(0,1fr))', sm: 'repeat(2,minmax(0,1fr))', xl: 'repeat(3,minmax(0,1fr))' }, gap: 1.5 }}>
+              {imageResources.map(asset => { const status = imageStatus?.assets.find(item => item.id === asset.id || item.type === asset.type); const available = asset.id > 0 && Boolean(asset.url); return <Card key={`${asset.type}-${asset.id}`} variant="outlined" sx={{ overflow: 'hidden' }}>
                 <Box sx={{ aspectRatio: '3/2', bgcolor: 'action.hover', display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
-                  {asset.url ? <Box onClick={() => { setViewer(asset); setZoom(1) }} sx={{ width: '100%', height: '100%', cursor: 'zoom-in' }}><SmartImage src={asset.url} alt={asset.type}/></Box> : <Typography variant="caption" color="text.disabled">图片不可用</Typography>}
+                  {available ? <Box onClick={() => { setViewer(asset); setZoom(1) }} sx={{ width: '100%', height: '100%', cursor: 'zoom-in' }}><SmartImage src={asset.url} alt={asset.type}/></Box> : <Typography variant="body2" color="text.disabled">暂无图片</Typography>}
                 </Box>
-                <Box sx={{ p: 1.25 }}><Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}><Chip size="small" label={asset.type}/>{asset.primary && <Chip size="small" color="primary" label="主图"/>}{asset.locked && <Chip size="small" color="warning" label="用户锁定"/>}<Chip size="small" color={status?.status === 'Normal' ? 'success' : status?.status === 'Missing' ? 'warning' : 'error'} label={status?.status === 'Normal' ? '图片正常' : status?.status === 'Missing' ? '图片缺失' : '读取失败'}/></Stack>
+                <Box sx={{ p: 1.25 }}><Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}><Chip size="small" label={imageLabel(asset.type)}/>{asset.primary && <Chip size="small" color="primary" label="主图"/>}{asset.locked && <Chip size="small" color="warning" label="用户锁定"/>}<Chip size="small" color={status?.status === 'Normal' ? 'success' : status?.status === 'Failed' ? 'error' : 'warning'} label={imageStatusLabel(status?.status)}/></Stack>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: .75 }}>{asset.width && asset.height ? `${asset.width}×${asset.height}` : '尺寸待校验'} · {formatImageSize(asset.fileSize)}</Typography>
-                  <Button size="small" color={asset.locked ? 'warning' : 'inherit'} startIcon={asset.locked ? <LockOpenRoundedIcon/> : <LockRoundedIcon/>} onClick={() => void setImageLock(asset)} sx={{ mt: .5 }}>{asset.locked ? '解除锁定' : '锁定图片'}</Button>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: .25 }}>来源：{asset.provider || asset.ownership || '本地'} · 更新：{date(asset.downloadedAt)}</Typography>
+                  <Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap', mt: 1 }}>
+                    <Button size="small" disabled={!available} onClick={() => { setViewer(asset); setZoom(1) }}>查看</Button>
+                    <Button size="small" disabled={asset.id <= 0} onClick={() => openAssetDirectory(asset)}>目录</Button>
+                    <Button size="small" disabled={asset.id <= 0} onClick={() => revealAsset(asset)}>文件</Button>
+                    <Button size="small" onClick={() => generateImage(asset.type)}>重新生成</Button>
+                    <Button size="small" onClick={() => openReplace(asset)}>替换</Button>
+                    <Button size="small" disabled={asset.id <= 0} color={asset.locked ? 'warning' : 'inherit'} startIcon={asset.locked ? <LockOpenRoundedIcon/> : <LockRoundedIcon/>} onClick={() => void setImageLock(asset)}>{asset.locked ? '解锁' : '锁定'}</Button>
+                    <Button size="small" disabled={asset.id <= 0} color="error" onClick={() => previewDeleteImage(asset)}>删除</Button>
+                  </Stack>
                 </Box>
               </Card>})}
-            </Box> : <Typography variant="body2" color="text.secondary">暂无已登记图片资源；缺失图片不会显示损坏图标。</Typography>}
+            </Box>
           </SurfaceSection>
         </Stack>
         <SurfaceSection title="媒体文件" description={`${movie.mediaFiles.length} 个关联文件`}>
@@ -217,6 +250,19 @@ export default function MovieDetailPage() {
     <Dialog open={Boolean(deletePreview)} onClose={() => setDeletePreview(undefined)} maxWidth="sm" fullWidth><DialogTitle>从资料库移除影片？</DialogTitle><DialogContent><DialogContentText>将移除“{deletePreview?.code}”的数据库记录，但不会删除媒体文件。{deletePreview?.ratingWillBeRemembered ? '当前评分会按文件名记忆，重新导入同名文件时可恢复。' : '当前没有需要记忆的评分。'}</DialogContentText><Alert severity="warning" sx={{ mt: 2 }}>{deletePreview?.warnings.join(' ')}</Alert></DialogContent><DialogActions><Button onClick={() => setDeletePreview(undefined)}>取消</Button><Button variant="contained" color="error" onClick={confirmDelete}>确认移除记录</Button></DialogActions></Dialog>
     <Dialog open={Boolean(nfoPreview)} onClose={() => setNfoPreview(undefined)} maxWidth="sm" fullWidth><DialogTitle>{nfoMode === 'import' ? '导入 NFO 预览' : '导出 NFO 预览'}</DialogTitle><DialogContent><DialogContentText sx={{ overflowWrap: 'anywhere' }}>{nfoPreview?.path}</DialogContentText>{nfoPreview?.changes.length ? <Alert severity="info" sx={{ mt: 2 }}>将处理：{nfoPreview.changes.join('、')}</Alert> : null}{nfoPreview?.conflicts.length ? <Alert severity="warning" sx={{ mt: 1 }}>冲突字段保持原值：{nfoPreview.conflicts.join('、')}</Alert> : null}{nfoPreview?.warnings.map((warning) => <Alert key={warning} severity="warning" sx={{ mt: 1 }}>{warning}</Alert>)}</DialogContent><DialogActions><Button onClick={() => setNfoPreview(undefined)}>取消</Button>{nfoMode === 'export' && nfoPreview && !nfoPreview.canApply && <Button variant="outlined" onClick={() => confirmNfo(true)}>另存为 .lmm.nfo</Button>}<Button variant="contained" disabled={busy || Boolean(nfoPreview && !nfoPreview.canApply)} onClick={() => confirmNfo()}>{nfoMode === 'import' ? '确认导入' : '确认导出'}</Button></DialogActions></Dialog>
     <Dialog open={organizerOpen} onClose={() => !busy && setOrganizerOpen(false)} maxWidth="md" fullWidth><DialogTitle>整理文件</DialogTitle><DialogContent><Stack spacing={2} sx={{ mt: 1 }}><TextField label="文件名模板" value={organizerTemplate} onChange={event => { setOrganizerTemplate(event.target.value); setOrganizerPreview(undefined) }} helperText="支持 {Code}、{Title}、{Year}、{Actors}"/><TextField label="目标目录" value={organizerDestination} onChange={event => { setOrganizerDestination(event.target.value); setOrganizerPreview(undefined) }} helperText="留空时只在原目录重命名；不会覆盖任何已有目标。"/>{organizerPreview && <><Alert severity={organizerPreview.conflictItems ? 'error' : 'success'}>Dry Run：{organizerPreview.validItems} 项可执行，{organizerPreview.conflictItems} 项冲突。尚未修改文件。</Alert>{organizerPreview.items.map(item => <Paper key={item.mediaFileId} variant="outlined" sx={{ p: 1.5 }}><Typography variant="caption" color="text.secondary">原路径</Typography><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{item.sourcePath}</Typography><Typography variant="caption" color="text.secondary">目标路径</Typography><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{item.destinationPath}</Typography>{item.conflict && <Alert severity="error" sx={{ mt: 1 }}>{item.conflict}</Alert>}</Paper>)}</>}</Stack></DialogContent><DialogActions><Button onClick={() => setOrganizerOpen(false)}>取消</Button><Button variant="outlined" disabled={busy} onClick={dryRunOrganizer}>Dry Run</Button><Button variant="contained" disabled={busy || !organizerPreview || organizerPreview.conflictItems > 0} onClick={executeOrganizer}>确认并进入任务</Button></DialogActions></Dialog>
+    <Dialog open={Boolean(replaceTarget)} onClose={() => !busy && setReplaceTarget(undefined)} maxWidth="sm" fullWidth>
+      <DialogTitle>替换{replaceTarget ? imageLabel(replaceTarget.type) : '图片'}</DialogTitle>
+      <DialogContent>
+        <DialogContentText>请输入本地图片完整路径。Bridge 会校验图片、复制到受控图片目录、锁定该图片并刷新缓存。</DialogContentText>
+        <TextField autoFocus fullWidth margin="normal" label="本地图片路径" value={replacePath} onChange={(event) => setReplacePath(event.target.value)} placeholder="D:\Images\cover.jpg"/>
+      </DialogContent>
+      <DialogActions><Button onClick={() => setReplaceTarget(undefined)} disabled={busy}>取消</Button><Button variant="contained" disabled={busy || !replacePath.trim()} onClick={confirmReplace}>确认替换</Button></DialogActions>
+    </Dialog>
+    <Dialog open={Boolean(imageDeletePreview)} onClose={() => !busy && setImageDeletePreview(undefined)} maxWidth="sm" fullWidth>
+      <DialogTitle>删除{imageDeletePreview ? imageLabel(imageDeletePreview.type) : '图片'}？</DialogTitle>
+      <DialogContent><DialogContentText sx={{ overflowWrap: 'anywhere' }}>{imageDeletePreview?.path || imageDeletePreview?.fileName}</DialogContentText>{imageDeletePreview?.warnings.map((warning) => <Alert key={warning} severity="warning" sx={{ mt: 1 }}>{warning}</Alert>)}</DialogContent>
+      <DialogActions><Button onClick={() => setImageDeletePreview(undefined)} disabled={busy}>取消</Button><Button variant="contained" color="error" disabled={busy} onClick={confirmDeleteImage}>确认删除</Button></DialogActions>
+    </Dialog>
     <Dialog open={Boolean(viewer)} onClose={() => setViewer(undefined)} maxWidth="lg" fullWidth>
       <DialogTitle>{viewer?.type}</DialogTitle>
       <DialogContent onWheel={event => { event.preventDefault(); setZoom(value => Math.max(.4, Math.min(4, value + (event.deltaY < 0 ? .15 : -.15)))) }} sx={{ height: '72vh', display: 'grid', placeItems: 'center', overflow: 'auto', bgcolor: 'background.default' }}>
