@@ -30,7 +30,7 @@ const categories = [
 
 type Category = (typeof categories)[number][0]
 type LeaveAction = 'save' | 'discard'
-type LeavePromptMode = 'route' | 'window'
+type LeaveIntent = 'none' | 'route' | 'window'
 const planned = ['计划支持']
 const size = (bytes?: number) => bytes ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : '0 MB'
 const stable = (value: unknown) => JSON.stringify(value)
@@ -59,12 +59,9 @@ export default function SettingsPage() {
   const [confirm, setConfirm] = useState<'backup' | 'cache' | 'restore' | 'thumbs' | 'logs'>()
   const [restoreDefaultsOpen, setRestoreDefaultsOpen] = useState(false)
   const [leavePromptOpen, setLeavePromptOpen] = useState(false)
-  const [leavePromptMode, setLeavePromptMode] = useState<LeavePromptMode>('route')
-  const [pendingWindowClose, setPendingWindowClose] = useState(false)
   const allowWindowCloseRef = useRef(false)
   const hasUnsavedChangesRef = useRef(false)
-  const pendingWindowCloseRef = useRef(false)
-  const leavePromptModeRef = useRef<LeavePromptMode>('route')
+  const leaveIntentRef = useRef<LeaveIntent>('none')
 
   const hasUnsavedChanges = Boolean(original && draft && stable(original) !== stable(draft))
   const blocker = useBlocker(hasUnsavedChanges)
@@ -86,9 +83,8 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (blocker.state === 'blocked') {
-      if (pendingWindowCloseRef.current) return
-      leavePromptModeRef.current = 'route'
-      setLeavePromptMode('route')
+      if (leaveIntentRef.current === 'window') return
+      leaveIntentRef.current = 'route'
       setLeavePromptOpen(true)
     }
   }, [blocker.state])
@@ -106,13 +102,13 @@ export default function SettingsPage() {
   useEffect(() => {
     let unlisten: (() => void) | undefined
     getCurrentWindow().onCloseRequested(async (event) => {
-      if (allowWindowCloseRef.current) return
+      if (allowWindowCloseRef.current) {
+        allowWindowCloseRef.current = false
+        return
+      }
       if (!hasUnsavedChangesRef.current) return
       event.preventDefault()
-      pendingWindowCloseRef.current = true
-      leavePromptModeRef.current = 'window'
-      setLeavePromptMode('window')
-      setPendingWindowClose(true)
+      leaveIntentRef.current = 'window'
       setLeavePromptOpen(true)
     }).then((dispose) => { unlisten = dispose }).catch(() => undefined)
     return () => { unlisten?.() }
@@ -177,26 +173,30 @@ export default function SettingsPage() {
 
   const closeLeavePrompt = () => {
     setLeavePromptOpen(false)
-    setPendingWindowClose(false)
-    pendingWindowCloseRef.current = false
-    leavePromptModeRef.current = 'route'
-    setLeavePromptMode('route')
+    allowWindowCloseRef.current = false
+    leaveIntentRef.current = 'none'
     if (blocker.state === 'blocked') blocker.reset()
   }
   const finishLeave = async (action: LeaveAction) => {
-    if (action === 'save' && !await saveAll()) return
+    const intent = leaveIntentRef.current
+    if (action === 'save' && !await saveAll()) {
+      if (blocker.state === 'blocked') blocker.reset()
+      leaveIntentRef.current = 'none'
+      setLeavePromptOpen(false)
+      return
+    }
     if (action === 'discard' && original) {
       setDraft(clone(original))
       setMode(original.appearance.themeMode)
     }
     setLeavePromptOpen(false)
-    if (leavePromptModeRef.current === 'window' || pendingWindowCloseRef.current || pendingWindowClose || leavePromptMode === 'window' || blocker.state !== 'blocked') {
-      pendingWindowCloseRef.current = false
-      setPendingWindowClose(false)
+    if (intent === 'window') {
+      leaveIntentRef.current = 'none'
       allowWindowCloseRef.current = true
-      await getCurrentWindow().destroy()
+      await getCurrentWindow().close()
       return
     }
+    leaveIntentRef.current = 'none'
     if (blocker.state === 'blocked') blocker.proceed()
   }
 

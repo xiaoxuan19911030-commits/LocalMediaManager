@@ -5,11 +5,27 @@ import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOve
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
 
 let tokenPromise: Promise<string> | undefined
-const sessionToken = () => tokenPromise ??= invoke<string>('bridge_session_token').catch(() => import.meta.env.VITE_LMM_BRIDGE_TOKEN || '')
+const sessionToken = (refresh = false) => {
+  if (refresh) tokenPromise = undefined
+  return tokenPromise ??= invoke<string>('bridge_session_token').catch(() => import.meta.env.VITE_LMM_BRIDGE_TOKEN || '')
+}
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+function parseBridgeError(body: string, status: number) {
+  try {
+    const parsed = JSON.parse(body) as { code?: string; message?: string }
+    return {
+      code: parsed.code,
+      message: parsed.message || body || `Bridge request failed (${status})`,
+    }
+  } catch {
+    return { message: body || `Bridge request failed (${status})` }
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit, retrySession = true): Promise<T> {
   const headers = new Headers(init?.headers)
-  if (init?.method && init.method !== 'GET') {
+  const method = (init?.method ?? 'GET').toUpperCase()
+  if (method !== 'GET') {
     const token = await sessionToken()
     if (token) headers.set('X-LMM-Session', token)
   }
@@ -17,8 +33,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BRIDGE_ORIGIN}${path}`, { ...init, headers })
   if (!response.ok) {
     const body = await response.text()
-    try { throw new Error((JSON.parse(body) as { message?: string }).message || body) }
-    catch (error) { if (error instanceof SyntaxError) throw new Error(body || `Bridge request failed (${response.status})`); throw error }
+    const error = parseBridgeError(body, response.status)
+    if (response.status === 401 && retrySession && method !== 'GET' && error.code === 'INVALID_SESSION') {
+      console.warn('[bridge] Session token was rejected; refreshing once and retrying.', { path, method, status: response.status })
+      await sessionToken(true)
+      return request<T>(path, init, false)
+    }
+    if (response.status === 401 && error.code === 'INVALID_SESSION') {
+      throw new Error('本地服务会话已失效，设置没有保存。请关闭残留的 Local Media Manager 进程后重新打开。')
+    }
+    throw new Error(error.message)
   }
   return response.json() as Promise<T>
 }
