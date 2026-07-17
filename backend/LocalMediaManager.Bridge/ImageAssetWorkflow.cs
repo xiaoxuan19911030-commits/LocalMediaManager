@@ -9,9 +9,12 @@ public sealed record ImageValidationResult(bool Valid, string Status, string? Co
     long FileSize, string? Sha256, string? Error);
 
 public sealed record ImageAssetDto(long Id, string Type, string? Url, string Ownership, bool Locked, bool Derived,
-    bool Primary, string ValidationStatus, int Width, int Height, long FileSize, string? Provider, string? DownloadedAt);
+    bool Primary, string ValidationStatus, int Width, int Height, long FileSize, string? Provider, string? DownloadedAt, string? Directory);
 
 public sealed record ImageAssetContent(string Path, string ContentType);
+public sealed record ImageAssetStatusDto(long Id, string Type, string Status, string CacheStatus, string? Url, string? Message);
+public sealed record ImageCenterStatusDto(long MovieId, long TotalImages, long NormalImages, long MissingImages,
+    long InvalidCacheEntries, long FailedImages, IReadOnlyList<ImageAssetStatusDto> Assets);
 public sealed record ImageLockCommand(bool Locked);
 public sealed record ImageMutationResult(bool Changed, string Message);
 public sealed record ImageCachePreview(long Entries, long ExistingEntries, long MissingEntries, long Bytes,
@@ -82,6 +85,7 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
         command.CommandText = """
             SELECT Id,ImageType,Ownership,IsLocked,IsDerived,IsPrimary,ValidationStatus,
                    COALESCE(Width,0),COALESCE(Height,0),COALESCE(FileSize,0),SourceProvider,DownloadedAt
+                   ,FilePath
               FROM Images WHERE MovieId=$movie ORDER BY IsLocked DESC,IsPrimary DESC,Id
             """;
         command.Parameters.AddWithValue("$movie", movieId);
@@ -92,9 +96,50 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
             items.Add(new(id, reader.GetString(1), $"{bridgeUrl}/api/image-assets/{id}/content",
                 reader.GetString(2), reader.GetInt64(3) == 1, reader.GetInt64(4) == 1, reader.GetInt64(5) == 1,
                 reader.GetString(6), reader.GetInt32(7), reader.GetInt32(8), reader.GetInt64(9),
-                reader.IsDBNull(10) ? null : reader.GetString(10), reader.IsDBNull(11) ? null : reader.GetString(11)));
+                reader.IsDBNull(10) ? null : reader.GetString(10), reader.IsDBNull(11) ? null : reader.GetString(11),
+                reader.IsDBNull(12) ? null : Path.GetDirectoryName(reader.GetString(12))));
         }
         return items;
+    }
+
+    public async Task<ImageCenterStatusDto> ReadMovieStatusAsync(long movieId, string bridgeUrl,
+        CancellationToken cancellationToken = default)
+    {
+        await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadOnly, cancellationToken);
+        var assets = new List<ImageAssetStatusDto>();
+        await using (SqliteCommand command = connection.CreateCommand()) {
+            command.CommandText = """
+                SELECT Id,ImageType,FilePath,ValidationStatus
+                  FROM Images WHERE MovieId=$movie ORDER BY IsLocked DESC,IsPrimary DESC,Id
+                """;
+            command.Parameters.AddWithValue("$movie", movieId);
+            await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken)) {
+                long id = reader.GetInt64(0);
+                string type = reader.GetString(1);
+                string? path = reader.IsDBNull(2) ? null : reader.GetString(2);
+                string validation = reader.GetString(3);
+                bool exists = !string.IsNullOrWhiteSpace(path) && File.Exists(path);
+                string status = !exists ? "Missing" : validation is "Corrupt" or "Unsupported" ? "Failed" : "Normal";
+                assets.Add(new(id, type, status, "Unknown", $"{bridgeUrl}/api/image-assets/{id}/content",
+                    status == "Normal" ? null : exists ? validation : "图片文件缺失"));
+            }
+        }
+        long invalidCache = 0;
+        await using (SqliteCommand cache = connection.CreateCommand()) {
+            cache.CommandText = "SELECT CachePath FROM ImageCacheEntries WHERE MovieId=$movie";
+            cache.Parameters.AddWithValue("$movie", movieId);
+            await using SqliteDataReader reader = await cache.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken)) {
+                string path = reader.GetString(0);
+                if (!IsInsideCache(path) || !File.Exists(path)) invalidCache++;
+            }
+        }
+        string cacheStatus = invalidCache > 0 ? "Invalid" : "Valid";
+        assets = assets.Select(item => item with { CacheStatus = item.Type is "Poster" or "Thumbnail" or "GeneratedCard" ? cacheStatus : "NotCached" }).ToList();
+        return new(movieId, assets.Count, assets.LongCount(item => item.Status == "Normal"),
+            assets.LongCount(item => item.Status == "Missing"), invalidCache,
+            assets.LongCount(item => item.Status == "Failed"), assets);
     }
 
     public async Task<ImageAssetContent?> ResolveMovieAsync(long movieId, string variant,
@@ -297,7 +342,7 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
                CASE WHEN $variant='thumbnail' THEN
                  CASE ImageType WHEN 'Thumbnail' THEN 0 WHEN 'GeneratedCard' THEN 1 WHEN 'Poster' THEN 2 WHEN 'Fanart' THEN 3 ELSE 9 END
                ELSE
-                 CASE ImageType WHEN 'Poster' THEN 0 WHEN 'Fanart' THEN 1 WHEN 'BigPic' THEN 2 WHEN 'GeneratedCard' THEN 3 ELSE 9 END
+                 CASE ImageType WHEN 'BigPic' THEN 0 WHEN 'Fanart' THEN 1 WHEN 'Poster' THEN 2 WHEN 'GeneratedCard' THEN 3 ELSE 9 END
                END, Id LIMIT 1
             """;
         command.Parameters.AddWithValue("$movie", movieId); command.Parameters.AddWithValue("$variant", variant);

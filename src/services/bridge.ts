@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateResults, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageMutationResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, ScanLaunchResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
+import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateResults, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageMutationResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, ScanLaunchResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
 import type { MetaTubeSettings, NfoSettings, PlaybackSettings, ProviderConnectionResult, SettingsSnapshot } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
@@ -40,6 +40,7 @@ export const bridge = {
   savePlaybackSettings: (value: PlaybackSettings) => request<PlaybackSettings>('/api/settings/playback', { method: 'PUT', body: JSON.stringify(value) }),
   movie: (id: number) => request<MovieDetail>(`/api/videos/${id}`),
   movieImages: (id: number) => request<ImageAsset[]>(`/api/videos/${id}/images`),
+  movieImageStatus: (id: number) => request<ImageCenterStatus>(`/api/videos/${id}/images/status`),
   setImageLock: (imageId: number, locked: boolean) => request<ImageMutationResult>(`/api/image-assets/${imageId}/lock`, { method: 'PUT', body: JSON.stringify({ locked }) }),
   imageCachePreview: () => request<ImageCachePreview>('/api/images/cache/cleanup-preview'),
   cleanupImageCache: (confirmationToken: string) => request<ImageCacheCleanupResult>('/api/images/cache/cleanup', { method: 'POST', body: JSON.stringify({ confirmationToken }) }),

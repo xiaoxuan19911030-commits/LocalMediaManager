@@ -274,6 +274,8 @@ app.MapGet("/api/images/{movieId:long}/primary", async (long movieId, string? va
 
 app.MapGet("/api/videos/{movieId:long}/images", async (long movieId, ImageAssetService images, CancellationToken token) =>
     Results.Ok(await images.ReadMovieAssetsAsync(movieId, bridgeUrl, token)));
+app.MapGet("/api/videos/{movieId:long}/images/status", async (long movieId, ImageAssetService images, CancellationToken token) =>
+    Results.Ok(await images.ReadMovieStatusAsync(movieId, bridgeUrl, token)));
 
 app.MapGet("/api/image-assets/{imageId:long}/content", async (long imageId, ImageAssetService images, CancellationToken token) => {
     ImageAssetContent? content = await images.ResolveAssetAsync(imageId, token);

@@ -14,14 +14,18 @@ import VisibilityRoundedIcon from '@mui/icons-material/VisibilityRounded'
 import SyncRoundedIcon from '@mui/icons-material/SyncRounded'
 import LockRoundedIcon from '@mui/icons-material/LockRounded'
 import LockOpenRoundedIcon from '@mui/icons-material/LockOpenRounded'
+import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
+import ZoomInRoundedIcon from '@mui/icons-material/ZoomInRounded'
+import ZoomOutRoundedIcon from '@mui/icons-material/ZoomOutRounded'
 import { Alert, Autocomplete, Box, Button, Card, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Divider, IconButton, Paper, Rating, Snackbar, Stack, TextField, Tooltip, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router'
 import { SurfaceSection } from '@/components/ProductComponents'
+import { SmartImage, clearImageMemoryCache } from '@/components/SmartImage'
 import { bridge } from '@/services/bridge'
-import type { ImageAsset, MovieDeletePreview, MovieDetail, NamedItem, NfoPreview, OrganizerPreview } from '@/types/media'
+import type { ImageAsset, ImageCenterStatus, MovieDeletePreview, MovieDetail, NamedItem, NfoPreview, OrganizerPreview } from '@/types/media'
 
 const formatDuration = (seconds: number) => {
   if (!seconds) return '时长未知'
@@ -59,12 +63,13 @@ export default function MovieDetailPage() {
   const [tagSearch, setTagSearch] = useState('')
   const [actorOptions, setActorOptions] = useState<NamedItem[]>([]); const [selectedActors, setSelectedActors] = useState<NamedItem[]>([]); const [actorSearch, setActorSearch] = useState('')
   const [imageAssets, setImageAssets] = useState<ImageAsset[]>([]); const [posterFailed, setPosterFailed] = useState(false)
+  const [imageStatus, setImageStatus] = useState<ImageCenterStatus>(); const [viewer, setViewer] = useState<ImageAsset>(); const [zoom, setZoom] = useState(1)
   const [neighbors, setNeighbors] = useState<{ previousId?: number; nextId?: number }>({})
   const [deletePreview, setDeletePreview] = useState<MovieDeletePreview>()
   const [nfoPreview, setNfoPreview] = useState<NfoPreview>(); const [nfoMode, setNfoMode] = useState<'import' | 'export'>('export')
   const [organizerOpen, setOrganizerOpen] = useState(false); const [organizerPreview, setOrganizerPreview] = useState<OrganizerPreview>(); const [organizerTemplate, setOrganizerTemplate] = useState('{Code}'); const [organizerDestination, setOrganizerDestination] = useState('')
   const context = (location.state as { context?: { search?: string; sort?: string } } | null)?.context
-  const loadMovie = (movieId: number) => Promise.all([bridge.movie(movieId).then(setMovie), bridge.movieImages(movieId).then(setImageAssets)])
+  const loadMovie = (movieId: number) => Promise.all([bridge.movie(movieId).then(setMovie), bridge.movieImages(movieId).then(setImageAssets), bridge.movieImageStatus(movieId).then(setImageStatus)])
   useEffect(() => { const movieId = Number(id); if (!Number.isFinite(movieId)) { setError('无效影片编号'); return }
     setMovie(undefined); setImageAssets([]); setPosterFailed(false); setError(''); loadMovie(movieId).catch((reason: Error) => setError(reason.message)); bridge.neighbors(movieId, context?.search, context?.sort).then(setNeighbors).catch(() => setNeighbors({})) }, [id])
   useEffect(() => { if (!actorDialog) return; const timer = window.setTimeout(() => bridge.entities('actors', actorSearch, 'name', 48, 0).then((result) => setActorOptions([...selectedActors, ...result.items.filter((item) => !selectedActors.some((selected) => selected.id === item.id))])).catch((reason: Error) => setNotice(reason.message)), 200); return () => window.clearTimeout(timer) }, [actorDialog, actorSearch, selectedActors])
@@ -78,6 +83,8 @@ export default function MovieDetailPage() {
   const previewDelete = () => movie && bridge.previewDeleteMovie(movie.id).then(setDeletePreview).catch((reason: Error) => setNotice(reason.message))
   const confirmDelete = () => deletePreview && bridge.deleteMovie(deletePreview.movieId, deletePreview.confirmationToken).then((result) => { setDeletePreview(undefined); navigate('/media', { replace: true }); window.setTimeout(() => setNotice(result.message), 0) }).catch((reason: Error) => setNotice(reason.message))
   const syncMetadata = () => movie && bridge.syncMovie(movie.id).then(result => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message))
+  const refreshImages = () => { clearImageMemoryCache(); if (movie) loadMovie(movie.id).then(() => setNotice('图片状态已刷新')).catch((reason: Error) => setNotice(reason.message)) }
+  const rebuildCache = () => bridge.rebuildImageCache().then(result => setNotice(`${result.message}（${result.totalItems} 部影片）`)).catch((reason: Error) => setNotice(reason.message))
   const refreshStatus = () => movie && loadMovie(movie.id).then(() => setNotice('状态已刷新')).catch((reason: Error) => setNotice(reason.message))
   const openMovieFolder = () => {
     const path = movie?.mediaFiles[0]?.path
@@ -85,6 +92,12 @@ export default function MovieDetailPage() {
     const directory = path.replace(/[\\/][^\\/]*$/, '')
     window.open(`file:///${directory.replaceAll('\\', '/')}`)
     setNotice(`正在打开目录：${directory}`)
+  }
+  const openImageFolder = () => {
+    const directory = imageAssets.find(asset => asset.directory)?.directory
+    if (!directory) { openMovieFolder(); return }
+    window.open(`file:///${directory.replaceAll('\\', '/')}`)
+    setNotice(`正在打开图片目录：${directory}`)
   }
   const setImageLock = (asset: ImageAsset) => bridge.setImageLock(asset.id, !asset.locked).then(result => { setNotice(result.message); return movie ? bridge.movieImages(movie.id).then(setImageAssets) : undefined }).catch((reason: Error) => setNotice(reason.message))
   const previewNfo = (mode: 'import' | 'export') => { if (!movie) return; setBusy(true); setNfoMode(mode); (mode === 'import' ? bridge.previewNfoImport(movie.id) : bridge.previewNfoExport(movie.id)).then(setNfoPreview).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false)) }
@@ -104,7 +117,7 @@ export default function MovieDetailPage() {
         <Box sx={{ position: 'relative', display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '230px minmax(0,1fr)', lg: '290px minmax(0,1fr)' }, gap: { xs: 2, md: 3 } }}>
           <Card sx={{ overflow: 'hidden', width: '100%', maxWidth: { xs: 260, sm: 'none' }, mx: { xs: 'auto', sm: 0 }, alignSelf: 'start', boxShadow: (theme) => `0 18px 42px ${alpha(theme.palette.common.black, theme.palette.mode === 'dark' ? .36 : .18)}` }}>
             <Box sx={{ aspectRatio: '2/3', bgcolor: 'action.hover', display: 'grid', placeItems: 'center' }}>
-              {movie.coverUrl && !posterFailed ? <Box component="img" src={movie.coverUrl} alt={movie.code || movie.title} onError={() => setPosterFailed(true)} sx={{ width: '100%', height: '100%', objectFit: 'cover' }}/> : <Typography color="text.disabled" sx={{ px: 2, textAlign: 'center' }}>{posterFailed ? '图片损坏或不可用' : '暂无海报'}</Typography>}
+              {movie.coverUrl && !posterFailed ? <SmartImage src={movie.coverUrl} alt={movie.code || movie.title || ''} eager onError={() => setPosterFailed(true)}/> : <Typography color="text.disabled" sx={{ px: 2, textAlign: 'center' }}>{posterFailed ? '图片损坏或不可用' : '暂无海报'}</Typography>}
             </Box>
           </Card>
           <Box sx={{ minWidth: 0, display: 'flex', flexDirection: 'column', py: { sm: 1 } }}>
@@ -153,16 +166,24 @@ export default function MovieDetailPage() {
             {movie.description && <><Divider sx={{ my: 2.25 }}/><Typography variant="subtitle2" sx={{ fontWeight: 800, mb: .75 }}>内容简介</Typography><Typography color="text.secondary" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.85 }}>{movie.description}</Typography></>}
           </SurfaceSection>
           <SurfaceSection title="图片资源" description="源图按需读取；锁定的用户图片不会被同步或缓存重建覆盖">
+            <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', mb: 1.5 }}>
+              <Chip size="small" color={imageStatus?.missingImages || imageStatus?.failedImages ? 'warning' : 'success'} label={`正常 ${imageStatus?.normalImages ?? 0} / ${imageStatus?.totalImages ?? 0}`}/>
+              {Boolean(imageStatus?.invalidCacheEntries) && <Chip size="small" color="warning" label={`缓存失效 ${imageStatus?.invalidCacheEntries}`}/>}
+              <Button size="small" startIcon={<RefreshRoundedIcon/>} onClick={refreshImages}>刷新图片</Button>
+              <Button size="small" onClick={rebuildCache}>重新生成缓存</Button>
+              <Button size="small" startIcon={<FolderRoundedIcon/>} onClick={openImageFolder}>打开图片目录</Button>
+              <Button size="small" startIcon={<SyncRoundedIcon/>} onClick={syncMetadata}>重新下载图片</Button>
+            </Stack>
             {imageAssets.length ? <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2,minmax(0,1fr))', sm: 'repeat(3,minmax(0,1fr))' }, gap: 1.5 }}>
-              {imageAssets.map(asset => <Card key={asset.id} variant="outlined" sx={{ overflow: 'hidden' }}>
+              {imageAssets.map(asset => { const status = imageStatus?.assets.find(item => item.id === asset.id); return <Card key={asset.id} variant="outlined" sx={{ overflow: 'hidden' }}>
                 <Box sx={{ aspectRatio: '3/2', bgcolor: 'action.hover', display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
-                  {asset.url ? <Box component="img" src={asset.url} alt={asset.type} loading="lazy" sx={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={event => { event.currentTarget.style.display = 'none' }}/> : <Typography variant="caption" color="text.disabled">图片不可用</Typography>}
+                  {asset.url ? <Box onClick={() => { setViewer(asset); setZoom(1) }} sx={{ width: '100%', height: '100%', cursor: 'zoom-in' }}><SmartImage src={asset.url} alt={asset.type}/></Box> : <Typography variant="caption" color="text.disabled">图片不可用</Typography>}
                 </Box>
-                <Box sx={{ p: 1.25 }}><Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}><Chip size="small" label={asset.type}/>{asset.primary && <Chip size="small" color="primary" label="主图"/>}{asset.locked && <Chip size="small" color="warning" label="用户锁定"/>}</Stack>
+                <Box sx={{ p: 1.25 }}><Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}><Chip size="small" label={asset.type}/>{asset.primary && <Chip size="small" color="primary" label="主图"/>}{asset.locked && <Chip size="small" color="warning" label="用户锁定"/>}<Chip size="small" color={status?.status === 'Normal' ? 'success' : status?.status === 'Missing' ? 'warning' : 'error'} label={status?.status === 'Normal' ? '图片正常' : status?.status === 'Missing' ? '图片缺失' : '读取失败'}/></Stack>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: .75 }}>{asset.width && asset.height ? `${asset.width}×${asset.height}` : '尺寸待校验'} · {formatImageSize(asset.fileSize)}</Typography>
                   <Button size="small" color={asset.locked ? 'warning' : 'inherit'} startIcon={asset.locked ? <LockOpenRoundedIcon/> : <LockRoundedIcon/>} onClick={() => void setImageLock(asset)} sx={{ mt: .5 }}>{asset.locked ? '解除锁定' : '锁定图片'}</Button>
                 </Box>
-              </Card>)}
+              </Card>})}
             </Box> : <Typography variant="body2" color="text.secondary">暂无已登记图片资源；缺失图片不会显示损坏图标。</Typography>}
           </SurfaceSection>
         </Stack>
@@ -199,6 +220,13 @@ export default function MovieDetailPage() {
     <Dialog open={Boolean(deletePreview)} onClose={() => setDeletePreview(undefined)} maxWidth="sm" fullWidth><DialogTitle>从资料库移除影片？</DialogTitle><DialogContent><DialogContentText>将移除“{deletePreview?.code}”的数据库记录，但不会删除媒体文件。{deletePreview?.ratingWillBeRemembered ? '当前评分会按文件名记忆，重新导入同名文件时可恢复。' : '当前没有需要记忆的评分。'}</DialogContentText><Alert severity="warning" sx={{ mt: 2 }}>{deletePreview?.warnings.join(' ')}</Alert></DialogContent><DialogActions><Button onClick={() => setDeletePreview(undefined)}>取消</Button><Button variant="contained" color="error" onClick={confirmDelete}>确认移除记录</Button></DialogActions></Dialog>
     <Dialog open={Boolean(nfoPreview)} onClose={() => setNfoPreview(undefined)} maxWidth="sm" fullWidth><DialogTitle>{nfoMode === 'import' ? '导入 NFO 预览' : '导出 NFO 预览'}</DialogTitle><DialogContent><DialogContentText sx={{ overflowWrap: 'anywhere' }}>{nfoPreview?.path}</DialogContentText>{nfoPreview?.changes.length ? <Alert severity="info" sx={{ mt: 2 }}>将处理：{nfoPreview.changes.join('、')}</Alert> : null}{nfoPreview?.conflicts.length ? <Alert severity="warning" sx={{ mt: 1 }}>冲突字段保持原值：{nfoPreview.conflicts.join('、')}</Alert> : null}{nfoPreview?.warnings.map((warning) => <Alert key={warning} severity="warning" sx={{ mt: 1 }}>{warning}</Alert>)}</DialogContent><DialogActions><Button onClick={() => setNfoPreview(undefined)}>取消</Button>{nfoMode === 'export' && nfoPreview && !nfoPreview.canApply && <Button variant="outlined" onClick={() => confirmNfo(true)}>另存为 .lmm.nfo</Button>}<Button variant="contained" disabled={busy || Boolean(nfoPreview && !nfoPreview.canApply)} onClick={() => confirmNfo()}>{nfoMode === 'import' ? '确认导入' : '确认导出'}</Button></DialogActions></Dialog>
     <Dialog open={organizerOpen} onClose={() => !busy && setOrganizerOpen(false)} maxWidth="md" fullWidth><DialogTitle>整理文件</DialogTitle><DialogContent><Stack spacing={2} sx={{ mt: 1 }}><TextField label="文件名模板" value={organizerTemplate} onChange={event => { setOrganizerTemplate(event.target.value); setOrganizerPreview(undefined) }} helperText="支持 {Code}、{Title}、{Year}、{Actors}"/><TextField label="目标目录" value={organizerDestination} onChange={event => { setOrganizerDestination(event.target.value); setOrganizerPreview(undefined) }} helperText="留空时只在原目录重命名；不会覆盖任何已有目标。"/>{organizerPreview && <><Alert severity={organizerPreview.conflictItems ? 'error' : 'success'}>Dry Run：{organizerPreview.validItems} 项可执行，{organizerPreview.conflictItems} 项冲突。尚未修改文件。</Alert>{organizerPreview.items.map(item => <Paper key={item.mediaFileId} variant="outlined" sx={{ p: 1.5 }}><Typography variant="caption" color="text.secondary">原路径</Typography><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{item.sourcePath}</Typography><Typography variant="caption" color="text.secondary">目标路径</Typography><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{item.destinationPath}</Typography>{item.conflict && <Alert severity="error" sx={{ mt: 1 }}>{item.conflict}</Alert>}</Paper>)}</>}</Stack></DialogContent><DialogActions><Button onClick={() => setOrganizerOpen(false)}>取消</Button><Button variant="outlined" disabled={busy} onClick={dryRunOrganizer}>Dry Run</Button><Button variant="contained" disabled={busy || !organizerPreview || organizerPreview.conflictItems > 0} onClick={executeOrganizer}>确认并进入任务</Button></DialogActions></Dialog>
+    <Dialog open={Boolean(viewer)} onClose={() => setViewer(undefined)} maxWidth="lg" fullWidth>
+      <DialogTitle>{viewer?.type}</DialogTitle>
+      <DialogContent onWheel={event => { event.preventDefault(); setZoom(value => Math.max(.4, Math.min(4, value + (event.deltaY < 0 ? .15 : -.15)))) }} sx={{ height: '72vh', display: 'grid', placeItems: 'center', overflow: 'auto', bgcolor: 'background.default' }}>
+        {viewer?.url && <Box component="img" src={viewer.url} alt={viewer.type} sx={{ maxWidth: zoom === 1 ? '100%' : 'none', maxHeight: zoom === 1 ? '100%' : 'none', transform: `scale(${zoom})`, transformOrigin: 'center', transition: 'transform .12s ease' }}/>}
+      </DialogContent>
+      <DialogActions><Button startIcon={<ZoomOutRoundedIcon/>} onClick={() => setZoom(value => Math.max(.4, value - .25))}>缩小</Button><Button startIcon={<ZoomInRoundedIcon/>} onClick={() => setZoom(value => Math.min(4, value + .25))}>放大</Button><Button onClick={() => setZoom(1)}>适应窗口</Button><Button onClick={() => setZoom(2)}>原图</Button><Button onClick={() => setViewer(undefined)}>关闭</Button></DialogActions>
+    </Dialog>
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>
   </Box>
 }

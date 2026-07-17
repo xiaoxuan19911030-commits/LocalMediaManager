@@ -224,7 +224,12 @@ export interface MovieDeletePreview { movieId: number; code: string; fileName: s
 export interface ImageAsset {
   id: number; type: string; url?: string; ownership: string; locked: boolean; derived: boolean
   primary: boolean; validationStatus: string; width: number; height: number; fileSize: number
-  provider?: string; downloadedAt?: string
+  provider?: string; downloadedAt?: string; directory?: string
+}
+export interface ImageAssetStatus { id: number; type: string; status: 'Normal' | 'Missing' | 'Failed'; cacheStatus: 'Valid' | 'Invalid' | 'Unknown' | 'NotCached'; url?: string; message?: string }
+export interface ImageCenterStatus {
+  movieId: number; totalImages: number; normalImages: number; missingImages: number; invalidCacheEntries: number; failedImages: number
+  assets: ImageAssetStatus[]
 }
 export interface ImageMutationResult { changed: boolean; message: string }
 export interface ImageCachePreview {

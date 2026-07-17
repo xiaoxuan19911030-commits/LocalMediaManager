@@ -4,6 +4,7 @@ import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import { Box, Card, CardContent, Checkbox, Chip, IconButton, Rating, Tooltip, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import { useEffect, useState, type ReactNode } from 'react'
+import { SmartImage } from '@/components/SmartImage'
 import type { MediaItem } from '@/types/media'
 
 const isRecent = (value: string) => {
@@ -33,9 +34,9 @@ export function MediaCard({ item, onPlay, onOpen, selected, onSelect, onRatingCl
         '@media (prefers-reduced-motion: reduce)': { transition: 'none', '& .media-image, & .media-play': { transition: 'none' } } }}>
       <Box sx={{ position: 'relative', aspectRatio: '2 / 3', bgcolor: 'action.hover', overflow: 'hidden' }}>
         {item.coverUrl && !coverFailed ? (
-          <Box className="media-image" component="img" src={item.coverUrl} alt={primaryText} loading="lazy"
-            onError={() => setCoverFailed(true)}
-            sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', transition: 'transform .35s cubic-bezier(.2,.8,.2,1)' }} />
+          <Box className="media-image" sx={{ position: 'absolute', inset: 0, transition: 'transform .35s cubic-bezier(.2,.8,.2,1)' }}>
+            <SmartImage src={item.coverUrl} alt={primaryText} onError={() => setCoverFailed(true)}/>
+          </Box>
         ) : (
           <Box sx={{ height: '100%', display: 'grid', placeItems: 'center', color: 'text.disabled', px: 1.5, textAlign: 'center' }}>{coverFailed ? '图片损坏或不可用' : '暂无海报'}</Box>
         )}
