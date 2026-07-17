@@ -14,11 +14,21 @@ export function SmartImage({ src, alt, fit = 'cover', eager = false, onError }: 
   const [loaded, setLoaded] = useState(src ? memoryCache.get(src) : undefined)
 
   useEffect(() => {
-    if (eager || !ref.current) { setVisible(true); return }
-    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { rootMargin: '220px' })
+    if (eager || !ref.current || typeof IntersectionObserver === 'undefined') { setVisible(true); return }
+    const fallback = window.setTimeout(() => setVisible(true), 300)
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        window.clearTimeout(fallback)
+        setVisible(true)
+        observer.disconnect()
+      }
+    }, { rootMargin: '220px' })
     observer.observe(ref.current)
-    return () => observer.disconnect()
-  }, [eager])
+    return () => {
+      window.clearTimeout(fallback)
+      observer.disconnect()
+    }
+  }, [eager, src])
 
   useEffect(() => {
     if (!src || !visible) { setLoaded(undefined); return }

@@ -98,13 +98,23 @@ public sealed class DataSafetyService(string databasePath, string configDatabase
     {
         var validation = await ValidateBackupAsync(command.BackupPath, token);
         if (!validation.Valid) throw new InvalidOperationException("备份校验未通过，不能创建恢复计划。");
-        string mode = command.Mode is "database" or "settings" or "all" ? command.Mode : "all";
+        string mode = NormalizeRestoreMode(command.Mode);
         string planPath = Path.Combine(BackupRoot, $"restore-plan-{DateTime.UtcNow:yyyyMMdd-HHmmss}.json");
         Directory.CreateDirectory(BackupRoot);
         var steps = new[] { "重启应用", "启动时创建当前状态安全备份", "校验备份包", $"按 {mode} 模式替换目标文件", "执行 SQLite 完整性检查" };
         var warnings = new[] { "数据库会被替换。", "当前未保存操作可能丢失。", "应用可能需要重启后完成恢复。" };
         await File.WriteAllTextAsync(planPath, JsonSerializer.Serialize(new { command.BackupPath, mode, createdAt = DateTime.UtcNow, steps, warnings }, new JsonSerializerOptions { WriteIndented = true }), token);
         return new(planPath, command.BackupPath, mode, DateTime.UtcNow.ToString("O"), steps, warnings);
+    }
+
+    private static string NormalizeRestoreMode(string? mode)
+    {
+        return (mode ?? "").Trim().ToLowerInvariant() switch {
+            "all" => "all",
+            "database" or "database-only" => "database",
+            "settings" or "settings-only" or "config" or "config-only" => "settings",
+            _ => throw new ArgumentException("恢复模式无效。"),
+        };
     }
 
     public async Task<SettingsExportDto> ExportSettingsAsync(MetaTubeSettingsDto metaTube)

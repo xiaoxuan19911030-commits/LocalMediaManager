@@ -84,6 +84,24 @@ public sealed class DataSafetyServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RestorePlanAcceptsLegacyModeAliases()
+    {
+        BackupResultDto created = await Service.CreateBackupAsync(new(true, false));
+
+        RestorePlanDto plan = await Service.CreateRestorePlanAsync(new(created.BackupPath, "database-only"));
+
+        Assert.Equal("database", plan.Mode);
+    }
+
+    [Fact]
+    public async Task RestorePlanRejectsUnknownMode()
+    {
+        BackupResultDto created = await Service.CreateBackupAsync(new(true, false));
+
+        await Assert.ThrowsAsync<ArgumentException>(() => Service.CreateRestorePlanAsync(new(created.BackupPath, "everything")));
+    }
+
+    [Fact]
     public async Task InvalidBackupIsRejected()
     {
         string invalid = Path.Combine(root, "bad.zip");
