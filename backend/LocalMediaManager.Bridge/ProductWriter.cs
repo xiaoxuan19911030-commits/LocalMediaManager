@@ -46,7 +46,6 @@ public sealed class ProductWriter(string databasePath, RatingHistoryService? rat
             new { Favorite = favorite, Rating = rating, HasRating = hasRating });
         await transaction.CommitAsync();
         if (hasRating && rating > 0) await (ratingHistory?.RememberExplicitRatingAsync(movieId, rating) ?? Task.CompletedTask);
-        if (input.ClearRating) await (ratingHistory?.MaybeDeleteOnClearAsync(movieId) ?? Task.CompletedTask);
         return new(true, audit, "用户状态已保存。");
     }
 
@@ -134,8 +133,6 @@ public sealed class ProductWriter(string databasePath, RatingHistoryService? rat
         long audit = await AuditAsync(connection, transaction, "BatchRating", "Movie", null, null, new { MovieIds = ids, input.Rating, input.ClearRating }); await transaction.CommitAsync();
         if (!input.ClearRating && input.Rating is > 0 && ratingHistory is not null)
             foreach (long id in ids) await ratingHistory.RememberExplicitRatingAsync(id, input.Rating.Value);
-        if (input.ClearRating && ratingHistory is not null)
-            foreach (long id in ids) await ratingHistory.MaybeDeleteOnClearAsync(id);
         return new(true, audit, $"Updated ratings for {ids.Length} movies.");
     }
 

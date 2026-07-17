@@ -44,8 +44,7 @@ ON CONFLICT(NormalizedMovieCode) DO UPDATE SET
 WHERE excluded.UpdatedAt >= DeletedMovieRatings.UpdatedAt;
 
 INSERT INTO AppSettings(Key,ValueJson,ValueType,UpdatedAt) VALUES
-('ratingHistory.enabled','true','boolean',strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-('ratingHistory.deleteOnClear','false','boolean',strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+('ratingHistory.enabled','true','boolean',strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 ON CONFLICT(Key) DO NOTHING;
 
 INSERT INTO DatabaseMetadata(Key, Value)

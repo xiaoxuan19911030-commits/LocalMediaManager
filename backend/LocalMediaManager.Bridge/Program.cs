@@ -373,7 +373,7 @@ app.MapPut("/api/settings/playback", async (PlaybackSettingsDto command, Playbac
     Results.Ok(await playback.SaveAsync(command, token)));
 app.MapGet("/api/settings/rating-history", async (RatingHistoryService ratings, CancellationToken token) =>
     Results.Ok(await ratings.ReadSettingsAsync(token)));
-app.MapPut("/api/settings/rating-history", async (RatingHistorySettingsDto command, RatingHistoryService ratings, CancellationToken token) =>
+app.MapPut("/api/settings/rating-history", async (RatingRetentionSettingsDto command, RatingHistoryService ratings, CancellationToken token) =>
     Results.Ok(await ratings.SaveSettingsAsync(command, token)));
 
 app.MapPost("/api/organizer/dry-run", async (OrganizerPlanCommand command, FileOrganizerService organizer, CancellationToken token) =>

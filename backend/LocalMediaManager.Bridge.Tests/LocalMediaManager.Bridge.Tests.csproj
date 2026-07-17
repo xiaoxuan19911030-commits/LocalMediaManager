@@ -21,5 +21,6 @@
     <Content Include="..\LocalMediaManager.Migration\migrations\0008_FileOrganizerWorkflow.sql" Link="migrations\0008_FileOrganizerWorkflow.sql" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\LocalMediaManager.Migration\migrations\0009_PlaybackSettings.sql" Link="migrations\0009_PlaybackSettings.sql" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\LocalMediaManager.Migration\migrations\0010_DeletedMovieRatings.sql" Link="migrations\0010_DeletedMovieRatings.sql" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\LocalMediaManager.Migration\migrations\0011_RemoveRatingRetentionClearSetting.sql" Link="migrations\0011_RemoveRatingRetentionClearSetting.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

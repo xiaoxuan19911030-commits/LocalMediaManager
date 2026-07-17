@@ -31,7 +31,7 @@ export interface MetaTubeSettings {
 export interface ProviderConnectionResult { success: boolean; provider: string; message: string; elapsedMilliseconds: number }
 export interface NfoSettings { exportPolicy: 'SkipExisting' | 'SeparateFile'; outputDirectory: string; fillEmptyOnly: boolean; includeImages: boolean }
 export interface PlaybackSettings { playerPath: string; useSystemDefault: boolean }
-export interface RatingHistorySettings { enabled: boolean; deleteOnClear: boolean }
+export interface RatingRetentionSettings { enabled: boolean }
 
 export interface DataSafetyOverview {
   databasePath: string; databaseBytes: number; configDatabasePath: string

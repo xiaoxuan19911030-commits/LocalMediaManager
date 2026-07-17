@@ -5,17 +5,16 @@ namespace LocalMediaManager.Bridge;
 
 public sealed class RatingHistoryService(string databasePath)
 {
-    public async Task<RatingHistorySettingsDto> ReadSettingsAsync(CancellationToken token = default)
+    public async Task<RatingRetentionSettingsDto> ReadSettingsAsync(CancellationToken token = default)
     {
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, token);
-        return new(await EnabledAsync(connection, token), await DeleteOnClearAsync(connection, token));
+        return new(await EnabledAsync(connection, token));
     }
 
-    public async Task<RatingHistorySettingsDto> SaveSettingsAsync(RatingHistorySettingsDto input, CancellationToken token = default)
+    public async Task<RatingRetentionSettingsDto> SaveSettingsAsync(RatingRetentionSettingsDto input, CancellationToken token = default)
     {
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, token);
         await StoreSettingAsync(connection, "ratingHistory.enabled", input.Enabled, token);
-        await StoreSettingAsync(connection, "ratingHistory.deleteOnClear", input.DeleteOnClear, token);
         return input;
     }
 
@@ -49,15 +48,6 @@ public sealed class RatingHistoryService(string databasePath)
         string? normalized = MovieCodeNormalizer.Normalize(code);
         if (normalized is null) return;
         await StoreAsync(connection, normalized, rating, token);
-    }
-
-    public async Task MaybeDeleteOnClearAsync(long movieId, CancellationToken token = default)
-    {
-        await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, token);
-        if (!await DeleteOnClearAsync(connection, token)) return;
-        string? normalized = MovieCodeNormalizer.Normalize(await ScalarTextAsync(connection, "SELECT Code FROM Movies WHERE Id=$movie", token, ("$movie", movieId)));
-        if (normalized is null) return;
-        await ExecuteAsync(connection, "DELETE FROM DeletedMovieRatings WHERE NormalizedMovieCode=$code", token, ("$code", normalized));
     }
 
     public static async Task<bool> RestoreForImportedMovieAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
@@ -116,12 +106,6 @@ public sealed class RatingHistoryService(string databasePath)
     {
         string? raw = await ScalarTextAsync(connection, transaction, "SELECT ValueJson FROM AppSettings WHERE Key='ratingHistory.enabled'");
         return ParseBool(raw, true);
-    }
-
-    private static async Task<bool> DeleteOnClearAsync(SqliteConnection connection, CancellationToken token)
-    {
-        string? raw = await ScalarTextAsync(connection, "SELECT ValueJson FROM AppSettings WHERE Key='ratingHistory.deleteOnClear'", token);
-        return ParseBool(raw, false);
     }
 
     private static bool ParseBool(string? raw, bool fallback)
@@ -191,4 +175,4 @@ public sealed class RatingHistoryService(string databasePath)
     }
 }
 
-public sealed record RatingHistorySettingsDto(bool Enabled, bool DeleteOnClear);
+public sealed record RatingRetentionSettingsDto(bool Enabled);

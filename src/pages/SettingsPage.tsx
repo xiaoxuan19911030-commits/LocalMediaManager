@@ -18,7 +18,7 @@ import { buildInfo } from '@/buildInfo'
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
 import type { BridgeHealth } from '@/types/media'
-import type { BackupValidation, DataSafetyOverview, DiagnosticCheck, MetaTubeSettings, NfoSettings, PlaybackSettings, RatingHistorySettings, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic } from '@/types/settings'
+import type { BackupValidation, DataSafetyOverview, DiagnosticCheck, MetaTubeSettings, NfoSettings, PlaybackSettings, RatingRetentionSettings, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 
 const categories = [
@@ -40,7 +40,7 @@ export default function SettingsPage() {
   const [metaTube, setMetaTube] = useState<MetaTubeSettings>()
   const [nfo, setNfo] = useState<NfoSettings>()
   const [playback, setPlayback] = useState<PlaybackSettings>()
-  const [ratingHistory, setRatingHistory] = useState<RatingHistorySettings>()
+  const [ratingRetention, setRatingRetention] = useState<RatingRetentionSettings>()
   const [diagnostics, setDiagnostics] = useState<SystemDiagnostic>()
   const [cachePreview, setCachePreview] = useState<ImageCachePreview>()
   const [backupPath, setBackupPath] = useState('')
@@ -55,8 +55,8 @@ export default function SettingsPage() {
 
   const load = useCallback(() => {
     setError('')
-    return Promise.all([bridge.settings(), bridge.dataSafetyOverview(), bridge.nfoSettings(), bridge.playbackSettings(), bridge.ratingHistorySettings(), bridge.health()])
-      .then(([settings, data, nfoValue, playbackValue, ratingHistoryValue, healthValue]) => { setSnapshot(settings); setOverview(data); setMetaTube(settings.metaTube); setNfo(nfoValue); setPlayback(playbackValue); setRatingHistory(ratingHistoryValue); setHealth(healthValue) })
+    return Promise.all([bridge.settings(), bridge.dataSafetyOverview(), bridge.nfoSettings(), bridge.playbackSettings(), bridge.ratingRetentionSettings(), bridge.health()])
+      .then(([settings, data, nfoValue, playbackValue, ratingRetentionValue, healthValue]) => { setSnapshot(settings); setOverview(data); setMetaTube(settings.metaTube); setNfo(nfoValue); setPlayback(playbackValue); setRatingRetention(ratingRetentionValue); setHealth(healthValue) })
       .catch((reason: Error) => setError(reason.message))
   }, [])
   useEffect(() => { void load() }, [load])
@@ -83,7 +83,7 @@ export default function SettingsPage() {
     catch (reason) { setError((reason as Error).message) }
   }
 
-  if (!snapshot || !overview || !nfo || !playback || !metaTube || !ratingHistory) {
+  if (!snapshot || !overview || !nfo || !playback || !metaTube || !ratingRetention) {
     return <WorkspacePage title="Settings Center" description="设置与数据安全中心" error={error} loading={!error}/>
   }
 
@@ -111,7 +111,7 @@ export default function SettingsPage() {
         {category === 'search' && <PlannedSection labels={['默认搜索范围', '默认排序', '默认卡片/列表模式', '保存页面筛选状态']} fields={legacyFields}/>}
         {category === 'shortcuts' && <ShortcutSection/>}
         {category === 'appearance' && <AppearanceSection mode={mode} setMode={setMode}/>}
-        {category === 'data' && <DataSection overview={overview} ratingHistory={ratingHistory} setRatingHistory={setRatingHistory} saveRatingHistory={() => run(() => bridge.saveRatingHistorySettings(ratingHistory), '评分保留设置已保存')} backupPath={backupPath} setBackupPath={setBackupPath} restoreMode={restoreMode} setRestoreMode={setRestoreMode} validation={backupValidation} setValidation={setBackupValidation} importJson={importJson} setImportJson={setImportJson} importPreview={importPreview} previewImport={previewImport} onBackup={() => setConfirm('backup')} onRestore={() => setConfirm('restore')}/>}
+        {category === 'data' && <DataSection overview={overview} ratingRetention={ratingRetention} setRatingRetention={setRatingRetention} saveRatingRetention={() => run(() => bridge.saveRatingRetentionSettings(ratingRetention), '评分保留设置已保存')} ratingSaving={busy} backupPath={backupPath} setBackupPath={setBackupPath} restoreMode={restoreMode} setRestoreMode={setRestoreMode} validation={backupValidation} setValidation={setBackupValidation} importJson={importJson} setImportJson={setImportJson} importPreview={importPreview} previewImport={previewImport} onBackup={() => setConfirm('backup')} onRestore={() => setConfirm('restore')}/>}
         {category === 'logs' && <LogsSection diagnostics={diagnostics} runDiagnostics={() => bridge.settingsDiagnostics().then(setDiagnostics).catch((reason: Error) => setError(reason.message))} onCleanLogs={() => setConfirm('logs')}/>}
         {category === 'about' && <AboutSection overview={overview} health={health}/>}
         {legacyFields.length > 0 && category !== 'metadata' && category !== 'playback' && category !== 'images' && <LegacyFields fields={legacyFields}/>}
@@ -154,8 +154,55 @@ function ShortcutSection() {
 function AppearanceSection({ mode, setMode }: { mode: string; setMode: (value: 'light' | 'dark') => void }) {
   return <SurfaceSection title="外观" description="主题预览立即生效；其他显示密度设置为计划支持。"><Stack direction="row" spacing={1}><Button variant={mode === 'light' ? 'contained' : 'outlined'} startIcon={<LightModeRoundedIcon/>} onClick={() => setMode('light')}>浅色</Button><Button variant={mode === 'dark' ? 'contained' : 'outlined'} startIcon={<DarkModeRoundedIcon/>} onClick={() => setMode('dark')}>深色</Button></Stack></SurfaceSection>
 }
-function DataSection({ overview, ratingHistory, setRatingHistory, saveRatingHistory, backupPath, setBackupPath, restoreMode, setRestoreMode, validation, setValidation, importJson, setImportJson, importPreview, previewImport, onBackup, onRestore }: { overview: DataSafetyOverview; ratingHistory: RatingHistorySettings; setRatingHistory: (v: RatingHistorySettings) => void; saveRatingHistory: () => void; backupPath: string; setBackupPath: (v: string) => void; restoreMode: string; setRestoreMode: (v: string) => void; validation?: BackupValidation; setValidation: (v: BackupValidation) => void; importJson: string; setImportJson: (v: string) => void; importPreview?: SettingsImportPreview; previewImport: () => void; onBackup: () => void; onRestore: () => void }) {
-  return <Stack spacing={2}><SurfaceSection title="数据位置" description="不会把原始影片和原始图片打包进备份。"><Stack spacing={1}><Typography>数据库：{overview.databasePath}</Typography><Typography>数据库大小：{size(overview.databaseBytes)}</Typography><Typography>配置库：{overview.configDatabasePath}</Typography><Typography>备份目录：{overview.backupDirectory}</Typography><Typography>缓存目录：{overview.cacheDirectory}</Typography><Typography>日志目录：{overview.logDirectory}</Typography><Typography>最近备份：{overview.lastBackupAt ? new Date(overview.lastBackupAt).toLocaleString() : '暂无'}</Typography></Stack></SurfaceSection><SurfaceSection title="评分保留" description="删除已评分影片时保存番号与评分；以后重新导入相同番号时自动恢复。"><Stack spacing={1}><FormControlLabel control={<Switch checked={ratingHistory.enabled} onChange={event => setRatingHistory({ ...ratingHistory, enabled: event.target.checked })}/>} label="自动保留并恢复已删除影片评分"/><FormControlLabel control={<Switch checked={ratingHistory.deleteOnClear} onChange={event => setRatingHistory({ ...ratingHistory, deleteOnClear: event.target.checked })}/>} label="清除当前评分时，同时删除评分历史"/><Button variant="contained" onClick={saveRatingHistory}>保存评分设置</Button></Stack></SurfaceSection><SurfaceSection title="备份与恢复计划" description="恢复采用计划文件，避免运行中热替换数据库。"><Stack spacing={1.5}><Button variant="contained" startIcon={<BackupRoundedIcon/>} onClick={onBackup}>创建手动备份</Button><TextField size="small" label="备份路径" value={backupPath} onChange={event => setBackupPath(event.target.value)}/><Stack direction="row" spacing={1}><Button variant="outlined" onClick={() => bridge.validateBackup(backupPath).then(setValidation)}>校验备份</Button><TextField select size="small" label="恢复模式" value={restoreMode} onChange={event => setRestoreMode(event.target.value)} sx={{ width: 150 }}><MenuItem value="all">全部</MenuItem><MenuItem value="database">仅数据库</MenuItem><MenuItem value="settings">仅设置</MenuItem></TextField><Button color="error" variant="outlined" startIcon={<RestoreRoundedIcon/>} disabled={!validation?.valid} onClick={onRestore}>创建恢复计划</Button></Stack>{validation && <Alert severity={validation.valid ? 'success' : 'error'}>{validation.valid ? '备份校验通过' : validation.errors.join('；')}</Alert>}</Stack></SurfaceSection><SurfaceSection title="配置导入导出" description="导出会剔除敏感字段；导入先预览差异，不直接覆盖。"><Stack spacing={1.5}><Button startIcon={<SettingsBackupRestoreRoundedIcon/>} onClick={() => bridge.exportSettings().then(result => setImportJson(JSON.stringify(result, null, 2)))}>导出当前设置</Button><TextField multiline minRows={6} label="导入 JSON / 导出预览" value={importJson} onChange={event => setImportJson(event.target.value)}/><Button startIcon={<UploadFileRoundedIcon/>} variant="outlined" onClick={previewImport}>预览导入差异</Button>{importPreview && <Alert severity={importPreview.valid ? 'info' : 'warning'}>{importPreview.valid ? `可识别 ${importPreview.changes.length} 项：${importPreview.categories.join('、')}` : importPreview.warnings.join('；')}</Alert>}</Stack></SurfaceSection></Stack>
+function DataSection({ overview, ratingRetention, setRatingRetention, saveRatingRetention, ratingSaving, backupPath, setBackupPath, restoreMode, setRestoreMode, validation, setValidation, importJson, setImportJson, importPreview, previewImport, onBackup, onRestore }: { overview: DataSafetyOverview; ratingRetention: RatingRetentionSettings; setRatingRetention: (v: RatingRetentionSettings) => void; saveRatingRetention: () => void; ratingSaving: boolean; backupPath: string; setBackupPath: (v: string) => void; restoreMode: string; setRestoreMode: (v: string) => void; validation?: BackupValidation; setValidation: (v: BackupValidation) => void; importJson: string; setImportJson: (v: string) => void; importPreview?: SettingsImportPreview; previewImport: () => void; onBackup: () => void; onRestore: () => void }) {
+  return <Stack spacing={2}>
+    <SurfaceSection title="数据位置" description="不会把原始影片和原始图片打包进备份。">
+      <Stack spacing={1}>
+        <Typography>数据库：{overview.databasePath}</Typography>
+        <Typography>数据库大小：{size(overview.databaseBytes)}</Typography>
+        <Typography>配置库：{overview.configDatabasePath}</Typography>
+        <Typography>备份目录：{overview.backupDirectory}</Typography>
+        <Typography>缓存目录：{overview.cacheDirectory}</Typography>
+        <Typography>日志目录：{overview.logDirectory}</Typography>
+        <Typography>最近备份：{overview.lastBackupAt ? new Date(overview.lastBackupAt).toLocaleString() : '暂无'}</Typography>
+      </Stack>
+    </SurfaceSection>
+    <SurfaceSection title="评分保留" description="删除已评分影片时保存番号与评分；以后重新导入相同番号时自动恢复。">
+      <Stack spacing={2}>
+        <FormControlLabel
+          control={<Switch checked={ratingRetention.enabled} onChange={event => setRatingRetention({ enabled: event.target.checked })}/>}
+          label="自动保留并恢复已删除影片评分"
+        />
+        <Button fullWidth variant="contained" disabled={ratingSaving} onClick={saveRatingRetention}>
+          {ratingSaving ? '保存中...' : '保存评分设置'}
+        </Button>
+      </Stack>
+    </SurfaceSection>
+    <SurfaceSection title="备份与恢复计划" description="恢复采用计划文件，避免运行中热替换数据库。">
+      <Stack spacing={1.5}>
+        <Button variant="contained" startIcon={<BackupRoundedIcon/>} onClick={onBackup}>创建手动备份</Button>
+        <TextField size="small" label="备份路径" value={backupPath} onChange={event => setBackupPath(event.target.value)}/>
+        <Stack direction="row" spacing={1}>
+          <Button variant="outlined" onClick={() => bridge.validateBackup(backupPath).then(setValidation)}>校验备份</Button>
+          <TextField select size="small" label="恢复模式" value={restoreMode} onChange={event => setRestoreMode(event.target.value)} sx={{ width: 150 }}>
+            <MenuItem value="all">全部</MenuItem>
+            <MenuItem value="database">仅数据库</MenuItem>
+            <MenuItem value="settings">仅设置</MenuItem>
+          </TextField>
+          <Button color="error" variant="outlined" startIcon={<RestoreRoundedIcon/>} disabled={!validation?.valid} onClick={onRestore}>创建恢复计划</Button>
+        </Stack>
+        {validation && <Alert severity={validation.valid ? 'success' : 'error'}>{validation.valid ? '备份校验通过' : validation.errors.join('；')}</Alert>}
+      </Stack>
+    </SurfaceSection>
+    <SurfaceSection title="配置导入导出" description="导出会剔除敏感字段；导入先预览差异，不直接覆盖。">
+      <Stack spacing={1.5}>
+        <Button startIcon={<SettingsBackupRestoreRoundedIcon/>} onClick={() => bridge.exportSettings().then(result => setImportJson(JSON.stringify(result, null, 2)))}>导出当前设置</Button>
+        <TextField multiline minRows={6} label="导入 JSON / 导出预览" value={importJson} onChange={event => setImportJson(event.target.value)}/>
+        <Button startIcon={<UploadFileRoundedIcon/>} variant="outlined" onClick={previewImport}>预览导入差异</Button>
+        {importPreview && <Alert severity={importPreview.valid ? 'info' : 'warning'}>{importPreview.valid ? `可识别 ${importPreview.changes.length} 项：${importPreview.categories.join('、')}` : importPreview.warnings.join('；')}</Alert>}
+      </Stack>
+    </SurfaceSection>
+  </Stack>
 }
 function LogsSection({ diagnostics, runDiagnostics, onCleanLogs }: { diagnostics?: SystemDiagnostic; runDiagnostics: () => void; onCleanLogs: () => void }) {
   return <SurfaceSection title="日志与诊断" description="诊断包不包含影片、原始图片、Cookie、Token 或完整个人路径列表。"><Stack spacing={1.5}><Stack direction="row" spacing={1}><Button startIcon={<RefreshRoundedIcon/>} variant="contained" onClick={runDiagnostics}>执行基础诊断</Button><Button color="error" variant="outlined" onClick={onCleanLogs}>清理旧日志</Button></Stack>{diagnostics?.checks.map(check => <DiagnosticRow key={check.key} check={check}/>)}</Stack></SurfaceSection>

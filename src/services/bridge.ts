@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateResults, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageDeletePreview, ImageMutationResult, ImageTaskLaunchResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, PlatformOpenResult, SafeDeleteLaunchResult, SafeDeletePreview, SafeDeletePreviewCommand, ScanLaunchResult, TaskCleanupResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
-import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, MetaTubeSettings, NfoSettings, PlaybackSettings, ProviderConnectionResult, RatingHistorySettings, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic } from '@/types/settings'
+import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, MetaTubeSettings, NfoSettings, PlaybackSettings, ProviderConnectionResult, RatingRetentionSettings, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
 
@@ -45,8 +45,8 @@ export const bridge = {
   saveNfoSettings: (value: NfoSettings) => request<NfoSettings>('/api/settings/nfo', { method: 'PUT', body: JSON.stringify(value) }),
   playbackSettings: () => request<PlaybackSettings>('/api/settings/playback'),
   savePlaybackSettings: (value: PlaybackSettings) => request<PlaybackSettings>('/api/settings/playback', { method: 'PUT', body: JSON.stringify(value) }),
-  ratingHistorySettings: () => request<RatingHistorySettings>('/api/settings/rating-history'),
-  saveRatingHistorySettings: (value: RatingHistorySettings) => request<RatingHistorySettings>('/api/settings/rating-history', { method: 'PUT', body: JSON.stringify(value) }),
+  ratingRetentionSettings: () => request<RatingRetentionSettings>('/api/settings/rating-history'),
+  saveRatingRetentionSettings: (value: RatingRetentionSettings) => request<RatingRetentionSettings>('/api/settings/rating-history', { method: 'PUT', body: JSON.stringify(value) }),
   movie: (id: number) => request<MovieDetail>(`/api/videos/${id}`),
   movieImages: (id: number) => request<ImageAsset[]>(`/api/videos/${id}/images`),
   movieImageStatus: (id: number) => request<ImageCenterStatus>(`/api/videos/${id}/images/status`),

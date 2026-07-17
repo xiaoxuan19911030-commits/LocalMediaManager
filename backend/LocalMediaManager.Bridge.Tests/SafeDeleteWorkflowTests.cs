@@ -22,7 +22,7 @@ public sealed class SafeDeleteWorkflowTests : IAsyncLifetime
         await File.WriteAllTextAsync(nfo, "<movie />");
         await using var connection = new SqliteConnection($"Data Source={Database}");
         await connection.OpenAsync();
-        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0010_DeletedMovieRatings.sql" }) {
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0010_DeletedMovieRatings.sql", "0011_RemoveRatingRetentionClearSetting.sql" }) {
             await using var command = connection.CreateCommand();
             command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
             await command.ExecuteNonQueryAsync();
@@ -91,12 +91,58 @@ public sealed class SafeDeleteWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ScanImportDoesNotRestoreWhenCurrentMovieAlreadyHasRating()
+    {
+        await ratings.RememberExplicitRatingAsync(1, 4);
+        string at = DateTimeOffset.UtcNow.ToString("O");
+        await using SqliteConnection connection = await Open();
+        await using SqliteTransaction tx = (SqliteTransaction)await connection.BeginTransactionAsync();
+        await Execute(connection, tx, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES(3,'SONE-104','New',0,0,'pending','Test',$at,$at)", ("$at", at));
+        await Execute(connection, tx, "INSERT INTO UserMovieState(MovieId,IsFavorite,UserRating,PlayCount,LastPositionSeconds,UpdatedAt,HasUserRating) VALUES(3,0,2,0,0,$at,1)", ("$at", at));
+
+        bool restored = await RatingHistoryService.RestoreForImportedMovieAsync(connection, tx, 3, "SONE-104", at);
+        await tx.CommitAsync();
+
+        Assert.False(restored);
+        Assert.Equal(2, await Scalar(connection, "SELECT UserRating FROM UserMovieState WHERE MovieId=3"));
+    }
+
+    [Fact]
     public async Task RatingHistorySettingCanDisableSaveAndRestore()
     {
-        await ratings.SaveSettingsAsync(new(false, false));
+        await ratings.SaveSettingsAsync(new(false));
         await ratings.RememberExplicitRatingAsync(1, 5);
+        string at = DateTimeOffset.UtcNow.ToString("O");
         await using SqliteConnection verify = await Open();
         Assert.Equal(0, await Scalar(verify, "SELECT COUNT(*) FROM DeletedMovieRatings WHERE Rating=5"));
+        await Execute(verify, "INSERT INTO DeletedMovieRatings(NormalizedMovieCode,Rating,UpdatedAt) VALUES('SONE-104',5,$at)", ("$at", at));
+        await using SqliteTransaction tx = (SqliteTransaction)await verify.BeginTransactionAsync();
+        await Execute(verify, tx, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES(3,'SONE-104','New',0,0,'pending','Test',$at,$at)", ("$at", at));
+
+        bool restored = await RatingHistoryService.RestoreForImportedMovieAsync(verify, tx, 3, "SONE-104", at);
+        await tx.CommitAsync();
+
+        Assert.False(restored);
+        Assert.Equal(0, await Scalar(verify, "SELECT COUNT(*) FROM UserMovieState WHERE MovieId=3"));
+    }
+
+    [Fact]
+    public async Task ClearingCurrentRatingDoesNotDeleteRetainedRating()
+    {
+        await ratings.RememberExplicitRatingAsync(1, 4);
+
+        await writer.SetUserStateAsync(1, new(null, null, true));
+
+        await using SqliteConnection verify = await Open();
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM DeletedMovieRatings WHERE NormalizedMovieCode='SONE-104' AND Rating=4"));
+        Assert.Equal(0, await Scalar(verify, "SELECT COALESCE(HasUserRating,0) FROM UserMovieState WHERE MovieId=1"));
+    }
+
+    [Fact]
+    public async Task RemovedClearSettingKeyIsNotCreatedByMigration()
+    {
+        await using SqliteConnection verify = await Open();
+        Assert.Equal(0, await Scalar(verify, "SELECT COUNT(*) FROM AppSettings WHERE Key='ratingHistory.deleteOnClear'"));
     }
 
     [Fact]
