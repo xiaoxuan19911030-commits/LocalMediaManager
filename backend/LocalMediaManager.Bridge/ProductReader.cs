@@ -39,7 +39,7 @@ public sealed record MetadataOverviewDto(long TotalMovies, long ScrapedMovies, l
 public sealed record DiagnosticItemDto(string Severity, string Code, string Title, string Detail, long Count);
 public sealed record DiagnosticsDto(string Integrity, long ForeignKeyErrors, IReadOnlyList<DiagnosticItemDto> Items);
 public sealed record NeighborsDto(long? PreviousId, long? NextId);
-public sealed record DuplicateMovieDto(long MovieId, string Code, string Title, string FilePath, string? FileHash, string ImportedAt);
+public sealed record DuplicateMovieDto(long MovieId, string Code, string Title, string FilePath, string? FileHash, string ImportedAt, string Recommendation);
 public sealed record DuplicateGroupDto(string Rule, string Key, long Count, IReadOnlyList<DuplicateMovieDto> Items);
 public sealed record DuplicateResultsDto(long TotalGroups, long TotalMovies, long CodeGroups, long PathGroups, long HashGroups, IReadOnlyList<DuplicateGroupDto> Groups);
 internal sealed record SearchCondition(string Query, bool? Favorite, bool? Watched, double? RatingMin);
@@ -390,9 +390,11 @@ public static class ProductReader
         };
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT m.Id,COALESCE(m.Code,''),COALESCE(m.Title,''),COALESCE(f.FilePath,''),f.FileHash,COALESCE(m.ImportedAt,m.CreatedAt,'')
+            SELECT m.Id,COALESCE(m.Code,''),COALESCE(m.Title,''),COALESCE(f.FilePath,''),f.FileHash,COALESCE(m.ImportedAt,m.CreatedAt,''),
+                   COALESCE(s.IsFavorite,0),COALESCE(s.UserRating,0),COALESCE(f.FileSize,0),COALESCE(s.PlayCount,0),COALESCE(s.LastPlayedAt,'')
               FROM Movies m
               LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND (f.IsPrimary=1 OR $rule<>'code')
+              LEFT JOIN UserMovieState s ON s.MovieId=m.Id
              WHERE {condition}
              ORDER BY m.Code COLLATE NOCASE,m.Id,f.Id
             """;
@@ -401,11 +403,18 @@ public static class ProductReader
         var items = new List<DuplicateMovieDto>();
         var seen = new HashSet<long>();
         await using var reader = await command.ExecuteReaderAsync();
+        var candidates = new List<(DuplicateMovieDto Item, long Favorite, double Rating, long Size, long Plays, string LastPlayed)>();
         while (await reader.ReadAsync()) {
             long id = reader.GetInt64(0);
             if (!seen.Add(id)) continue;
-            items.Add(new(id, reader.GetString(1), reader.GetString(2), reader.GetString(3), Text(reader, 4), reader.GetString(5)));
+            candidates.Add((new(id, reader.GetString(1), reader.GetString(2), reader.GetString(3), Text(reader, 4), reader.GetString(5), "建议删除"),
+                reader.GetInt64(6), reader.GetDouble(7), reader.GetInt64(8), reader.GetInt64(9), reader.GetString(10)));
         }
+        long keepId = candidates.OrderByDescending(item => item.Favorite).ThenByDescending(item => item.Rating)
+            .ThenByDescending(item => item.Size).ThenByDescending(item => item.Plays)
+            .ThenByDescending(item => item.LastPlayed, StringComparer.Ordinal).FirstOrDefault().Item?.MovieId ?? 0;
+        foreach (var candidate in candidates)
+            items.Add(candidate.Item with { Recommendation = candidate.Item.MovieId == keepId ? "推荐保留" : "建议删除" });
         return items;
     }
 

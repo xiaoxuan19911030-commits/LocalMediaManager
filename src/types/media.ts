@@ -200,6 +200,7 @@ export interface DuplicateMovie {
   filePath: string
   fileHash?: string
   importedAt: string
+  recommendation: string
 }
 export interface DuplicateGroup {
   rule: 'code' | 'path' | 'hash'
@@ -214,6 +215,29 @@ export interface DuplicateResults {
   pathGroups: number
   hashGroups: number
   groups: DuplicateGroup[]
+}
+export interface MaintenanceStats {
+  totalMovies: number
+  healthyMovies: number
+  problemMovies: number
+  duplicateMovies: number
+  missingImages: number
+  missingNfo: number
+  missingMetadata: number
+  orphanFiles: number
+  emptyDirectories: number
+  cacheProblems: number
+}
+export interface MaintenanceIssue { category: string; severity: string; title: string; detail: string; movieId?: number; path?: string }
+export interface MaintenancePath { kind: string; path: string; reason: string }
+export interface MaintenanceReport {
+  stats: MaintenanceStats
+  issues: MaintenanceIssue[]
+  orphanFiles: MaintenancePath[]
+  directories: MaintenancePath[]
+  duplicates: DuplicateResults
+  limit: number
+  offset: number
 }
 export interface MutationResult { changed: boolean; auditId: number; message: string }
 export interface ImpactPreview { operation: string; entityId: number; name: string; affectedMovies: number; confirmationToken: string; warnings: string[] }

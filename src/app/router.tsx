@@ -12,6 +12,7 @@ import CollectionPage from '@/pages/CollectionPage'
 import MetadataPage from '@/pages/MetadataPage'
 import DiagnosticsPage from '@/pages/DiagnosticsPage'
 import DuplicatesPage from '@/pages/DuplicatesPage'
+import MaintenancePage from '@/pages/MaintenancePage'
 import PluginsPage from '@/pages/PluginsPage'
 import AiProvidersPage from '@/pages/AiProvidersPage'
 
@@ -28,6 +29,7 @@ export const router = createHashRouter([{ path: '/', Component: AppShell, childr
   { path: 'metadata', Component: MetadataPage },
   { path: 'diagnostics', Component: DiagnosticsPage },
   { path: 'duplicates', Component: DuplicatesPage },
+  { path: 'maintenance', Component: MaintenancePage },
   { path: 'tasks', Component: TasksPage },
   { path: 'plugins', Component: PluginsPage },
   { path: 'ai-providers', Component: AiProvidersPage },
