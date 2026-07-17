@@ -45,11 +45,11 @@ export default function HomePage() {
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2,minmax(0,1fr))', md: 'repeat(3,minmax(0,1fr))', xl: 'repeat(6,minmax(0,1fr))' }, gap: 1.25 }}>
         <StatCard label="全部影片" value={dashboard.movieCount} icon={<MovieRoundedIcon/>}/>
+        <Box onClick={() => navigate('/search?metadataStatus=complete')} sx={{ cursor: 'pointer' }}><StatCard label="已完整" value={dashboard.completeMetadataCount} icon={<TaskAltRoundedIcon/>} tone="success.main"/></Box>
+        <Box onClick={() => navigate('/search?metadataStatus=missing-images')} sx={{ cursor: 'pointer' }}><StatCard label="待完善" value={dashboard.pendingMetadataCount} icon={<BrokenImageRoundedIcon/>} tone="warning.main"/></Box>
+        <Box onClick={() => navigate('/search?metadataStatus=unscraped')} sx={{ cursor: 'pointer' }}><StatCard label="未刮削" value={dashboard.unscrapedCount} icon={<BrokenImageRoundedIcon/>} tone="error.main"/></Box>
         <StatCard label="我的收藏" value={dashboard.favoriteCount} icon={<FavoriteRoundedIcon/>} tone="error.main"/>
         <StatCard label="播放过" value={dashboard.playedCount} icon={<PlayCircleRoundedIcon/>} tone="success.main"/>
-        <StatCard label="媒体库" value={dashboard.libraryCount} icon={<FolderRoundedIcon/>} tone="warning.main"/>
-        <StatCard label="缺失文件" value={dashboard.missingFileCount} icon={<BrokenImageRoundedIcon/>} tone="error.main"/>
-        <StatCard label="进行中任务" value={dashboard.activeTaskCount} icon={<TaskAltRoundedIcon/>} tone="info.main"/>
       </Box>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0,1.35fr) minmax(300px,.65fr)' }, gap: 2 }}>

@@ -22,6 +22,8 @@ export function MediaCard({ item, onPlay, onOpen, selected, onSelect, onRatingCl
   const recent = isRecent(item.importedAt)
   const displayTitle = item.title && !item.title.includes('\uFFFD') ? item.title : ''
   const primaryText = item.code || displayTitle || `影片 ${item.dataId}`
+  const metadataTone = item.metadataStatus?.state === 'complete' ? 'success.main' : item.metadataStatus?.state === 'unscraped' ? 'error.main' : 'warning.main'
+  const metadataTip = item.metadataStatus?.missingItems?.length ? `缺少：${item.metadataStatus.missingItems.join('、')}` : item.metadataStatus?.label
   return (
     <Card role={onOpen ? 'button' : undefined} tabIndex={onOpen ? 0 : undefined} onKeyDown={(event) => { if (onOpen && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(item) } }}
       onClick={() => onOpen?.(item)} sx={{ overflow: 'hidden', minWidth: 0, cursor: onOpen ? 'pointer' : 'default', position: 'relative', borderColor: selected ? 'primary.main' : undefined,
@@ -57,6 +59,11 @@ export function MediaCard({ item, onPlay, onOpen, selected, onSelect, onRatingCl
             <PlayArrowRoundedIcon />
           </IconButton>
         </Tooltip>
+        {item.metadataStatus && <Tooltip title={metadataTip}>
+          <Box sx={{ position: 'absolute', right: 8, bottom: 8, width: 28, height: 28, borderRadius: 1.25, display: 'grid', placeItems: 'center', bgcolor: 'rgba(10,13,20,.82)', color: metadataTone, fontWeight: 900, border: 1, borderColor: 'rgba(255,255,255,.18)' }}>
+            {item.metadataStatus.icon}
+          </Box>
+        </Tooltip>}
       </Box>
       <CardContent sx={{ p: 1.4, '&:last-child': { pb: 1.4 } }}>
         <Tooltip title={primaryText} placement="top"><Typography noWrap sx={{ fontWeight: 800, letterSpacing: '.01em' }}>{primaryText}</Typography></Tooltip>

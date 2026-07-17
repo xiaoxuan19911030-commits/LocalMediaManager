@@ -171,9 +171,9 @@ app.MapGet("/api/collections/{kind}", async (string kind, int? limit, int? offse
 });
 
 app.MapGet("/api/search/advanced", async (string? q, long? actorId, long? tagId, bool? favorite, bool? watched, double? ratingMin,
-    string? metadata, string? fileStatus, long? libraryId, string? sort, int? limit, int? offset) => File.Exists(databasePath)
+    string? metadata, string? fileStatus, string? metadataStatus, long? libraryId, string? sort, int? limit, int? offset) => File.Exists(databasePath)
     ? Results.Ok(await ProductReader.AdvancedSearchAsync(databasePath, bridgeUrl, q ?? "", actorId, tagId, favorite,
-        watched, Math.Clamp(ratingMin ?? 0, 0, 5), metadata ?? "all", fileStatus ?? "all", libraryId, sort ?? "newest",
+        watched, Math.Clamp(ratingMin ?? 0, 0, 5), metadata ?? "all", fileStatus ?? "all", metadataStatus ?? "all", libraryId, sort ?? "newest",
         Math.Clamp(limit ?? 48, 1, 96), Math.Max(offset ?? 0, 0)))
     : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
 
@@ -206,64 +206,7 @@ app.MapGet("/api/videos", async (int? limit, int? offset, string? search, string
 
     int take = Math.Clamp(limit ?? 24, 1, 96);
     int skip = Math.Max(0, offset ?? 0);
-    string query = (search ?? string.Empty).Trim();
-    string orderBy = sort?.ToLowerInvariant() switch {
-        "code" => "m.Code COLLATE NOCASE, m.Id",
-        "title" => "m.Title COLLATE NOCASE, m.Id",
-        "release" => "m.ReleaseDate DESC, m.Id DESC",
-        "rating" => "s.UserRating DESC, m.Id DESC",
-        _ => "m.Id DESC",
-    };
-    await using var connection = await OpenReadOnlyAsync(databasePath);
-    await using var countCommand = connection.CreateCommand();
-    countCommand.CommandText = """
-        SELECT COUNT(*) FROM Movies m
-         WHERE $search='' OR m.Code LIKE $like ESCAPE '\' OR m.Title LIKE $like ESCAPE '\'
-        """;
-    countCommand.Parameters.AddWithValue("$search", query);
-    countCommand.Parameters.AddWithValue("$like", $"%{EscapeLike(query)}%");
-    long total = (long)(await countCommand.ExecuteScalarAsync() ?? 0L);
-    await using var command = connection.CreateCommand();
-    command.CommandText = $"""
-        SELECT m.Id,
-               COALESCE(NULLIF(m.Code, ''), NULLIF(m.Title, ''), CAST(m.Id AS TEXT)) AS Code,
-               COALESCE(m.Title, '') AS Title,
-               COALESCE(f.FilePath, '') AS Path,
-               COALESCE(s.UserRating, 0) AS Grade,
-               COALESCE(s.IsFavorite, 0) AS Favorite,
-               COALESCE(m.ReleaseDate, '') AS ReleaseDate,
-               COALESCE(m.ImportedAt, m.CreatedAt, '') AS ImportedAt,
-               CASE WHEN EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id) THEN 1 ELSE 0 END AS HasCover
-          FROM Movies m
-          JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video'
-          LEFT JOIN UserMovieState s ON s.MovieId=m.Id
-         WHERE $search='' OR m.Code LIKE $like ESCAPE '\' OR m.Title LIKE $like ESCAPE '\'
-         ORDER BY {orderBy}
-         LIMIT $limit OFFSET $offset
-        """;
-    command.Parameters.AddWithValue("$search", query);
-    command.Parameters.AddWithValue("$like", $"%{EscapeLike(query)}%");
-    command.Parameters.AddWithValue("$limit", take);
-    command.Parameters.AddWithValue("$offset", skip);
-    var items = new List<object>();
-    await using var reader = await command.ExecuteReaderAsync();
-    while (await reader.ReadAsync()) {
-        string code = reader.GetString(1);
-        items.Add(new {
-            dataId = reader.GetInt64(0),
-            code,
-            title = reader.GetString(2),
-            path = reader.GetString(3),
-            grade = reader.GetDouble(4),
-            favorite = reader.GetInt64(5) == 1,
-            releaseDate = reader.GetString(6),
-            importedAt = reader.GetString(7),
-            coverUrl = reader.GetInt64(8) == 1
-                ? $"{bridgeUrl}/api/images/{reader.GetInt64(0)}/primary?variant=thumbnail"
-                : null,
-        });
-    }
-    return Results.Ok(new { items, total, limit = take, offset = skip });
+    return Results.Ok(await ProductReader.ReadVideosPageAsync(databasePath, bridgeUrl, search ?? "", sort ?? "newest", take, skip));
 });
 
 app.MapGet("/api/videos/{movieId:long}", async (long movieId) => {
@@ -460,5 +403,3 @@ static string ContentType(string path) => Path.GetExtension(path).ToLowerInvaria
 static bool IsVideoFile(string path) => Path.GetExtension(path).ToLowerInvariant() is
     ".mp4" or ".mkv" or ".avi" or ".wmv" or ".mov" or ".ts" or ".m2ts" or ".flv" or ".webm"
     or ".vob" or ".mpg" or ".mpeg";
-
-static string EscapeLike(string value) => value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");

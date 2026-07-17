@@ -44,6 +44,13 @@ function Relation({ label, items }: { label: string; items: NamedItem[] }) {
     </Stack></Box>
 }
 
+function MetadataCheckRow({ label, complete }: { label: string; complete: boolean }) {
+  return <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, p: 1, borderRadius: 1.5, bgcolor: 'action.hover' }}>
+    <Typography variant="body2" sx={{ fontWeight: 700 }}>{label}</Typography>
+    <Chip size="small" color={complete ? 'success' : 'warning'} label={complete ? '正常' : '缺失'}/>
+  </Box>
+}
+
 export default function MovieDetailPage() {
   const { id } = useParams(); const navigate = useNavigate(); const location = useLocation()
   const [movie, setMovie] = useState<MovieDetail>(); const [error, setError] = useState(''); const [notice, setNotice] = useState('')
@@ -71,6 +78,14 @@ export default function MovieDetailPage() {
   const previewDelete = () => movie && bridge.previewDeleteMovie(movie.id).then(setDeletePreview).catch((reason: Error) => setNotice(reason.message))
   const confirmDelete = () => deletePreview && bridge.deleteMovie(deletePreview.movieId, deletePreview.confirmationToken).then((result) => { setDeletePreview(undefined); navigate('/media', { replace: true }); window.setTimeout(() => setNotice(result.message), 0) }).catch((reason: Error) => setNotice(reason.message))
   const syncMetadata = () => movie && bridge.syncMovie(movie.id).then(result => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message))
+  const refreshStatus = () => movie && loadMovie(movie.id).then(() => setNotice('状态已刷新')).catch((reason: Error) => setNotice(reason.message))
+  const openMovieFolder = () => {
+    const path = movie?.mediaFiles[0]?.path
+    if (!path) { setNotice('没有可打开的文件目录'); return }
+    const directory = path.replace(/[\\/][^\\/]*$/, '')
+    window.open(`file:///${directory.replaceAll('\\', '/')}`)
+    setNotice(`正在打开目录：${directory}`)
+  }
   const setImageLock = (asset: ImageAsset) => bridge.setImageLock(asset.id, !asset.locked).then(result => { setNotice(result.message); return movie ? bridge.movieImages(movie.id).then(setImageAssets) : undefined }).catch((reason: Error) => setNotice(reason.message))
   const previewNfo = (mode: 'import' | 'export') => { if (!movie) return; setBusy(true); setNfoMode(mode); (mode === 'import' ? bridge.previewNfoImport(movie.id) : bridge.previewNfoExport(movie.id)).then(setNfoPreview).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false)) }
   const confirmNfo = (separateWhenLocked = false) => { if (!movie || !nfoPreview) return; setBusy(true); const action = nfoMode === 'import' ? bridge.importNfo(movie.id, nfoPreview.confirmationToken) : bridge.exportNfo(movie.id, nfoPreview.confirmationToken, separateWhenLocked); action.then(result => { setNfoPreview(undefined); setNotice(result.message); return loadMovie(movie.id) }).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false)) }
@@ -113,11 +128,26 @@ export default function MovieDetailPage() {
         </Box>
       </Paper>
 
+      <SurfaceSection title="元数据状态" description={movie.metadataStatus.missingItems.length ? `缺少：${movie.metadataStatus.missingItems.join('、')}` : '当前影片元数据已完整'}>
+        <Stack spacing={1.5}>
+          <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+            <Chip color={movie.metadataStatus.state === 'complete' ? 'success' : movie.metadataStatus.state === 'unscraped' ? 'error' : 'warning'} label={`${movie.metadataStatus.icon} ${movie.metadataStatus.label}`}/>
+            <Button size="small" startIcon={<SyncRoundedIcon/>} onClick={syncMetadata}>同步信息</Button>
+            <Button size="small" startIcon={<SyncRoundedIcon/>} onClick={syncMetadata}>重新刮削</Button>
+            <Button size="small" startIcon={<FolderRoundedIcon/>} onClick={openMovieFolder}>打开影片目录</Button>
+            <Button size="small" onClick={refreshStatus}>刷新状态</Button>
+          </Stack>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,minmax(0,1fr))', md: 'repeat(3,minmax(0,1fr))' }, gap: 1 }}>
+            {movie.metadataStatus.checks.map(item => <MetadataCheckRow key={item.key} label={item.label} complete={item.complete}/>)}
+          </Box>
+        </Stack>
+      </SurfaceSection>
+
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0,1.25fr) minmax(320px,.75fr)' }, gap: 2.25, alignItems: 'start' }}>
         <Stack spacing={2.25}>
           <SurfaceSection title="影片信息" description="整理后的媒体关联与元数据">
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,minmax(0,1fr))' }, gap: 2.25 }}>
-              <Relation label="演员" items={movie.actors}/><Relation label="类型" items={movie.genres}/><Relation label="制作商" items={movie.studios}/><Relation label="系列" items={movie.series}/><Relation label="标签" items={movie.tags}/>
+              <Relation label="演员" items={movie.actors}/><Relation label="导演" items={movie.directors}/><Relation label="类型" items={movie.genres}/><Relation label="制作商" items={movie.studios}/><Relation label="系列" items={movie.series}/><Relation label="标签" items={movie.tags}/>
               <Box><Typography variant="overline" color="text.secondary" sx={{ fontWeight: 750 }}>导入日期</Typography><Typography sx={{ mt: .5 }}>{date(movie.importedAt)}</Typography></Box>
             </Box>
             {movie.description && <><Divider sx={{ my: 2.25 }}/><Typography variant="subtitle2" sx={{ fontWeight: 800, mb: .75 }}>内容简介</Typography><Typography color="text.secondary" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.85 }}>{movie.description}</Typography></>}

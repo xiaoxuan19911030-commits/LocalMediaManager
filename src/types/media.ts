@@ -4,6 +4,15 @@ export interface LibrarySummary {
   readOnly: boolean
 }
 
+export interface MetadataCheck { key: string; label: string; complete: boolean }
+export interface MetadataStatus {
+  state: 'complete' | 'partial' | 'unscraped'
+  icon: string
+  label: string
+  missingItems: string[]
+  checks: MetadataCheck[]
+}
+
 export interface MediaItem {
   dataId: number
   code: string
@@ -14,6 +23,7 @@ export interface MediaItem {
   releaseDate: string
   importedAt: string
   coverUrl?: string
+  metadataStatus: MetadataStatus
 }
 
 export interface MediaPageResult {
@@ -38,6 +48,9 @@ export interface DashboardSummary {
   missingFileCount: number
   libraryCount: number
   activeTaskCount: number
+  completeMetadataCount: number
+  pendingMetadataCount: number
+  unscrapedCount: number
   recentImports: MediaItem[]
   recentPlays: MediaItem[]
 }
@@ -156,8 +169,10 @@ export interface MovieDetail {
   lastPositionSeconds: number
   notes?: string
   coverUrl?: string
+  metadataStatus: MetadataStatus
   mediaFiles: MediaFileItem[]
   actors: NamedItem[]
+  directors: NamedItem[]
   tags: NamedItem[]
   genres: NamedItem[]
   studios: NamedItem[]
@@ -169,11 +184,12 @@ export interface ActorDetail { id: number; name: string; alias?: string; gender?
 export interface EntityPageResult { items: EntityCard[]; total: number; limit: number; offset: number }
 export interface AdvancedSearchFilters {
   query: string; actorId?: number; tagId?: number; favorite?: boolean; watched?: boolean; ratingMin?: number
-  metadata?: string; fileStatus?: string; libraryId?: number; sort?: string; limit?: number; offset?: number
+  metadata?: string; fileStatus?: string; metadataStatus?: string; libraryId?: number; sort?: string; limit?: number; offset?: number
 }
 export interface MetadataOverview {
-  totalMovies: number; scrapedMovies: number; missingTitle: number; missingCover: number
-  missingActors: number; missingTags: number; missingNfo: number; missingFiles: number
+  totalMovies: number; scrapedMovies: number; completeMovies: number; pendingMovies: number; unscrapedMovies: number
+  missingTitle: number; missingCover: number; missingFanart: number; missingPreview: number
+  missingActors: number; missingTags: number; missingDescription: number; missingNfo: number; missingFiles: number
 }
 export interface DiagnosticItem { severity: 'error' | 'warning' | 'info'; code: string; title: string; detail: string; count: number }
 export interface DiagnosticsResult { integrity: string; foreignKeyErrors: number; items: DiagnosticItem[] }
