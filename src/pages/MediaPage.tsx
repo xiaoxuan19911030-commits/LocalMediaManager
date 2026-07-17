@@ -1,13 +1,12 @@
 import FavoriteBorderRoundedIcon from '@mui/icons-material/FavoriteBorderRounded'
 import FavoriteRoundedIcon from '@mui/icons-material/FavoriteRounded'
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded'
+import EditRoundedIcon from '@mui/icons-material/EditRounded'
 import FolderRoundedIcon from '@mui/icons-material/FolderRounded'
-import ImageRoundedIcon from '@mui/icons-material/ImageRounded'
-import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import StarRoundedIcon from '@mui/icons-material/StarRounded'
 import SyncRoundedIcon from '@mui/icons-material/SyncRounded'
-import { Alert, Autocomplete, Button, Collapse, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Divider, FormControlLabel, InputAdornment, ListItemIcon, Menu, MenuItem, Snackbar, Stack, Switch, TextField, Typography } from '@mui/material'
+import { Alert, Autocomplete, Button, Collapse, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Divider, InputAdornment, ListItemIcon, Menu, MenuItem, Snackbar, Stack, TextField, Typography } from '@mui/material'
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { MovieResultContainer, useMovieActions } from '@/components/workspace/MovieResults'
 import { ViewModeToggle, WorkspacePage, refreshAction } from '@/components/workspace/Workspace'
@@ -23,8 +22,6 @@ interface SavedMediaState {
   search?: string
   query?: string
   sort?: string
-  favorite?: boolean
-  watched?: boolean
   rating?: string
   tagId?: number
   metadataStatus?: string
@@ -50,8 +47,6 @@ export default function MediaPage() {
   const [search, setSearch] = useState(saved.search ?? '')
   const [query, setQuery] = useState(saved.query ?? '')
   const [sort, setSort] = useState(saved.sort ?? 'newest')
-  const [favorite, setFavorite] = useState(saved.favorite ?? false)
-  const [watched, setWatched] = useState(saved.watched ?? false)
   const [rating, setRating] = useState(saved.rating && saved.rating !== '0' ? String(saved.rating) : 'all')
   const [tagId, setTagId] = useState(saved.tagId ?? 0)
   const [metadataStatus, setMetadataStatus] = useState(saved.metadataStatus ?? 'all')
@@ -72,6 +67,8 @@ export default function MediaPage() {
   const [removeTags, setRemoveTags] = useState<NamedItem[]>([])
   const [contextMenu, setContextMenu] = useState<{ mouseX: number; mouseY: number; item: MediaItem }>()
   const [deletePreview, setDeletePreview] = useState<MovieDeletePreview>()
+  const [editMode, setEditMode] = useState(false)
+  const [subMenu, setSubMenu] = useState<{ kind: 'edit' | 'extend' | 'open'; anchor: HTMLElement }>()
   const movieActions = useMovieActions({ onNotice: setNotice, play: bridge.play })
 
   const load = useCallback(() => {
@@ -79,8 +76,6 @@ export default function MediaPage() {
     const effectiveMetadataStatus = imageStatus === 'missing' ? 'missing-images' : imageStatus === 'normal' ? 'complete' : metadataStatus
     bridge.advancedSearch({
       query,
-      favorite: favorite ? true : undefined,
-      watched: watched ? true : undefined,
       ratingFilter: rating,
       tagId: tagId || undefined,
       metadataStatus: effectiveMetadataStatus,
@@ -92,7 +87,7 @@ export default function MediaPage() {
       .then((result) => { setItems(result.items); setTotal(result.total) })
       .catch((reason: Error) => setError(reason.message))
       .finally(() => setLoading(false))
-  }, [favorite, imageStatus, libraryId, metadataStatus, page, query, rating, sort, tagId, watched])
+  }, [imageStatus, libraryId, metadataStatus, page, query, rating, sort, tagId])
 
   useEffect(load, [load])
   useEffect(() => {
@@ -100,24 +95,22 @@ export default function MediaPage() {
     bridge.entities('tags', '', 'name', 96, 0).then((result) => setTags(result.items)).catch(() => undefined)
   }, [])
   useEffect(() => {
-    window.sessionStorage.setItem(mediaStateKey, JSON.stringify({ page, search, query, sort, favorite, watched, rating, tagId, metadataStatus, imageStatus, libraryId, moreOpen, view }))
-  }, [favorite, imageStatus, libraryId, metadataStatus, moreOpen, page, query, rating, search, sort, tagId, view, watched])
+    window.sessionStorage.setItem(mediaStateKey, JSON.stringify({ page, search, query, sort, rating, tagId, metadataStatus, imageStatus, libraryId, moreOpen, view }))
+  }, [imageStatus, libraryId, metadataStatus, moreOpen, page, query, rating, search, sort, tagId, view])
 
   const activeFilterCount = useMemo(() => [
     query,
     sort !== 'newest',
-    favorite,
-    watched,
     rating !== 'all',
     tagId > 0,
     metadataStatus !== 'all',
     imageStatus !== 'all',
     libraryId > 0,
-  ].filter(Boolean).length, [favorite, imageStatus, libraryId, metadataStatus, query, rating, sort, tagId, watched])
+  ].filter(Boolean).length, [imageStatus, libraryId, metadataStatus, query, rating, sort, tagId])
 
   const submitSearch = () => { setPage(1); setQuery(search.trim()) }
   const clearFilters = () => {
-    setSearch(''); setQuery(''); setSort('newest'); setFavorite(false); setWatched(false); setRating('all')
+    setSearch(''); setQuery(''); setSort('newest'); setRating('all')
     setTagId(0); setMetadataStatus('all'); setImageStatus('all'); setLibraryId(0); setPage(1)
   }
   const batchFavorite = (value: boolean) => bridge.setBatchFavorite(selected, value).then((result) => { setNotice(result.message); setSelected([]); load() }).catch((reason: Error) => setNotice(reason.message))
@@ -126,12 +119,16 @@ export default function MediaPage() {
   const saveBatchRating = () => bridge.setBatchRating(selected, batchRating === '' ? undefined : Number(batchRating), batchRating === '').then((result) => { setNotice(result.message); setRatingDialog(false); setSelected([]); load() }).catch((reason: Error) => setNotice(reason.message))
   const createBatchSync = () => bridge.createBatchSync(selected).then((result) => { setNotice(result.message); setSelected([]) }).catch((reason: Error) => setNotice(reason.message))
   const openContextMenu = (event: MouseEvent, item: MediaItem) => { event.preventDefault(); setContextMenu({ mouseX: event.clientX + 2, mouseY: event.clientY - 6, item }) }
-  const closeContextMenu = () => setContextMenu(undefined)
+  const closeContextMenu = () => { setContextMenu(undefined); setSubMenu(undefined) }
   const syncContextMovie = () => { const item = contextMenu?.item; closeContextMenu(); if (item) bridge.syncMovie(item.dataId).then((result) => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message)) }
   const openContextMovie = () => { const item = contextMenu?.item; closeContextMenu(); if (item) movieActions.openMovie(item, { search: query, sort }) }
   const openContextLocation = () => { const item = contextMenu?.item; closeContextMenu(); if (item?.path) bridge.revealFile(item.path).then((result) => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message)); else setNotice('没有可定位的影片文件') }
   const previewDeleteContextMovie = () => { const item = contextMenu?.item; closeContextMenu(); if (item) bridge.previewDeleteMovie(item.dataId).then(setDeletePreview).catch((reason: Error) => setNotice(reason.message)) }
   const confirmDeleteContextMovie = () => deletePreview && bridge.deleteMovie(deletePreview.movieId, deletePreview.confirmationToken).then((result) => { setNotice(result.message); setDeletePreview(undefined); load() }).catch((reason: Error) => setNotice(reason.message))
+  const enterEditMode = () => { setEditMode(true); setSelected([]) }
+  const exitEditMode = () => { setEditMode(false); setSelected([]); closeContextMenu() }
+  const toggleSelect = (item: MediaItem) => setSelected((current) => current.includes(item.dataId) ? current.filter((id) => id !== item.dataId) : [...current, item.dataId])
+  const selectCurrentPage = () => setSelected(items.map((item) => item.dataId))
 
   const filters = <Stack component="form" onSubmit={(event) => { event.preventDefault(); submitSearch() }} spacing={1.25}>
     <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} useFlexGap sx={{ alignItems: { xs: 'stretch', md: 'center' }, flexWrap: 'wrap' }}>
@@ -140,14 +137,13 @@ export default function MediaPage() {
         <MenuItem value="newest">最新导入</MenuItem><MenuItem value="code">番号</MenuItem><MenuItem value="title">标题</MenuItem><MenuItem value="release">发行日期</MenuItem><MenuItem value="rating">个人评分</MenuItem>
       </TextField>
       <Button type="submit" variant="contained">搜索</Button>
+      {!editMode ? <Button variant="outlined" startIcon={<EditRoundedIcon/>} onClick={enterEditMode}>编辑</Button> : <><Button variant="outlined" onClick={selectCurrentPage}>全选当前页</Button><Typography variant="body2" color="text.secondary">已选择 {selected.length} 部</Typography><Button variant="contained" onClick={exitEditMode}>完成</Button></>}
       <Button variant="outlined" onClick={() => void load()}>刷新</Button>
       <ViewModeToggle value={view} onChange={setView}/>
       <Button color="inherit" onClick={() => setMoreOpen((value) => !value)}>{moreOpen ? '收起筛选' : '更多筛选'}</Button>
     </Stack>
     <Collapse in={moreOpen} unmountOnExit={false}>
       <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.25} useFlexGap sx={{ alignItems: { xs: 'stretch', lg: 'center' }, flexWrap: 'wrap' }}>
-        <FormControlLabel sx={{ ml: 0 }} control={<Switch checked={favorite} onChange={(event) => { setPage(1); setFavorite(event.target.checked) }}/>} label="收藏"/>
-        <FormControlLabel sx={{ ml: 0 }} control={<Switch checked={watched} onChange={(event) => { setPage(1); setWatched(event.target.checked) }}/>} label="已观看"/>
         <TextField select size="small" label="评分" value={rating} onChange={(event) => { setPage(1); setRating(event.target.value) }} sx={{ minWidth: 130 }}>
           <MenuItem value="all">全部评分</MenuItem><MenuItem value="unrated">未评分</MenuItem>{[5, 4, 3, 2, 1].map((value) => <MenuItem key={value} value={String(value)}>{'★'.repeat(value)}</MenuItem>)}
         </TextField>
@@ -167,7 +163,7 @@ export default function MediaPage() {
     </Collapse>
   </Stack>
 
-  const stats = selected.length > 0 && <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap', p: 1.25, border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'action.hover' }}>
+  const stats = editMode && selected.length > 0 && <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap', p: 1.25, border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'action.hover' }}>
     <Typography sx={{ fontWeight: 800 }}>已选择 {selected.length} 部</Typography>
     <Button size="small" startIcon={<FavoriteRoundedIcon/>} onClick={() => batchFavorite(true)}>收藏</Button>
     <Button size="small" startIcon={<FavoriteBorderRoundedIcon/>} onClick={() => batchFavorite(false)}>取消收藏</Button>
@@ -182,25 +178,33 @@ export default function MediaPage() {
 
   return <WorkspacePage title="影片墙" description={`共 ${total} 部影片，支持搜索、排序、筛选和分页浏览。`} stats={stats} filters={filters} activeFilterCount={activeFilterCount} onClearFilters={clearFilters} loading={loading} error={error}
     primaryActions={[refreshAction(load)]}>
-    <MovieResultContainer items={items} total={total} page={page} pageSize={pageSize} onPageChange={setPage} view={view} selectable selectedIds={selected} onSelect={(value, checked) => setSelected((current) => checked ? [...current, value.dataId] : current.filter((id) => id !== value.dataId))} onRatingClick={selected.length > 0 ? () => setRatingDialog(true) : undefined} onContextMenu={openContextMenu} onPlay={movieActions.playMovie} onOpen={(item) => movieActions.openMovie(item, { search: query, sort })} emptyTitle="暂无影片" emptyDescription="当前媒体库还没有可展示的影片。"/>
+    <MovieResultContainer items={items} total={total} page={page} pageSize={pageSize} onPageChange={setPage} view={view} selectable={editMode} selectedIds={selected} onSelect={(value, checked) => setSelected((current) => checked ? [...current, value.dataId] : current.filter((id) => id !== value.dataId))} onRatingClick={editMode && selected.length > 0 ? () => setRatingDialog(true) : undefined} onContextMenu={openContextMenu} onPlay={movieActions.playMovie} onOpen={(item) => editMode ? toggleSelect(item) : movieActions.openMovie(item, { search: query, sort })} emptyTitle="暂无影片" emptyDescription="当前媒体库还没有可展示的影片。"/>
     <Menu open={Boolean(contextMenu)} onClose={closeContextMenu} anchorReference="anchorPosition" anchorPosition={contextMenu ? { top: contextMenu.mouseY, left: contextMenu.mouseX } : undefined}>
-      {selected.length > 1 ? [
+      {editMode && selected.length > 0 ? [
         <MenuItem key="batch-sync" onClick={() => { closeContextMenu(); void createBatchSync() }}><ListItemIcon><SyncRoundedIcon fontSize="small"/></ListItemIcon>全部同步信息</MenuItem>,
         <Divider key="batch-divider-1"/>,
-        <MenuItem key="batch-screenshot" disabled>批量生成截图</MenuItem>,
-        <MenuItem key="batch-gif" disabled>批量生成 GIF</MenuItem>,
+        <MenuItem key="batch-screenshot" disabled>批量生成截图（开发中：缺少截图任务 Runner）</MenuItem>,
+        <MenuItem key="batch-gif" disabled>批量生成 GIF（开发中：缺少 GIF 任务 Runner）</MenuItem>,
         <Divider key="batch-divider-2"/>,
-        <MenuItem key="batch-delete-info" disabled>删除信息</MenuItem>,
-        <MenuItem key="batch-delete-file" disabled>删除影片</MenuItem>,
+        <MenuItem key="batch-delete-info" disabled>删除信息（开发中：缺少批量预览）</MenuItem>,
+        <MenuItem key="batch-delete-file" disabled>删除影片（开发中：缺少安全文件删除工作流）</MenuItem>,
       ] : [
         <MenuItem key="sync" onClick={syncContextMovie}><ListItemIcon><SyncRoundedIcon fontSize="small"/></ListItemIcon>同步信息</MenuItem>,
-        <MenuItem key="edit" onClick={openContextMovie}><ListItemIcon><InfoOutlinedIcon fontSize="small"/></ListItemIcon>编辑</MenuItem>,
-        <MenuItem key="images" onClick={openContextMovie}><ListItemIcon><ImageRoundedIcon fontSize="small"/></ListItemIcon>图片</MenuItem>,
-        <MenuItem key="location" onClick={openContextLocation}><ListItemIcon><FolderRoundedIcon fontSize="small"/></ListItemIcon>打开位置</MenuItem>,
+        <Divider key="divider-1"/>,
+        <MenuItem key="edit" onMouseEnter={(event) => setSubMenu({ kind: 'edit', anchor: event.currentTarget })} onClick={(event) => setSubMenu({ kind: 'edit', anchor: event.currentTarget })}><ListItemIcon><EditRoundedIcon fontSize="small"/></ListItemIcon>编辑</MenuItem>,
+        <Divider key="divider-2"/>,
+        <MenuItem key="extend" onMouseEnter={(event) => setSubMenu({ kind: 'extend', anchor: event.currentTarget })} onClick={(event) => setSubMenu({ kind: 'extend', anchor: event.currentTarget })}>扩展功能</MenuItem>,
+        <Divider key="divider-3"/>,
+        <MenuItem key="location" onMouseEnter={(event) => setSubMenu({ kind: 'open', anchor: event.currentTarget })} onClick={(event) => setSubMenu({ kind: 'open', anchor: event.currentTarget })}><ListItemIcon><FolderRoundedIcon fontSize="small"/></ListItemIcon>打开位置</MenuItem>,
         <Divider key="divider"/>,
         <MenuItem key="delete-info" onClick={previewDeleteContextMovie}><ListItemIcon><DeleteOutlineRoundedIcon fontSize="small"/></ListItemIcon>删除信息</MenuItem>,
-        <MenuItem key="delete-file" disabled>删除影片</MenuItem>,
+        <MenuItem key="delete-file" disabled>删除影片（开发中：缺少安全文件删除工作流）</MenuItem>,
       ]}
+    </Menu>
+    <Menu open={Boolean(subMenu)} anchorEl={subMenu?.anchor} onClose={() => setSubMenu(undefined)} anchorOrigin={{ vertical: 'top', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'left' }}>
+      {subMenu?.kind === 'edit' && [<MenuItem key="info" onClick={openContextMovie}>编辑信息</MenuItem>, <MenuItem key="recognize" disabled>重新识别主画面（开发中：缺少智能卡图 Runner）</MenuItem>, <MenuItem key="left" disabled>居左裁切（开发中：缺少裁切预览）</MenuItem>, <MenuItem key="center" disabled>居中裁切（开发中：缺少裁切预览）</MenuItem>, <MenuItem key="right" disabled>居右裁切（开发中：缺少裁切预览）</MenuItem>]}
+      {subMenu?.kind === 'extend' && [<MenuItem key="screenshot" disabled>生成截图（开发中：缺少截图任务 Runner）</MenuItem>, <MenuItem key="gif" disabled>生成 GIF（开发中：缺少 GIF 任务 Runner）</MenuItem>, <MenuItem key="rename" onClick={openContextMovie}>重命名影片</MenuItem>]}
+      {subMenu?.kind === 'open' && [<MenuItem key="movie" disabled={!contextMenu?.item.path} onClick={openContextLocation}>影片{contextMenu?.item.path ? '' : '（无文件路径）'}</MenuItem>, <MenuItem key="poster" disabled>海报（请在详情页图片资源中打开）</MenuItem>, <MenuItem key="preview" disabled>预览图（请在详情页图片资源中打开）</MenuItem>, <MenuItem key="thumb" disabled>缩略图（请在详情页图片资源中打开）</MenuItem>, <MenuItem key="screenshot" disabled>截图（尚无可定位资源）</MenuItem>, <MenuItem key="gif" disabled>GIF（尚无可定位资源）</MenuItem>]}
     </Menu>
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>
     <Dialog open={ratingDialog} onClose={() => setRatingDialog(false)} fullWidth maxWidth="xs"><DialogTitle>批量评分</DialogTitle><DialogContent><TextField select fullWidth margin="normal" label="评分" value={batchRating} onChange={(event) => setBatchRating(event.target.value)}><MenuItem value="">清除评分</MenuItem>{[0, 1, 2, 3, 4, 5].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}</TextField></DialogContent><DialogActions><Button onClick={() => setRatingDialog(false)}>取消</Button><Button variant="contained" onClick={saveBatchRating}>应用到 {selected.length} 部影片</Button></DialogActions></Dialog>

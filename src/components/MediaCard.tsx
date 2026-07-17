@@ -3,7 +3,7 @@ import NewReleasesRoundedIcon from '@mui/icons-material/NewReleasesRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import { Box, Card, CardContent, Checkbox, Chip, IconButton, Rating, Tooltip, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
-import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { SmartImage } from '@/components/SmartImage'
 import type { MediaItem } from '@/types/media'
 
@@ -19,15 +19,17 @@ export function MediaCardGrid({ children, minWidth = 148 }: { children: ReactNod
 
 export function MediaCard({ item, onPlay, onOpen, selected, onSelect, onRatingClick, onContextMenu }: { item: MediaItem; onPlay: (item: MediaItem) => void; onOpen?: (item: MediaItem) => void; selected?: boolean; onSelect?: (item: MediaItem, selected: boolean) => void; onRatingClick?: (item: MediaItem) => void; onContextMenu?: (event: MouseEvent, item: MediaItem) => void }) {
   const [coverFailed, setCoverFailed] = useState(false)
+  const clickTimer = useRef<number | undefined>(undefined)
   useEffect(() => setCoverFailed(false), [item.coverUrl])
+  useEffect(() => () => { if (clickTimer.current) window.clearTimeout(clickTimer.current) }, [])
   const recent = isRecent(item.importedAt)
   const displayTitle = item.title && !item.title.includes('\uFFFD') ? item.title : ''
   const primaryText = item.code || displayTitle || `影片 ${item.dataId}`
   const metadataTone = item.metadataStatus?.state === 'complete' ? 'success.main' : item.metadataStatus?.state === 'unscraped' ? 'error.main' : 'warning.main'
   const metadataTip = item.metadataStatus?.missingItems?.length ? `缺少：${item.metadataStatus.missingItems.join('、')}` : item.metadataStatus?.label
   return (
-    <Card role={onOpen ? 'button' : undefined} tabIndex={onOpen ? 0 : undefined} onContextMenu={(event) => onContextMenu?.(event, item)} onKeyDown={(event) => { if (onOpen && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(item) } }}
-      onClick={() => onOpen?.(item)} sx={{ overflow: 'hidden', minWidth: 0, cursor: onOpen ? 'pointer' : 'default', position: 'relative', borderColor: selected ? 'primary.main' : undefined,
+    <Card role={onOpen ? 'button' : undefined} tabIndex={onOpen ? 0 : undefined} onContextMenu={(event) => onContextMenu?.(event, item)} onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); if (clickTimer.current) window.clearTimeout(clickTimer.current); onPlay(item) }} onKeyDown={(event) => { if (onOpen && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(item) } }}
+      onClick={() => { if (!onOpen) return; if (clickTimer.current) window.clearTimeout(clickTimer.current); clickTimer.current = window.setTimeout(() => onOpen(item), 180) }} sx={{ overflow: 'hidden', minWidth: 0, cursor: onOpen ? 'pointer' : 'default', position: 'relative', borderColor: selected ? 'primary.main' : undefined,
         transition: 'transform .22s cubic-bezier(.2,.8,.2,1), border-color .22s ease, box-shadow .22s ease',
         '&:hover': onOpen ? { transform: 'translateY(-5px)', borderColor: 'primary.main', boxShadow: (theme) => `0 14px 32px ${alpha(theme.palette.common.black, theme.palette.mode === 'dark' ? .32 : .14)}` } : undefined,
         '&:hover .media-play': { opacity: 1, transform: 'translate(-50%,-50%) scale(1)' }, '&:hover .media-image': { transform: 'scale(1.025)' },

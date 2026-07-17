@@ -1,6 +1,7 @@
 import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import { Box, Button, Card, CardContent, Pagination, Rating, Stack, Tooltip, Typography } from '@mui/material'
+import { useEffect, useRef } from 'react'
 import type { MouseEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { MediaCard, MediaCardGrid } from '@/components/MediaCard'
@@ -74,10 +75,20 @@ export function MovieResultContainer({
 }
 
 export function MovieList({ items, onPlay, onOpen, onContextMenu }: { items: MediaItem[]; onPlay: (item: MediaItem) => void; onOpen: (item: MediaItem) => void; onContextMenu?: (event: MouseEvent, item: MediaItem) => void }) {
+  const clickTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => { if (clickTimer.current) window.clearTimeout(clickTimer.current) }, [])
+  const openDelayed = (item: MediaItem) => {
+    if (clickTimer.current) window.clearTimeout(clickTimer.current)
+    clickTimer.current = window.setTimeout(() => onOpen(item), 180)
+  }
+  const playNow = (item: MediaItem) => {
+    if (clickTimer.current) window.clearTimeout(clickTimer.current)
+    onPlay(item)
+  }
   return <Stack spacing={1}>
     {items.map(item => {
       const title = item.title || item.code || `#${item.dataId}`
-      return <Card key={item.dataId} variant="outlined" onContextMenu={(event) => onContextMenu?.(event, item)}><CardContent sx={{ py: 1.25, '&:last-child': { pb: 1.25 } }}>
+      return <Card key={item.dataId} variant="outlined" onClick={() => openDelayed(item)} onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); playNow(item) }} onContextMenu={(event) => onContextMenu?.(event, item)}><CardContent sx={{ py: 1.25, '&:last-child': { pb: 1.25 } }}>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(130px,.7fr) minmax(220px,1.3fr) 120px 120px auto' }, gap: 1.25, alignItems: 'center' }}>
           <Box sx={{ minWidth: 0 }}><Typography noWrap sx={{ fontWeight: 800 }}>{item.code || `#${item.dataId}`}</Typography><Typography variant="caption" color="text.secondary">ID {item.dataId}</Typography></Box>
           <Tooltip title={title}><Typography noWrap>{title}</Typography></Tooltip>
@@ -87,8 +98,8 @@ export function MovieList({ items, onPlay, onOpen, onContextMenu }: { items: Med
             {item.metadataStatus && <MetadataStatusBadge status={item.metadataStatus}/>}
           </Stack>
           <Stack direction="row" spacing={.5} sx={{ justifyContent: 'flex-end' }}>
-            <Button size="small" startIcon={<PlayArrowRoundedIcon/>} onClick={() => onPlay(item)}>播放</Button>
-            <Button size="small" startIcon={<OpenInNewRoundedIcon/>} onClick={() => onOpen(item)}>详情</Button>
+            <Button size="small" startIcon={<PlayArrowRoundedIcon/>} onClick={(event) => { event.stopPropagation(); onPlay(item) }}>播放</Button>
+            <Button size="small" startIcon={<OpenInNewRoundedIcon/>} onClick={(event) => { event.stopPropagation(); onOpen(item) }}>详情</Button>
           </Stack>
         </Box>
         {item.path && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: .75, overflowWrap: 'anywhere' }}>{item.path}</Typography>}
