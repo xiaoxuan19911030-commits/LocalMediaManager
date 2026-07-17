@@ -51,8 +51,62 @@ export interface DashboardSummary {
   completeMetadataCount: number
   pendingMetadataCount: number
   unscrapedCount: number
+  actorCount: number
+  directorCount: number
+  tagCount: number
+  seriesCount: number
+  studioCount: number
+  maintenance: DashboardMaintenance
+  metadataHealth: DashboardMetadataHealth
+  recentActivity: DashboardActivity[]
+  libraries: DashboardLibrary[]
+  topTags: DashboardEntity[]
+  topActors: DashboardEntity[]
+  topDirectors: DashboardEntity[]
+  topStudios: DashboardEntity[]
+  topSeries: DashboardEntity[]
   recentImports: MediaItem[]
   recentPlays: MediaItem[]
+}
+
+export interface DashboardMaintenance {
+  healthyMovies: number
+  pendingMovies: number
+  unscrapedMovies: number
+  duplicateMovies: number
+  missingImages: number
+  missingNfo: number
+  cacheProblems: number
+}
+
+export interface DashboardMetadataHealth {
+  completeRate: number
+  imageRate: number
+  nfoRate: number
+  actorRate: number
+  tagRate: number
+}
+
+export interface DashboardActivity {
+  type: string
+  title: string
+  detail: string
+  createdAt?: string
+  movieId?: number
+}
+
+export interface DashboardLibrary {
+  id: number
+  name: string
+  movieCount: number
+  fileBytes: number
+  lastUpdatedAt?: string
+}
+
+export interface DashboardEntity {
+  id: number
+  name: string
+  movieCount: number
 }
 
 export interface SearchEntity {

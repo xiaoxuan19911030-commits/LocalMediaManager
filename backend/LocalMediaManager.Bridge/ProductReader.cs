@@ -6,9 +6,20 @@ public sealed record MetadataCheckDto(string Key, string Label, bool Complete);
 public sealed record MetadataStatusDto(string State, string Icon, string Label, IReadOnlyList<string> MissingItems, IReadOnlyList<MetadataCheckDto> Checks);
 public sealed record MediaCardDto(long DataId, string Code, string Title, string Path, double Grade,
     bool Favorite, string ReleaseDate, string ImportedAt, string? CoverUrl, MetadataStatusDto MetadataStatus);
+public sealed record DashboardActivityDto(string Type, string Title, string Detail, string? CreatedAt, long? MovieId);
+public sealed record DashboardEntityDto(long Id, string Name, long MovieCount);
+public sealed record DashboardLibraryDto(long Id, string Name, long MovieCount, long FileBytes, string? LastUpdatedAt);
+public sealed record DashboardMaintenanceDto(long HealthyMovies, long PendingMovies, long UnscrapedMovies, long DuplicateMovies,
+    long MissingImages, long MissingNfo, long CacheProblems);
+public sealed record DashboardMetadataHealthDto(long CompleteRate, long ImageRate, long NfoRate, long ActorRate, long TagRate);
 public sealed record DashboardDto(long MovieCount, long FavoriteCount, long PlayedCount, long MissingFileCount,
     long LibraryCount, long ActiveTaskCount, long CompleteMetadataCount, long PendingMetadataCount, long UnscrapedCount,
-    IReadOnlyList<MediaCardDto> RecentImports, IReadOnlyList<MediaCardDto> RecentPlays);
+    long ActorCount, long DirectorCount, long TagCount, long SeriesCount, long StudioCount,
+    DashboardMaintenanceDto Maintenance, DashboardMetadataHealthDto MetadataHealth,
+    IReadOnlyList<DashboardActivityDto> RecentActivity, IReadOnlyList<DashboardLibraryDto> Libraries,
+    IReadOnlyList<DashboardEntityDto> TopTags, IReadOnlyList<DashboardEntityDto> TopActors,
+    IReadOnlyList<DashboardEntityDto> TopDirectors, IReadOnlyList<DashboardEntityDto> TopStudios,
+    IReadOnlyList<DashboardEntityDto> TopSeries, IReadOnlyList<MediaCardDto> RecentImports, IReadOnlyList<MediaCardDto> RecentPlays);
 public sealed record SearchEntityDto(long Id, string Name, long MovieCount);
 public sealed record GlobalSearchDto(string Query, IReadOnlyList<MediaCardDto> Movies,
     IReadOnlyList<SearchEntityDto> Actors, IReadOnlyList<SearchEntityDto> Tags);
@@ -49,6 +60,7 @@ public static class ProductReader
     public static async Task<DashboardDto> ReadDashboardAsync(string databasePath, string bridgeUrl)
     {
         await using var connection = await OpenAsync(databasePath);
+        bool hasDirectors = await HasDirectorsAsync(connection);
         long movies = await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies");
         long favorites = await ScalarAsync(connection, "SELECT COUNT(*) FROM UserMovieState WHERE IsFavorite=1");
         long played = await ScalarAsync(connection, "SELECT COUNT(*) FROM UserMovieState WHERE PlayCount>0");
@@ -56,9 +68,41 @@ public static class ProductReader
         long libraries = await ScalarAsync(connection, "SELECT COUNT(*) FROM Libraries WHERE IsEnabled=1");
         long tasks = await ScalarAsync(connection, "SELECT COUNT(*) FROM Tasks WHERE Status NOT IN ('Completed','Failed','Cancelled')");
         (long complete, long pending, long unscraped) = await ReadMetadataCountsAsync(connection);
+        long actors = await ScalarAsync(connection, "SELECT COUNT(*) FROM Actors");
+        long directors = hasDirectors ? await ScalarAsync(connection, "SELECT COUNT(*) FROM Directors") : 0;
+        long tags = await ScalarAsync(connection, "SELECT COUNT(*) FROM Tags");
+        long series = await ScalarAsync(connection, "SELECT COUNT(*) FROM Series");
+        long studios = await ScalarAsync(connection, "SELECT COUNT(*) FROM Studios");
+        long missingImages = await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id)");
+        long missingNfo = await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies WHERE trim(COALESCE(NfoPath,''))=''");
+        long missingActors = await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id)");
+        long missingTags = await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieTags mt WHERE mt.MovieId=m.Id)");
+        var maintenance = new DashboardMaintenanceDto(
+            Math.Max(0, movies - pending),
+            pending,
+            unscraped,
+            await CountDuplicateMovieIdsAsync(connection),
+            missingImages,
+            missingNfo,
+            await CountInvalidCacheRowsAsync(connection));
+        var metadataHealth = new DashboardMetadataHealthDto(
+            Percent(complete, movies),
+            Percent(movies - missingImages, movies),
+            Percent(movies - missingNfo, movies),
+            Percent(movies - missingActors, movies),
+            Percent(movies - missingTags, movies));
+        var recentActivity = await ReadDashboardActivityAsync(connection);
+        var libraryStats = await ReadDashboardLibrariesAsync(connection);
+        var topTags = await ReadTopEntitiesAsync(connection, "Tags", "MovieTags", "TagId");
+        var topActors = await ReadTopEntitiesAsync(connection, "Actors", "MovieActors", "ActorId");
+        var topDirectors = hasDirectors ? await ReadTopEntitiesAsync(connection, "Directors", "MovieDirectors", "DirectorId") : [];
+        var topStudios = await ReadTopEntitiesAsync(connection, "Studios", "MovieStudios", "StudioId");
+        var topSeries = await ReadTopEntitiesAsync(connection, "Series", "MovieSeries", "SeriesId");
         var recentImports = await ReadCardsAsync(connection, bridgeUrl, "m.ImportedAt DESC, m.Id DESC", 8, false);
         var recentPlays = await ReadCardsAsync(connection, bridgeUrl, "s.LastPlayedAt DESC, m.Id DESC", 8, true);
-        return new(movies, favorites, played, missing, libraries, tasks, complete, pending, unscraped, recentImports, recentPlays);
+        return new(movies, favorites, played, missing, libraries, tasks, complete, pending, unscraped,
+            actors, directors, tags, series, studios, maintenance, metadataHealth, recentActivity, libraryStats,
+            topTags, topActors, topDirectors, topStudios, topSeries, recentImports, recentPlays);
     }
 
     public static async Task<GlobalSearchDto> SearchAsync(string databasePath, string bridgeUrl, string query, int limit)
@@ -527,6 +571,106 @@ public static class ProductReader
     private static async Task<IReadOnlyList<SearchEntityDto>> ReadEntitiesAsync(SqliteConnection connection,string table,string relation,string key,string like,int limit){
         await using var command=connection.CreateCommand();command.CommandText=$"SELECT e.Id,e.Name,COUNT(r.MovieId) FROM {table} e LEFT JOIN {relation} r ON r.{key}=e.Id WHERE e.Name LIKE $like ESCAPE '\\' GROUP BY e.Id ORDER BY COUNT(r.MovieId) DESC,e.Name LIMIT $limit";command.Parameters.AddWithValue("$like",like);command.Parameters.AddWithValue("$limit",limit);
         var result=new List<SearchEntityDto>();await using var reader=await command.ExecuteReaderAsync();while(await reader.ReadAsync())result.Add(new(reader.GetInt64(0),reader.GetString(1),reader.GetInt64(2)));return result;
+    }
+    private static long Percent(long value, long total) => total <= 0 ? 100 : Math.Clamp((long)Math.Round(value * 100d / total), 0, 100);
+    private static async Task<long> CountDuplicateMovieIdsAsync(SqliteConnection connection)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            WITH
+            duplicate_codes AS (
+                SELECT upper(trim(Code)) AS Key FROM Movies WHERE trim(COALESCE(Code,''))<>'' GROUP BY Key HAVING COUNT(*)>1
+            ),
+            duplicate_paths AS (
+                SELECT lower(trim(NormalizedPath)) AS Key FROM MediaFiles WHERE trim(COALESCE(NormalizedPath,''))<>'' GROUP BY Key HAVING COUNT(DISTINCT MovieId)>1
+            ),
+            duplicate_hashes AS (
+                SELECT lower(trim(FileHash)) AS Key FROM MediaFiles WHERE trim(COALESCE(FileHash,''))<>'' GROUP BY Key HAVING COUNT(DISTINCT MovieId)>1
+            )
+            SELECT COUNT(DISTINCT MovieId) FROM (
+                SELECT m.Id AS MovieId FROM Movies m JOIN duplicate_codes d ON upper(trim(m.Code))=d.Key
+                UNION ALL
+                SELECT f.MovieId FROM MediaFiles f JOIN duplicate_paths d ON lower(trim(f.NormalizedPath))=d.Key
+                UNION ALL
+                SELECT f.MovieId FROM MediaFiles f JOIN duplicate_hashes d ON lower(trim(f.FileHash))=d.Key
+            )
+            """;
+        return Convert.ToInt64(await command.ExecuteScalarAsync() ?? 0L);
+    }
+    private static async Task<long> CountInvalidCacheRowsAsync(SqliteConnection connection)
+    {
+        if (!await TableExistsAsync(connection, "ImageCacheEntries")) return 0;
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT CachePath FROM ImageCacheEntries LIMIT 10000";
+        long count = 0;
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) if (!reader.IsDBNull(0) && !File.Exists(reader.GetString(0))) count++;
+        return count;
+    }
+    private static async Task<IReadOnlyList<DashboardActivityDto>> ReadDashboardActivityAsync(SqliteConnection connection)
+    {
+        var result = new List<DashboardActivityDto>();
+        await using (var command = connection.CreateCommand()) {
+            command.CommandText = """
+                SELECT m.Id,COALESCE(NULLIF(m.Code,''),NULLIF(m.Title,''),CAST(m.Id AS TEXT)),COALESCE(m.ImportedAt,m.CreatedAt,'')
+                  FROM Movies m ORDER BY COALESCE(m.ImportedAt,m.CreatedAt,'') DESC,m.Id DESC LIMIT 5
+                """;
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) result.Add(new("recent-import", "最近新增影片", reader.GetString(1), Text(reader, 2), reader.GetInt64(0)));
+        }
+        await using (var command = connection.CreateCommand()) {
+            command.CommandText = """
+                SELECT CurrentMovieId,TaskType,Status,COALESCE(CompletedAt,StartedAt,CreatedAt,'')
+                  FROM Tasks
+                 WHERE TaskType LIKE '%Sync%' OR TaskType LIKE '%Metadata%' OR TaskType LIKE '%Scan%' OR TaskType='ImageCacheRebuild'
+                 ORDER BY Id DESC LIMIT 8
+                """;
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) result.Add(new("task", "任务动态", $"{reader.GetString(1)} · {reader.GetString(2)}", Text(reader, 3), reader.IsDBNull(0) ? null : reader.GetInt64(0)));
+        }
+        await using (var command = connection.CreateCommand()) {
+            command.CommandText = """
+                SELECT s.MovieId,COALESCE(NULLIF(m.Code,''),NULLIF(m.Title,''),CAST(m.Id AS TEXT)),COALESCE(s.UpdatedAt,''),COALESCE(s.UserRating,0),COALESCE(s.IsFavorite,0),COALESCE(s.HasUserRating,0)
+                  FROM UserMovieState s JOIN Movies m ON m.Id=s.MovieId
+                 WHERE COALESCE(s.HasUserRating,0)=1 OR COALESCE(s.IsFavorite,0)=1
+                 ORDER BY s.UpdatedAt DESC LIMIT 10
+                """;
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) {
+                bool hasRating = reader.GetInt64(5) == 1;
+                result.Add(new(hasRating ? "rating" : "favorite", hasRating ? "评分更新" : "收藏更新",
+                    hasRating ? $"{reader.GetString(1)} · {reader.GetDouble(3):0.#}" : reader.GetString(1),
+                    Text(reader, 2), reader.GetInt64(0)));
+            }
+        }
+        return result.OrderByDescending(item => item.CreatedAt ?? "").Take(20).ToList();
+    }
+    private static async Task<IReadOnlyList<DashboardLibraryDto>> ReadDashboardLibrariesAsync(SqliteConnection connection)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT l.Id,l.Name,COUNT(DISTINCT f.MovieId),COALESCE(SUM(f.FileSize),0),MAX(COALESCE(f.LastSeenAt,l.CreatedAt,''))
+              FROM Libraries l LEFT JOIN MediaFiles f ON f.LibraryId=l.Id
+             GROUP BY l.Id,l.Name ORDER BY COUNT(DISTINCT f.MovieId) DESC,l.Name LIMIT 10
+            """;
+        var result = new List<DashboardLibraryDto>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) result.Add(new(reader.GetInt64(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt64(3), Text(reader, 4)));
+        return result;
+    }
+    private static async Task<IReadOnlyList<DashboardEntityDto>> ReadTopEntitiesAsync(SqliteConnection connection, string table, string relation, string key)
+    {
+        if (!await TableExistsAsync(connection, table) || !await TableExistsAsync(connection, relation)) return [];
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT e.Id,e.Name,COUNT(DISTINCT r.MovieId) AS MovieCount
+              FROM {table} e LEFT JOIN {relation} r ON r.{key}=e.Id
+             GROUP BY e.Id,e.Name ORDER BY MovieCount DESC,e.Name LIMIT 10
+            """;
+        var result = new List<DashboardEntityDto>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) result.Add(new(reader.GetInt64(0), reader.GetString(1), reader.GetInt64(2)));
+        return result;
     }
     private static async Task<IReadOnlyList<NamedDto>> ReadNamesAsync(SqliteConnection connection,string table,string relation,string key,long movieId){
         await using var command=connection.CreateCommand();command.CommandText=$"SELECT e.Id,e.Name FROM {table} e JOIN {relation} r ON r.{key}=e.Id WHERE r.MovieId=$id ORDER BY e.Name";command.Parameters.AddWithValue("$id",movieId);
