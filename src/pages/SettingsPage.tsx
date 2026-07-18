@@ -20,12 +20,12 @@ import { buildInfo } from '@/buildInfo'
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
 import type { BridgeHealth } from '@/types/media'
-import type { BackupValidation, DataSafetyOverview, DiagnosticCheck, MetaTubeSettings, NfoSettings, PlaybackSettings, RatingRetentionSettings, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings } from '@/types/settings'
+import type { BackupValidation, DataSafetyOverview, DiagnosticCheck, MediaStorageSettings, MetaTubeSettings, NfoSettings, PlaybackSettings, RatingRetentionSettings, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 
 const categories = [
   ['general', '常规'], ['library', '媒体库'], ['scan', '扫描与导入'], ['metadata', '元数据与同步'],
-  ['images', '图片与缓存'], ['playback', '播放器'], ['search', '搜索与筛选'], ['shortcuts', '快捷键'],
+  ['images', '图片与缓存'], ['mediaStorage', '媒体存储'], ['playback', '播放器'], ['search', '搜索与筛选'], ['shortcuts', '快捷键'],
   ['appearance', '外观'], ['data', '数据与备份'], ['logs', '日志与诊断'], ['about', '关于'],
 ] as const
 
@@ -58,6 +58,7 @@ export default function SettingsPage() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [confirm, setConfirm] = useState<'backup' | 'cache' | 'restore' | 'thumbs' | 'logs'>()
+  const [createMediaRootOpen, setCreateMediaRootOpen] = useState(false)
   const [restoreDefaultsOpen, setRestoreDefaultsOpen] = useState(false)
   const [leavePromptOpen, setLeavePromptOpen] = useState(false)
   const allowWindowCloseRef = useRef(false)
@@ -109,7 +110,12 @@ export default function SettingsPage() {
         allowWindowCloseRef.current = false
         return
       }
-      if (!hasUnsavedChangesRef.current) return
+      if (!hasUnsavedChangesRef.current) {
+        event.preventDefault()
+        closingAppRef.current = true
+        await invoke('close_local_media_manager').catch(() => getCurrentWindow().destroy())
+        return
+      }
       event.preventDefault()
       leaveIntentRef.current = 'window'
       setLeavePromptOpen(true)
@@ -132,22 +138,30 @@ export default function SettingsPage() {
     if (key === 'appearance') setMode((value as UnifiedSettings['appearance']).themeMode)
   }
 
-  const saveAll = async () => {
+  const saveAll = async (createMissingMediaStorageRoot = false) => {
     if (!draft || !original) return false
     setBusy(true); setError('')
     try {
-      const result = await bridge.saveAllSettings(draft)
+      const result = await bridge.saveAllSettings(draft, createMissingMediaStorageRoot)
       setOriginal(clone(result.settings))
       setDraft(clone(result.settings))
       setMode(result.settings.appearance.themeMode)
+      setCreateMediaRootOpen(false)
       setNotice('设置已保存')
       return true
     } catch (reason) {
-      setError((reason as Error).message)
       const message = (reason as Error).message
-      if (message.includes('MetaTube')) setCategory('metadata')
-      else if (message.includes('NFO')) setCategory('metadata')
-      else if (message.includes('播放器')) setCategory('playback')
+      setError(message)
+      const mediaStorageError = message.includes('媒体存储') || message.includes('海报目录') || message.includes('缩略图目录') || message.includes('背景图目录') || message.includes('预览图目录') || message.includes('截图目录') || message.includes('GIF 目录') || message.includes('NFO 目录') || message.includes('影片资源文件夹规则') || message.includes('文件名规则')
+      if (mediaStorageError) {
+        setCategory('mediaStorage')
+      }
+      if (message.includes('媒体存储根目录不存在')) {
+        setCreateMediaRootOpen(true)
+      }
+      if (!mediaStorageError && message.includes('MetaTube')) setCategory('metadata')
+      else if (!mediaStorageError && message.includes('NFO')) setCategory('metadata')
+      else if (!mediaStorageError && message.includes('播放器')) setCategory('playback')
       return false
     } finally {
       setBusy(false)
@@ -232,6 +246,7 @@ export default function SettingsPage() {
         {category === 'scan' && <PlannedSection labels={['自动读取 NFO', '自动读取本地图片', '忽略隐藏文件', '视频扩展名白名单']} fields={legacyFields}/>}
         {category === 'metadata' && <MetadataSection metaTube={draft.metaTube} setMetaTube={(value) => updateDraft('metaTube', value)} nfo={draft.nfo} setNfo={(value) => updateDraft('nfo', value)} busy={busy} testMetaTube={testMetaTube}/>}
         {category === 'images' && <ImagesSection cachePreview={cachePreview} setCachePreview={setCachePreview} onClean={() => setConfirm('cache')} onThumbs={() => setConfirm('thumbs')}/>}
+        {category === 'mediaStorage' && <MediaStorageSection mediaStorage={draft.mediaStorage} defaults={defaults.mediaStorage} setMediaStorage={(value) => updateDraft('mediaStorage', value)} setNotice={setNotice}/>}
         {category === 'playback' && <PlaybackSection playback={draft.playback} setPlayback={(value) => updateDraft('playback', value)}/>}
         {category === 'search' && <PlannedSection labels={['默认搜索范围', '默认排序', '默认卡片/列表模式', '保存页面筛选状态']} fields={legacyFields}/>}
         {category === 'shortcuts' && <ShortcutSection/>}
@@ -260,6 +275,14 @@ export default function SettingsPage() {
       <DialogContent><DialogContentText>将当前设置恢复为默认值。修改将在点击“保存设置”后生效。</DialogContentText></DialogContent>
       <DialogActions><Button onClick={() => setRestoreDefaultsOpen(false)}>取消</Button><Button variant="contained" onClick={restoreDefaultsToDraft}>恢复默认值</Button></DialogActions>
     </Dialog>
+    <Dialog open={createMediaRootOpen} onClose={() => setCreateMediaRootOpen(false)}>
+      <DialogTitle>创建媒体存储根目录</DialogTitle>
+      <DialogContent><DialogContentText>该目录不存在，是否创建并保存当前设置？只会创建根目录，不会移动、删除或重命名任何现有资源。</DialogContentText></DialogContent>
+      <DialogActions>
+        <Button onClick={() => setCreateMediaRootOpen(false)}>返回修改</Button>
+        <Button variant="contained" disabled={busy} onClick={() => void saveAll(true)}>{busy ? '正在保存...' : '创建并保存'}</Button>
+      </DialogActions>
+    </Dialog>
     <Dialog open={leavePromptOpen} onClose={closeLeavePrompt}>
       <DialogTitle>设置尚未保存</DialogTitle>
       <DialogContent><DialogContentText>你有尚未保存的设置更改。</DialogContentText></DialogContent>
@@ -284,6 +307,57 @@ function MetadataSection({ metaTube, setMetaTube, nfo, setNfo, testMetaTube, bus
 }
 function ImagesSection({ cachePreview, setCachePreview, onClean, onThumbs }: { cachePreview?: ImageCachePreview; setCachePreview: (v: ImageCachePreview) => void; onClean: () => void; onThumbs: () => void }) {
   return <SurfaceSection title="图片与缓存" description="清理只影响 .lmm-cache 中可重建缩略图，不删除源图。"><Stack spacing={1.5}>{cachePreview && <Alert severity="warning">预计可清理 {cachePreview.entries} 条，{size(cachePreview.bytes)}，缺失记录 {cachePreview.missingEntries} 条。</Alert>}<Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}><Button variant="outlined" onClick={() => bridge.imageCachePreview().then(setCachePreview)}>检查缓存</Button><Button color="error" variant="outlined" disabled={!cachePreview} onClick={onClean}>清理缓存</Button><Button variant="outlined" onClick={onThumbs}>重建 Thumbnail</Button></Stack></Stack></SurfaceSection>
+}
+function MediaStorageSection({ mediaStorage, defaults, setMediaStorage, setNotice }: { mediaStorage: MediaStorageSettings; defaults: MediaStorageSettings; setMediaStorage: (v: MediaStorageSettings) => void; setNotice: (v: string) => void }) {
+  const chooseRoot = async () => {
+    try {
+      const selected = await invoke<string | null>('choose_directory')
+      if (selected) setMediaStorage({ ...mediaStorage, rootPath: selected })
+    } catch (reason) {
+      setNotice((reason as Error).message)
+    }
+  }
+  const openRoot = () => {
+    bridge.openDirectory(mediaStorage.rootPath).then((result) => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))
+  }
+  const update = <K extends keyof MediaStorageSettings>(key: K, value: MediaStorageSettings[K]) => setMediaStorage({ ...mediaStorage, [key]: value })
+  const rows: [keyof MediaStorageSettings, string][] = [
+    ['postersDirectory', '海报目录'],
+    ['thumbnailsDirectory', '缩略图目录'],
+    ['fanartDirectory', '背景图目录'],
+    ['previewsDirectory', '预览图目录'],
+    ['screenshotsDirectory', '截图目录'],
+    ['gifDirectory', 'GIF 目录'],
+    ['nfoDirectory', 'NFO 目录'],
+  ]
+  const previewRows = buildMediaStoragePreview(mediaStorage)
+  return <Stack spacing={2}>
+    <SurfaceSection title="媒体资源根目录" description="用于保存海报、缩略图、背景图、预览图、截图、GIF 和 NFO。修改后不会自动移动现有文件。">
+      <Stack spacing={1.5}>
+        <TextField size="small" label="根目录路径" value={mediaStorage.rootPath} onChange={event => update('rootPath', event.target.value)} helperText="建议使用独立数据目录，不要放在程序安装目录、resources 或 Web assets 内。"/>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+          <Button variant="outlined" onClick={chooseRoot}>浏览文件夹</Button>
+          <Button variant="outlined" onClick={openRoot}>打开文件夹</Button>
+          <Button variant="text" onClick={() => update('rootPath', defaults.rootPath)}>使用默认路径</Button>
+        </Stack>
+      </Stack>
+    </SurfaceSection>
+    <SurfaceSection title="资源目录结构" description="编辑相对目录名；不支持绝对路径、盘符、.. 或 Windows 保留设备名。">
+      <Stack spacing={1.25}>
+        {rows.map(([key, label]) => <TextField key={key} size="small" label={label} value={mediaStorage[key]} onChange={event => update(key, event.target.value)} />)}
+      </Stack>
+    </SurfaceSection>
+    <SurfaceSection title="文件命名规则" description="本轮只支持 {MovieCode} 和 {MovieTitle}，默认仅使用 {MovieCode}。">
+      <Stack spacing={1.5}>
+        <TextField size="small" label="影片资源文件夹规则" value={mediaStorage.movieFolderTemplate} onChange={event => update('movieFolderTemplate', event.target.value)} />
+        <TextField size="small" label="文件名规则" value={mediaStorage.fileNameTemplate} onChange={event => update('fileNameTemplate', event.target.value)} />
+        <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: 'action.hover' }}>
+          <Typography sx={{ fontWeight: 800, mb: 1 }}>路径预览</Typography>
+          <Stack spacing={0.75}>{previewRows.map(row => <Typography key={row.label} variant="body2" sx={{ overflowWrap: 'anywhere' }}><Box component="span" sx={{ fontWeight: 750 }}>{row.label}：</Box>{row.path}</Typography>)}</Stack>
+        </Paper>
+      </Stack>
+    </SurfaceSection>
+  </Stack>
 }
 function PlaybackSection({ playback, setPlayback }: { playback: PlaybackSettings; setPlayback: (v: PlaybackSettings) => void }) {
   return <SurfaceSection title="播放器" description="复用现有播放服务，不新增播放器内核。"><Stack spacing={1.5}><FormControlLabel control={<Switch checked={playback.useSystemDefault} onChange={event => setPlayback({ ...playback, useSystemDefault: event.target.checked })}/>} label="使用系统默认播放器"/><TextField disabled={playback.useSystemDefault} size="small" label="外部播放器路径" value={playback.playerPath} onChange={event => setPlayback({ ...playback, playerPath: event.target.value })}/></Stack></SurfaceSection>
@@ -325,4 +399,27 @@ function confirmWarnings(value?: string) {
   if (value === 'restore') return ['恢复前会先创建当前状态安全备份。', '应用可能需要重启。', '输入 CONFIRM 后才会创建计划。']
   if (value === 'cache') return ['只删除 .lmm-cache 中的生成缓存。', '不删除 Poster、Fanart、ExtraPic。']
   return []
+}
+
+function buildMediaStoragePreview(settings: MediaStorageSettings) {
+  const movieFolder = renderMediaTemplate(settings.movieFolderTemplate)
+  const fileName = renderMediaTemplate(settings.fileNameTemplate)
+  const root = settings.rootPath || '<RootPath>'
+  const join = (...parts: string[]) => parts.map(part => part.trim().replace(/^\\+|\\+$/g, '')).filter(Boolean).join('\\')
+  return [
+    { label: 'Poster', path: join(root, settings.postersDirectory, movieFolder, `${fileName}.jpg`) },
+    { label: 'Thumbnail', path: join(root, settings.thumbnailsDirectory, movieFolder, `${fileName}.jpg`) },
+    { label: 'Fanart', path: join(root, settings.fanartDirectory, movieFolder, `${fileName}.jpg`) },
+    { label: 'Preview', path: join(root, settings.previewsDirectory, movieFolder, `${fileName}.jpg`) },
+    { label: 'Screenshot', path: join(root, settings.screenshotsDirectory, movieFolder, `${fileName}_001.jpg`) },
+    { label: 'GIF', path: join(root, settings.gifDirectory, movieFolder, `${fileName}_001.gif`) },
+    { label: 'NFO', path: join(root, settings.nfoDirectory, movieFolder, `${fileName}.nfo`) },
+  ]
+}
+
+function renderMediaTemplate(template: string) {
+  return (template || '')
+    .replaceAll('{MovieCode}', 'ABC-123')
+    .replaceAll('{MovieTitle}', 'Example Movie')
+    .trim() || '<empty>'
 }

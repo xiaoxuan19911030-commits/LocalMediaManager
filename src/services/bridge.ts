@@ -58,7 +58,7 @@ export const bridge = {
   settings: () => request<SettingsSnapshot>('/api/settings'),
   allSettings: () => request<UnifiedSettings>('/api/settings/all'),
   defaultSettings: () => request<UnifiedSettings>('/api/settings/defaults'),
-  saveAllSettings: (value: UnifiedSettings) => request<UnifiedSettingsSaveResult>('/api/settings/all', { method: 'PUT', body: JSON.stringify(value) }),
+  saveAllSettings: (value: UnifiedSettings, createMissingMediaStorageRoot = false) => request<UnifiedSettingsSaveResult>(`/api/settings/all?${new URLSearchParams({ createMissingMediaStorageRoot: String(createMissingMediaStorageRoot) })}`, { method: 'PUT', body: JSON.stringify(value) }),
   dataSafetyOverview: () => request<DataSafetyOverview>('/api/settings/data-safety/overview'),
   createBackup: (value: BackupCreateCommand) => request<BackupResult>('/api/settings/data-safety/backup', { method: 'POST', body: JSON.stringify(value) }),
   validateBackup: (path: string) => request<BackupValidation>(`/api/settings/data-safety/backup/validate?${new URLSearchParams({ path })}`),

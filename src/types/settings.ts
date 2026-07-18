@@ -33,12 +33,25 @@ export interface NfoSettings { exportPolicy: 'SkipExisting' | 'SeparateFile'; ou
 export interface PlaybackSettings { playerPath: string; useSystemDefault: boolean }
 export interface RatingRetentionSettings { enabled: boolean }
 export interface AppearanceSettings { themeMode: 'light' | 'dark' }
+export interface MediaStorageSettings {
+  rootPath: string
+  postersDirectory: string
+  thumbnailsDirectory: string
+  fanartDirectory: string
+  previewsDirectory: string
+  screenshotsDirectory: string
+  gifDirectory: string
+  nfoDirectory: string
+  movieFolderTemplate: string
+  fileNameTemplate: string
+}
 export interface UnifiedSettings {
   metaTube: MetaTubeSettings
   nfo: NfoSettings
   playback: PlaybackSettings
   ratingRetention: RatingRetentionSettings
   appearance: AppearanceSettings
+  mediaStorage: MediaStorageSettings
 }
 export interface UnifiedSettingsSaveResult { settings: UnifiedSettings; changedFields: string[]; message: string }
 
