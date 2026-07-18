@@ -19,7 +19,7 @@ const readable = (value: string) => value && !value.includes('\uFFFD') ? value :
 type EntityPageType = 'actors' | 'directors' | 'series' | 'tags' | 'movie-tags'
 const pageMeta: Record<EntityPageType, { title: string; description: string; searchPlaceholder: string; mediaParam: string; mediaNameParam: string; noun: string }> = {
   tags: { title: '自定义标签', description: '浏览用户手动创建和维护的自定义标签。', searchPlaceholder: '搜索自定义标签', mediaParam: 'customTagId', mediaNameParam: 'customTagName', noun: '自定义标签' },
-  'movie-tags': { title: '影片标签', description: '浏览刮削或 NFO 导入的影片自带标签。', searchPlaceholder: '搜索影片标签', mediaParam: 'movieTagId', mediaNameParam: 'movieTagName', noun: '影片标签' },
+  'movie-tags': { title: '标签', description: '浏览影片已有标签。', searchPlaceholder: '搜索标签', mediaParam: 'movieTagId', mediaNameParam: 'movieTagName', noun: '标签' },
   actors: { title: '演员', description: '按作品数量或名称浏览演员及其关联影片。', searchPlaceholder: '搜索演员', mediaParam: 'actorId', mediaNameParam: 'actorName', noun: '演员' },
   directors: { title: '导演', description: '按作品数量或名称浏览导演及其关联影片。', searchPlaceholder: '搜索导演', mediaParam: 'directorId', mediaNameParam: 'directorName', noun: '导演' },
   series: { title: '系列', description: '按作品数量或名称浏览系列及其关联影片。', searchPlaceholder: '搜索系列', mediaParam: 'seriesId', mediaNameParam: 'seriesName', noun: '系列' },

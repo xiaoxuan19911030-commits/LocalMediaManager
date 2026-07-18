@@ -48,8 +48,8 @@ internal sealed record EntityConfig(string Table, string Relation, string Key, s
     public static EntityConfig? For(string type, string bridgeUrl) => type.ToLowerInvariant() switch {
         "actors" => new("Actors", "MovieActors", "ActorId", "", id => $"{bridgeUrl}/api/actors/{id}/image"),
         "directors" => new("Directors", "MovieDirectors", "DirectorId", "", _ => null),
-        "tags" or "custom-tags" => new("Tags", "MovieTags", "TagId", $"{ProductReader.CustomTagSourceCondition("e")} AND {ProductReader.NotStatusBadgeTagCondition("e")}", _ => null),
-        "movie-tags" => new("Tags", "MovieTags", "TagId", $"{ProductReader.MovieTagSourceCondition("e")} AND {ProductReader.NotStatusBadgeTagCondition("e")}", _ => null),
+        "tags" or "custom-tags" => new("Tags", "MovieTags", "TagId", ProductReader.NotStatusBadgeTagCondition("e"), _ => null),
+        "movie-tags" => new("Tags", "MovieTags", "TagId", ProductReader.NotStatusBadgeTagCondition("e"), _ => null),
         "series" => new("Series", "MovieSeries", "SeriesId", "", _ => null),
         _ => null,
     };
@@ -321,9 +321,9 @@ public static class ProductReader
         else if (parsed.Directors.Count > 0)
             conditions.Add("0=1");
         foreach (string value in parsed.Tags)
-            AddEntityNameCondition(conditions, parameters, "MovieTags", "Tags", "TagId", value, ref index, MovieTagSourceCondition("t"));
+            AddEntityNameCondition(conditions, parameters, "MovieTags", "Tags", "TagId", value, ref index, NotStatusBadgeTagCondition("t"));
         foreach (string value in parsed.CustomTags)
-            AddEntityNameCondition(conditions, parameters, "MovieTags", "Tags", "TagId", value, ref index, CustomTagSourceCondition("t"));
+            AddEntityNameCondition(conditions, parameters, "MovieTags", "Tags", "TagId", value, ref index, NotStatusBadgeTagCondition("t"));
         foreach (string value in parsed.Series)
             AddEntityNameCondition(conditions, parameters, "MovieSeries", "Series", "SeriesId", value, ref index);
         foreach (string value in parsed.Studios)
@@ -334,8 +334,8 @@ public static class ProductReader
         if (hasDirectors && directorId.HasValue) { conditions.Add("EXISTS(SELECT 1 FROM MovieDirectors md WHERE md.MovieId=m.Id AND md.DirectorId=$director)"); parameters.Add(("$director", directorId.Value)); }
         else if (!hasDirectors && directorId.HasValue) conditions.Add("0=1");
         if (tagId.HasValue) customTagId ??= tagId;
-        if (customTagId.HasValue) { conditions.Add($"EXISTS(SELECT 1 FROM MovieTags mt JOIN Tags t ON t.Id=mt.TagId WHERE mt.MovieId=m.Id AND mt.TagId=$customTag AND {CustomTagSourceCondition("t")})"); parameters.Add(("$customTag", customTagId.Value)); }
-        if (movieTagId.HasValue) { conditions.Add($"EXISTS(SELECT 1 FROM MovieTags mt JOIN Tags t ON t.Id=mt.TagId WHERE mt.MovieId=m.Id AND mt.TagId=$movieTag AND {MovieTagSourceCondition("t")})"); parameters.Add(("$movieTag", movieTagId.Value)); }
+        if (customTagId.HasValue) { conditions.Add($"EXISTS(SELECT 1 FROM MovieTags mt JOIN Tags t ON t.Id=mt.TagId WHERE mt.MovieId=m.Id AND mt.TagId=$customTag AND {NotStatusBadgeTagCondition("t")})"); parameters.Add(("$customTag", customTagId.Value)); }
+        if (movieTagId.HasValue) { conditions.Add($"EXISTS(SELECT 1 FROM MovieTags mt JOIN Tags t ON t.Id=mt.TagId WHERE mt.MovieId=m.Id AND mt.TagId=$movieTag AND {NotStatusBadgeTagCondition("t")})"); parameters.Add(("$movieTag", movieTagId.Value)); }
         if (seriesId.HasValue) { conditions.Add("EXISTS(SELECT 1 FROM MovieSeries mse WHERE mse.MovieId=m.Id AND mse.SeriesId=$series)"); parameters.Add(("$series", seriesId.Value)); }
         if (favorite.HasValue) { conditions.Add("COALESCE(s.IsFavorite,0)=$favorite"); parameters.Add(("$favorite", favorite.Value ? 1 : 0)); }
         if (watched.HasValue) conditions.Add(watched.Value ? "COALESCE(s.PlayCount,0)>0" : "COALESCE(s.PlayCount,0)=0");
@@ -366,10 +366,6 @@ public static class ProductReader
         conditions.Add($"""EXISTS(SELECT 1 FROM {relation} r JOIN {table} t ON t.Id=r.{key} WHERE r.MovieId=m.Id AND t.Name LIKE {name} ESCAPE '\'{extraCondition})""");
         parameters.Add((name, $"%{EscapeLike(value)}%"));
     }
-
-    internal static string CustomTagSourceCondition(string alias) => $"COALESCE({alias}.Source,'User') IN ('User','LegacyStamp')";
-
-    internal static string MovieTagSourceCondition(string alias) => $"COALESCE({alias}.Source,'User') NOT IN ('User','LegacyStamp')";
 
     internal static string NotStatusBadgeTagCondition(string alias) => $"trim(COALESCE({alias}.Name,'')) NOT IN ('新加入','已收藏')";
 

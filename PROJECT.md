@@ -1697,9 +1697,9 @@ Local Media Manager
 
 **影片卡片：** `MediaCard` + `MediaCardGrid`；封面 `GET /api/images/{movieId}/primary`
 
-**Smart Search：** 影片墙与搜索页共用 `GET /api/search/advanced`。普通关键词以 AND 组合；每个关键词在番号、标题、原始标题、简介、文件路径/名、演员、导演、影片标签、自定义标签、Genre、厂商、系列、媒体库名之间 OR 匹配。结构化字段支持 `演员:`、`导演:`、`标签:`、`自定义标签:`、`系列:`、`厂商:`、`媒体库:`、年份与评分比较、收藏/观看布尔条件。`标签:` 仅指影片自带标签；`自定义标签:` 仅指用户手动/Legacy stamp 标签。分类入口参数、FilterBar 与 Smart Search 条件统一 AND。
+**Smart Search：** 影片墙与搜索页共用 `GET /api/search/advanced`。普通关键词以 AND 组合；每个关键词在番号、标题、原始标题、简介、文件路径/名、演员、导演、标签、自定义标签、Genre、厂商、系列、媒体库名之间 OR 匹配。结构化字段支持 `演员:`、`导演:`、`标签:`、`自定义标签:`、`系列:`、`厂商:`、`媒体库:`、年份与评分比较、收藏/观看布尔条件。当前数据不能可靠用 `Tags.Source` 区分标签来源，`标签:` 与 `自定义标签:` 均恢复历史 `Tags/MovieTags` 查询语义，并排除状态 Badge。分类入口参数、FilterBar 与 Smart Search 条件统一 AND。
 
-**MovieWall：** 所有本质属于影片列表的页面复用 `MovieWall`：全部影片、收藏、最近播放、搜索结果、导演/系列/影片标签/自定义标签/媒体库进入后的结果页。`MovieWall` 统一 Smart Search、FilterBar、排序、分页、卡片/列表视图和详情返回滚动恢复。
+**MovieWall：** 所有本质属于影片列表的页面复用 `MovieWall`：全部影片、收藏、最近播放、搜索结果、导演/系列/标签/自定义标签/媒体库进入后的结果页。`MovieWall` 统一 Smart Search、FilterBar、排序、分页、卡片/列表视图和详情返回滚动恢复。
 
 **列表返回状态：** `MovieWall` 进入详情前记录当前列表状态签名与 scrollY；从详情返回且默认条件、搜索、FilterBar、排序、页码、视图未变时恢复滚动。用户改变查询条件后不复用旧滚动。
 
@@ -1730,7 +1730,7 @@ Local Media Manager
 
 | 模块 | 路由 | Bridge 入口 |
 |------|------|------------|
-| **Tags Category** | `/tags` | 二级分类页：导演、影片标签、系列、自定义标签 |
+| **Tags Category** | `/tags` | 二级分类页：导演、标签、系列、自定义标签 |
 | **Custom Tags** | `/tags/custom` | `GET /api/entities/tags`、CRUD `/api/tags` |
 | **Movie Tags** | `/tags/movie-tags` | `GET /api/entities/movie-tags` |
 | **Actors** | `/actors` | `GET /api/entities/actors`、PUT `/api/actors/{id}` |
@@ -1742,7 +1742,7 @@ Local Media Manager
 
 **批量操作：** `POST /api/videos/batch/favorite`、`/batch/rating`、`/batch/tags`
 
-**实体来源：** 影片标签与自定义标签共享 `Tags/MovieTags`，但用 `Tags.Source` 区分：`User` 与 `LegacyStamp` 是自定义标签；`NFO`、`Scraper`、`LegacyLabel` 等非用户来源是影片自带标签。状态 Badge（如 `新加入`、`已收藏`）不是标签分类，不进入 `/tags` 二级分类与标签统计。Genre 使用独立 `Genres/MovieGenres`，不是影片标签。系列使用 `Series/MovieSeries`；导演使用 `Directors/MovieDirectors`（旧库可不存在，UI 显示空态）。实体列表数量使用 `COUNT(DISTINCT MovieId)`，点击实体后跳转影片墙并传递明确 ID 参数（如 `directorId`、`seriesId`、`movieTagId`、`customTagId`），不创建第二套影片列表。
+**实体来源：** 标签与自定义标签当前均基于历史 `Tags/MovieTags` 查询语义，不按 `Tags.Source` 强行拆分；真实库中 `LegacyLabel` 同时承载了用户维护标签（如“五星”“高颜值”）和状态标识（如“已收藏”），因此 `Source` 不能可靠区分标签来源。状态 Badge（如 `新加入`、`已收藏`）不是标签分类，不进入 `/tags` 二级分类与标签统计。Genre 使用独立 `Genres/MovieGenres`，不是标签。系列使用 `Series/MovieSeries`；导演使用 `Directors/MovieDirectors`（旧库可不存在，UI 显示空态）。实体列表数量使用 `COUNT(DISTINCT MovieId)`，点击实体后跳转影片墙并传递明确 ID 参数（如 `directorId`、`seriesId`、`movieTagId`、`customTagId`），不创建第二套影片列表。
 
 ### 16.6 媒体资源（Images & MediaStorage）
 

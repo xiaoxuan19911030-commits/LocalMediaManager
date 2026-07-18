@@ -111,18 +111,22 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task MovieTagsAndCustomTagsStaySeparated()
+    public async Task TagCategoriesDoNotFilterHistoricalTagsBySource()
     {
         EntityPageDto movieTags = await ProductReader.ReadEntitiesPageAsync(Database, "http://localhost", "movie-tags", "", "name", 24, 0);
         EntityPageDto customTags = await ProductReader.ReadEntitiesPageAsync(Database, "http://localhost", "tags", "", "name", 24, 0);
 
         Assert.Contains(movieTags.Items, item => item.Name == "长发");
-        Assert.DoesNotContain(movieTags.Items, item => item.Name == "收藏候选");
+        Assert.Contains(movieTags.Items, item => item.Name == "收藏候选");
+        Assert.Contains(movieTags.Items, item => item.Name == "legacy stamp");
+        Assert.Contains(movieTags.Items, item => item.Name == "space tag + alpha");
         Assert.DoesNotContain(movieTags.Items, item => item.Name == "已收藏");
         Assert.Contains(customTags.Items, item => item.Name == "收藏候选");
         Assert.Contains(customTags.Items, item => item.Name == "legacy stamp");
-        Assert.DoesNotContain(customTags.Items, item => item.Name == "长发");
+        Assert.Contains(customTags.Items, item => item.Name == "长发");
+        Assert.Contains(customTags.Items, item => item.Name == "space tag + alpha");
         Assert.DoesNotContain(customTags.Items, item => item.Name == "新加入");
+        Assert.DoesNotContain(customTags.Items, item => item.Name == "已收藏");
     }
 
     [Fact]

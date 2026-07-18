@@ -926,8 +926,8 @@ ordinary keywords:
   movie tags, custom tags, genres, studios, series, libraries
 
 structured fields:
-  标签:          → Tags.Source NOT IN ('User','LegacyStamp')
-  自定义标签:    → Tags.Source IN ('User','LegacyStamp')
+  标签:          → Tags/MovieTags, excluding status badges
+  自定义标签:    → Tags/MovieTags, excluding status badges
   导演:          → Directors/MovieDirectors when tables exist
   系列:          → Series/MovieSeries
 
@@ -966,8 +966,8 @@ entity click:
 
 #### 以后必须遵守
 
-- `标签:` 默认只表示影片自带标签，不得同时查用户自定义标签
-- `自定义标签:` 只表示用户标签与 Legacy stamp
+- `标签:` 与 `自定义标签:` 当前都使用历史 `Tags/MovieTags` 查询语义，不按 `Source` 强行拆分
+- 两者都必须排除 `新加入`、`已收藏` 等状态 Badge
 - `新加入`、`已收藏` 只作为影片状态 Badge；收藏浏览走左侧 `收藏`
 - Genre 是 `Genres/MovieGenres`，不是影片标签
 - 新实体入口应先复用实体列表 + 影片墙筛选，除非 Human 明确批准中心页
@@ -989,6 +989,25 @@ entity click:
 - `EntityPage.tsx`
 - `AppShell.tsx`
 - `ProductReaderSmartSearchTests.cs`
+
+#### 2026-07-18 修正
+
+安装版真实库验证后，DEC-011 中“用 `Tags.Source` 区分影片标签与自定义标签”的假设被撤回。实际数据中：
+
+- `LegacyLabel` 同时包含用户维护标签（如“五星”“高颜值”）和状态标识（如“已收藏”）。
+- `LegacyStamp` 包含“新加入”等状态标识。
+- 因此 `Tags.Source` 不能可靠区分标签来源，继续按 Source 拆分会导致历史标签不可见。
+
+当前定案修正为：
+
+```text
+标签 / 自定义标签:
+  均恢复历史 Tags + MovieTags 查询语义
+  不按 Source 强行拆分
+  仅排除状态 Badge：新加入、已收藏
+```
+
+`新加入` 与 `已收藏` 仍只作为影片状态 Badge；收藏浏览继续走左侧“收藏”入口。
 
 ---
 

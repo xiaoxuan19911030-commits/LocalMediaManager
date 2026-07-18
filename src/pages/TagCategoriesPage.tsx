@@ -8,14 +8,14 @@ import { WorkspacePage } from '@/components/workspace/Workspace'
 
 const categories = [
   { title: '导演', description: '影片导演分类', path: '/tags/directors', icon: <GroupsRoundedIcon/> },
-  { title: '影片标签', description: '刮削或 NFO 导入的影片自带标签', path: '/tags/movie-tags', icon: <SellRoundedIcon/> },
+  { title: '标签', description: '浏览影片已有标签', path: '/tags/movie-tags', icon: <SellRoundedIcon/> },
   { title: '系列', description: '影片系列分类', path: '/tags/series', icon: <MovieRoundedIcon/> },
   { title: '自定义标签', description: '用户手动创建和维护的标签', path: '/tags/custom', icon: <LocalOfferRoundedIcon/> },
 ] as const
 
 export default function TagCategoriesPage() {
   const navigate = useNavigate()
-  return <WorkspacePage title="标签" description="按导演、影片标签、系列和自定义标签浏览影片。">
+  return <WorkspacePage title="标签" description="按导演、标签、系列和自定义标签浏览影片。">
     <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))', gap: 1.25 }}>
       {categories.map((item) => <Card key={item.path} variant="outlined">
         <CardActionArea onClick={() => navigate(item.path)}>
