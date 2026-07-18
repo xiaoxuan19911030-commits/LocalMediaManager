@@ -44,7 +44,7 @@ docs/               → 证据、Release 验收、字段映射、矩阵
 | [DEC-009](#dec-009-legacy-read-unified-write-separation) | Legacy Read / Unified Write 分离 | MediaStorage | 0.5.0-17 | `2437e39` |
 | [DEC-010](#dec-010-generatedcard-wallcrops-unified-pipeline) | GeneratedCard/WallCrops 纳入统一管线 | MediaStorage | 0.5.0-17 | `2437e39` |
 | [DEC-011](#dec-011-smart-search-and-entity-taxonomy) | Smart Search 与实体标签语义边界 | Search / Entities | 0.5.0-18 | `5b68aa5` |
-| [DEC-012](#dec-012-moviewall-display-preferences-and-floating-pagination) | MovieWall 显示偏好与悬浮分页 | MovieWall / Settings | 0.5.0-20 | `ab01df9` |
+| [DEC-012](#dec-012-moviewall-display-preferences-and-floating-pagination) | MovieWall 显示偏好与悬浮分页 | MovieWall / Settings | 0.5.0-20 | `bbed780` |
 
 ---
 
