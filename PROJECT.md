@@ -860,7 +860,7 @@ SchemaMigrations（版本与 checksum）
 
 `AppSettings` 表：`Key` · `ValueJson` · `ValueType` · `UpdatedAt`
 
-Settings 键前缀：`metadata.metatube.*` · `nfo.*` · `playback.*` · `ratingHistory.*` · `appearance.*` · `mediaStorage.*`
+Settings 键前缀：`metadata.metatube.*` · `nfo.*` · `playback.*` · `ratingHistory.*` · `appearance.*` · `mediaStorage.*` · `movieWall.*`
 
 **唯一写入口：** `SettingsSaveCoordinator`（§10）
 
@@ -970,7 +970,7 @@ React 更新 original + draft（两者同步为 saved 状态）
 
 ### 10.2 UnifiedSettings 结构
 
-`UnifiedSettingsDto` 包含六个域，**一次 Save 全部提交**：
+`UnifiedSettingsDto` 包含七个域，**一次 Save 全部提交**：
 
 | 域 | DTO | AppSettings 键前缀 | 说明 |
 |----|-----|-------------------|------|
@@ -980,6 +980,7 @@ React 更新 original + draft（两者同步为 saved 状态）
 | **RatingRetention** | `RatingRetentionSettingsDto` | `ratingHistory.*` | Safe Delete 后评分记忆 |
 | **Appearance** | `AppearanceSettingsDto` | `appearance.*` | 主题模式 `dark` / `light` |
 | **MediaStorage** | `MediaStorageSettingsDto` | `mediaStorage.*` | 根目录、资源子目录、路径模板 |
+| **MovieWallDisplay** | `MovieWallDisplaySettingsDto` | `movieWall.*` | 影片墙卡片海报方向与大小 |
 
 `NonDestructive`（MetaTube 不覆盖手工数据）和 `ImportFillEmptyOnly`（NFO 导入只补空）在 Coordinator 层**强制为 true**，UI 不能关闭。
 
@@ -1035,6 +1036,10 @@ Settings 页面（`SettingsPage.tsx`）使用**全局 Draft 模式**：
 
 **Appearance：**
 - ThemeMode 规范化为 `dark` 或 `light`
+
+**MovieWallDisplay：**
+- PosterOrientation 规范化为 `portrait` 或 `landscape`
+- PosterSize 规范化为 `small`、`medium` 或 `large`
 
 **MediaStorage：**（详见 §11）
 - RootPath 绝对路径、可写、不在安装目录/resources/dist/assets 内
@@ -1699,7 +1704,9 @@ Local Media Manager
 
 **Smart Search：** 影片墙与搜索页共用 `GET /api/search/advanced`。普通关键词以 AND 组合；每个关键词在番号、标题、原始标题、简介、文件路径/名、演员、导演、标签、自定义标签、Genre、厂商、系列、媒体库名之间 OR 匹配。结构化字段支持 `演员:`、`导演:`、`标签:`、`自定义标签:`、`系列:`、`厂商:`、`媒体库:`、年份与评分比较、收藏/观看布尔条件。当前数据不能可靠用 `Tags.Source` 区分标签来源，`标签:` 与 `自定义标签:` 均恢复历史 `Tags/MovieTags` 查询语义，并排除状态 Badge。分类入口参数、FilterBar 与 Smart Search 条件统一 AND。
 
-**MovieWall：** 所有本质属于影片列表的页面复用 `MovieWall`：全部影片、收藏、最近播放、搜索结果、导演/系列/标签/自定义标签/媒体库进入后的结果页。`MovieWall` 统一 Smart Search、FilterBar、排序、分页、卡片/列表视图和详情返回滚动恢复。
+**MovieWall：** 所有本质属于影片列表的页面复用 `MovieWall`：全部影片、收藏、最近播放、搜索结果、导演/系列/标签/自定义标签/媒体库进入后的结果页。`MovieWall` 统一 Smart Search、FilterBar、排序、分页、卡片/列表视图和详情返回滚动恢复。影片墙卡片显示偏好通过 `UnifiedSettings.movieWallDisplay` 持久化并在所有 MovieWall 页面共享：竖版海报比例 `2:3`，横版海报比例 `16:9`，尺寸为 `small` / `medium` / `large`。卡片模式使用响应式 CSS Grid 自动计算列数；列表模式不受海报方向与大小影响。
+
+**MovieWall 分页：** 分页由 `MovieWall` 统一管理为右下角半透明悬浮控件，显示上一页、当前页/总页数、下一页。点击当前页数字进入页码输入，`Enter` 跳转，`Esc` 取消，跳页后滚动回影片墙顶部并保留搜索、FilterBar、排序和视图状态。MovieWall 页面支持左/右方向键翻页和 `Ctrl+G` 聚焦页码输入；输入框、表单、下拉框或弹窗获得焦点时不抢占按键，详情页不使用这组快捷键。
 
 **列表返回状态：** `MovieWall` 进入详情前记录当前列表状态签名与 scrollY；从详情返回且默认条件、搜索、FilterBar、排序、页码、视图未变时恢复滚动。用户改变查询条件后不复用旧滚动。
 
@@ -1818,7 +1825,7 @@ Bridge **不内嵌播放器**；只负责路径解析和进程启动。无法返
 
 见 **§10 Settings 系统**。路由 `/settings`，页面 `SettingsPage.tsx`。
 
-Settings 分区：常规 · 媒体库 · 扫描与导入 · 元数据与同步 · 图片与缓存 · 媒体存储 · 播放器 · 搜索与筛选 · 快捷键 · 外观 · 数据与备份 · 日志与诊断 · 关于
+Settings 分区：常规 · 媒体库 · 扫描与导入 · 元数据与同步 · 图片与缓存 · 媒体存储 · 播放器 · 搜索与筛选 · 快捷键 · 外观 · 数据与备份 · 日志与诊断 · 关于。影片墙显示偏好位于「外观」分区。
 
 ### 16.13 扩展模块（Placeholder）
 
@@ -1963,6 +1970,7 @@ Web build · Bridge.Tests · cargo check · 文档与 Decision 同步
 | 0.5.0-15 | `sprint/0.5.0-15-settings-global-save` | Settings 全局 Draft + Coordinator 统一 Save + LeaveIntent | DEC-001 ～ DEC-003 |
 | 0.5.0-16 | `sprint/0.5.0-16-media-storage-settings` | MediaStorage 纳入 Settings；动态 RootPath；Documents 回退 | DEC-004 ～ DEC-007 |
 | 0.5.0-17 | `sprint/0.5.0-17-media-resource-write` | 统一写入 Resolver；Legacy Read 保留；WallCrops 纳入 | DEC-008 ～ DEC-010 |
+| 0.5.0-20 | `sprint/0.5.0-20-moviewall-display` | MovieWall 显示偏好、响应式卡片尺寸和悬浮分页交互 | DEC-012 |
 
 Sprint 0.5.0-02 ～ 0.5.0-14 待 backlog 考古后追加（DEC-011+，不阻塞开发）。
 

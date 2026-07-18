@@ -46,6 +46,7 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
         Assert.Equal(defaults.RatingRetention, loaded.RatingRetention);
         Assert.Equal(defaults.Appearance, loaded.Appearance);
         Assert.Equal(defaults.MediaStorage, loaded.MediaStorage);
+        Assert.Equal(defaults.MovieWallDisplay, loaded.MovieWallDisplay);
     }
 
     [Fact]
@@ -61,6 +62,7 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
             RatingRetention = new(false),
             Appearance = new("light"),
             MediaStorage = current.MediaStorage with { PostersDirectory = "Covers" },
+            MovieWallDisplay = new("landscape", "large"),
         };
 
         UnifiedSettingsSaveResult result = await coordinator.SaveAsync(draft);
@@ -71,6 +73,7 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
         Assert.Contains("ratingRetention", result.ChangedFields);
         Assert.Contains("appearance", result.ChangedFields);
         Assert.Contains("mediaStorage", result.ChangedFields);
+        Assert.Contains("movieWallDisplay", result.ChangedFields);
         Assert.False(saved.MetaTube.Enabled);
         Assert.Equal(180, saved.MetaTube.TimeoutSeconds);
         Assert.Equal(Path.GetFullPath(nfoDir), saved.Nfo.OutputDirectory);
@@ -78,6 +81,25 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
         Assert.False(saved.RatingRetention.Enabled);
         Assert.Equal("light", saved.Appearance.ThemeMode);
         Assert.Equal("Covers", saved.MediaStorage.PostersDirectory);
+        Assert.Equal("landscape", saved.MovieWallDisplay.PosterOrientation);
+        Assert.Equal("large", saved.MovieWallDisplay.PosterSize);
+    }
+
+    [Theory]
+    [InlineData("portrait", "small", "portrait", "small")]
+    [InlineData("landscape", "medium", "landscape", "medium")]
+    [InlineData("landscape", "large", "landscape", "large")]
+    [InlineData("bad", "huge", "portrait", "medium")]
+    public async Task MovieWallDisplaySettingsPersistAndNormalize(string orientation, string size, string expectedOrientation, string expectedSize)
+    {
+        UnifiedSettingsDto current = await coordinator.ReadAsync();
+        UnifiedSettingsDto draft = current with { MovieWallDisplay = new(orientation, size) };
+
+        await coordinator.SaveAsync(draft);
+        UnifiedSettingsDto saved = await coordinator.ReadAsync();
+
+        Assert.Equal(expectedOrientation, saved.MovieWallDisplay.PosterOrientation);
+        Assert.Equal(expectedSize, saved.MovieWallDisplay.PosterSize);
     }
 
     [Fact]

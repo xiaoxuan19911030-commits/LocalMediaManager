@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- MovieWall Display Optimization：影片墙新增统一海报方向（竖版 2:3 / 横版 16:9）、海报大小（小 / 中 / 大）设置，并经 Unified Settings 持久化。
+- MovieWall 分页改为右下角悬浮控件，支持点击页码输入、Enter 跳转、Esc 取消、左右方向键翻页和 Ctrl+G 聚焦页码。
+
+### Changed
+
+- 影片墙卡片网格改为基于显示偏好的响应式 CSS Grid，不写死列数；列表视图不受海报方向和大小设置影响。
+- 设置中心「外观」分区增加可视化影片墙显示选项卡，参考现有外观配置交互，不新增图片生成或资源来源设置。
+
 ### Planning
 
 - 启动 Sprint 0.5.0-01 `Feature Parity Finalization`，先完成基于旧版源码、Next 实现、Migration、Bridge、测试和安装版证据的审计，再按 P0/P1 补齐功能。

@@ -1,10 +1,13 @@
 import ExpandLessRoundedIcon from '@mui/icons-material/ExpandLessRounded'
 import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded'
+import NavigateBeforeRoundedIcon from '@mui/icons-material/NavigateBeforeRounded'
+import NavigateNextRoundedIcon from '@mui/icons-material/NavigateNextRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
-import { Button, Collapse, InputAdornment, MenuItem, Snackbar, Stack, TextField } from '@mui/material'
+import { Box, Button, Collapse, IconButton, InputAdornment, MenuItem, Paper, Snackbar, Stack, TextField, Tooltip, Typography } from '@mui/material'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { MovieResultContainer, useMovieActions } from '@/components/workspace/MovieResults'
 import { ViewModeToggle, WorkspacePage, refreshAction, type WorkspaceAction, type WorkspaceViewMode } from '@/components/workspace/Workspace'
+import { defaultMovieWallDisplay, normalizeMovieWallDisplay, type MovieWallDisplaySettings } from '@/components/workspace/movieWallDisplay'
 import { bridge } from '@/services/bridge'
 import type { AdvancedSearchFilters, MediaItem, MediaLibrary } from '@/types/media'
 
@@ -103,10 +106,12 @@ export function MovieWall({
   const [libraryId, setLibraryId] = useState(canReuseSavedState ? saved.libraryId ?? 0 : defaults.libraryId ?? 0)
   const [moreOpen, setMoreOpen] = useState(canReuseSavedState ? saved.moreOpen ?? false : false)
   const [view, setView] = useState<WorkspaceViewMode>(canReuseSavedState ? saved.view ?? 'grid' : 'grid')
+  const [movieWallDisplay, setMovieWallDisplay] = useState<MovieWallDisplaySettings>(defaultMovieWallDisplay)
   const [libraries, setLibraries] = useState<MediaLibrary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [pageInputFocusSignal, setPageInputFocusSignal] = useState(0)
   const loadSeq = useRef(0)
   const movieActions = useMovieActions({ onNotice: setNotice, play: bridge.play })
   const stateSignature = useMemo(() => JSON.stringify({ defaultsSignature, page, query, sort, rating, metadataStatus, imageStatus, libraryId, view }), [defaultsSignature, imageStatus, libraryId, metadataStatus, page, query, rating, sort, view])
@@ -115,6 +120,7 @@ export function MovieWall({
   const buildSavedState = useCallback((): SavedMovieWallState => ({ page, search, query, sort, rating, metadataStatus, imageStatus, libraryId, defaultsSignature, moreOpen, view }), [defaultsSignature, imageStatus, libraryId, metadataStatus, moreOpen, page, query, rating, search, sort, view])
   const filterDirty = rating !== 'all' || metadataStatus !== 'all' || imageStatus !== 'all' || libraryId !== (defaults.libraryId ?? 0)
   const activeFilterCount = (query ? 1 : 0) + (sort !== 'newest' ? 1 : 0) + (filterDirty ? 1 : 0)
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const load = useCallback(() => {
     const seq = ++loadSeq.current
@@ -139,6 +145,10 @@ export function MovieWall({
   useEffect(load, [load, reloadSignal])
   useEffect(() => () => { loadSeq.current += 1 }, [])
   useEffect(() => { bridge.libraries().then(setLibraries).catch(() => undefined) }, [])
+  useEffect(() => { bridge.allSettings().then(settings => setMovieWallDisplay(normalizeMovieWallDisplay(settings.movieWallDisplay))).catch(() => undefined) }, [])
+  useEffect(() => {
+    if (!loading && total > 0 && page > totalPages) setPage(totalPages)
+  }, [loading, page, total, totalPages])
   useEffect(() => {
     const next = buildSavedState()
     if (shouldRestoreScroll.current && saved.restoreSignature === stateSignature) {
@@ -164,6 +174,32 @@ export function MovieWall({
   const rememberScrollForDetail = useCallback(() => {
     window.sessionStorage.setItem(stateKey, JSON.stringify({ ...buildSavedState(), scrollY: window.scrollY, restoreScroll: true, restoreSignature: stateSignature }))
   }, [buildSavedState, stateKey, stateSignature])
+  const goToPage = useCallback((nextPage: number) => {
+    const clamped = Math.max(1, Math.min(totalPages, nextPage))
+    if (clamped === page) return
+    setPage(clamped)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [page, totalPages])
+  useEffect(() => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || isMovieWallShortcutBlocked(event)) return
+      if (event.ctrlKey && event.key.toLowerCase() === 'g') {
+        event.preventDefault()
+        setPageInputFocusSignal(value => value + 1)
+        return
+      }
+      if (event.ctrlKey || event.altKey || event.metaKey) return
+      if (event.key === 'ArrowLeft' && page > 1) {
+        event.preventDefault()
+        goToPage(page - 1)
+      } else if (event.key === 'ArrowRight' && page < totalPages) {
+        event.preventDefault()
+        goToPage(page + 1)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [goToPage, page, totalPages])
   const openMovie = (item: MediaItem) => {
     const openDefault = () => {
       rememberScrollForDetail()
@@ -215,7 +251,10 @@ export function MovieWall({
 
   return <WorkspacePage title={title} description={description?.(total)} stats={stats} filters={filters} activeFilterCount={activeFilterCount} loading={loading} error={error}
     primaryActions={[...(primaryActions?.(context) ?? []), refreshAction(load)]}>
-    <MovieResultContainer items={items} total={total} page={page} pageSize={pageSize} onPageChange={setPage} view={view} selectable={selectable} selectedIds={selectedIds} onSelect={onSelect} onRatingClick={onRatingClick} onContextMenu={onContextMenu} onPlay={movieActions.playMovie} onOpen={openMovie} emptyTitle={emptyTitle} emptyDescription={emptyDescription}/>
+    <Box sx={{ position: 'relative', pb: total > pageSize ? { xs: 9, md: 10 } : 0, pr: total > pageSize ? { lg: 13 } : 0 }}>
+      <MovieResultContainer items={items} total={total} display={movieWallDisplay} view={view} selectable={selectable} selectedIds={selectedIds} onSelect={onSelect} onRatingClick={onRatingClick} onContextMenu={onContextMenu} onPlay={movieActions.playMovie} onOpen={openMovie} emptyTitle={emptyTitle} emptyDescription={emptyDescription}/>
+    </Box>
+    {total > pageSize && <FloatingPagination page={page} totalPages={totalPages} onPageChange={goToPage} focusSignal={pageInputFocusSignal}/>}
     {childrenAfterResults?.(context)}
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>
   </WorkspacePage>
@@ -227,4 +266,95 @@ function readSavedState(key: string): SavedMovieWallState {
   } catch {
     return {}
   }
+}
+
+function FloatingPagination({ page, totalPages, onPageChange, focusSignal }: { page: number; totalPages: number; onPageChange: (page: number) => void; focusSignal: number }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(String(page))
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (!editing) setDraft(String(page))
+  }, [editing, page])
+
+  useEffect(() => {
+    if (focusSignal <= 0) return
+    setEditing(true)
+  }, [focusSignal])
+
+  useEffect(() => {
+    if (!editing) return
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    })
+  }, [editing])
+
+  const commit = () => {
+    const value = Number.parseInt(draft, 10)
+    if (Number.isFinite(value) && value >= 1 && value <= totalPages) onPageChange(value)
+    setEditing(false)
+    setDraft(String(page))
+  }
+  const cancel = () => {
+    setEditing(false)
+    setDraft(String(page))
+  }
+
+  return <Paper elevation={8} sx={{
+    position: 'fixed',
+    right: { xs: 14, md: 24 },
+    bottom: { xs: 14, md: 24 },
+    zIndex: theme => theme.zIndex.appBar - 1,
+    borderRadius: 999,
+    px: 0.75,
+    py: 0.5,
+    bgcolor: theme => theme.palette.mode === 'dark' ? 'rgba(18,22,31,.82)' : 'rgba(255,255,255,.86)',
+    border: 1,
+    borderColor: 'divider',
+    backdropFilter: 'blur(14px)',
+  }}>
+    <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+      <Tooltip title="上一页">
+        <span><IconButton size="small" disabled={page <= 1} onClick={() => onPageChange(page - 1)}><NavigateBeforeRoundedIcon fontSize="small"/></IconButton></span>
+      </Tooltip>
+      {editing ? (
+        <TextField
+          inputRef={inputRef}
+          size="small"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value.replace(/[^\d]/g, '').slice(0, 6))}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') { event.preventDefault(); commit() }
+            else if (event.key === 'Escape') { event.preventDefault(); cancel() }
+          }}
+          onBlur={commit}
+          slotProps={{ input: { inputMode: 'numeric', sx: { width: 54, height: 30, px: 0.75, textAlign: 'center' } } }}
+        />
+      ) : (
+        <Tooltip title="点击输入页码，Ctrl+G 可快速聚焦">
+          <Button color="inherit" size="small" onClick={() => setEditing(true)} sx={{ minWidth: 82, px: 1, borderRadius: 999, fontWeight: 850 }}>
+            <Typography component="span" variant="body2" sx={{ fontWeight: 850 }}>{page}</Typography>
+            <Typography component="span" variant="body2" color="text.secondary" sx={{ mx: 0.5 }}>/</Typography>
+            <Typography component="span" variant="body2" color="text.secondary">{totalPages}</Typography>
+          </Button>
+        </Tooltip>
+      )}
+      <Tooltip title="下一页">
+        <span><IconButton size="small" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}><NavigateNextRoundedIcon fontSize="small"/></IconButton></span>
+      </Tooltip>
+    </Stack>
+  </Paper>
+}
+
+function isMovieWallShortcutBlocked(event: globalThis.KeyboardEvent) {
+  if (document.querySelector('.MuiModal-root, .MuiPopover-root')) return true
+  const target = event.target
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  const tag = target.tagName.toLowerCase()
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return true
+  const role = target.getAttribute('role')
+  if (role === 'textbox' || role === 'combobox' || role === 'spinbutton') return true
+  return Boolean(target.closest('[contenteditable="true"], input, textarea, select, [role="textbox"], [role="combobox"], [role="spinbutton"]'))
 }

@@ -5,6 +5,7 @@ using Microsoft.Data.Sqlite;
 namespace LocalMediaManager.Bridge;
 
 public sealed record AppearanceSettingsDto(string ThemeMode);
+public sealed record MovieWallDisplaySettingsDto(string PosterOrientation, string PosterSize);
 
 public sealed record MediaStorageSettingsDto(
     string RootPath,
@@ -26,7 +27,8 @@ public sealed record UnifiedSettingsDto(
     PlaybackSettingsDto Playback,
     RatingRetentionSettingsDto RatingRetention,
     AppearanceSettingsDto Appearance,
-    MediaStorageSettingsDto MediaStorage);
+    MediaStorageSettingsDto MediaStorage,
+    MovieWallDisplaySettingsDto MovieWallDisplay);
 
 public sealed record UnifiedSettingsSaveResult(UnifiedSettingsDto Settings, IReadOnlyList<string> ChangedFields, string Message);
 
@@ -43,6 +45,7 @@ public sealed class SettingsSaveCoordinator(
     public async Task<UnifiedSettingsDto> ReadAsync(CancellationToken token = default)
     {
         AppearanceSettingsDto appearance = await ReadAppearanceAsync(token);
+        MovieWallDisplaySettingsDto movieWallDisplay = await ReadMovieWallDisplayAsync(token);
         MediaStorageSettingsDto mediaStorage = await ReadMediaStorageAsync(token);
         return new(
             await metadata.ReadMetaTubeAsync(),
@@ -50,7 +53,8 @@ public sealed class SettingsSaveCoordinator(
             await playback.ReadAsync(token),
             await ratings.ReadSettingsAsync(token),
             appearance,
-            mediaStorage);
+            mediaStorage,
+            movieWallDisplay);
     }
 
     public UnifiedSettingsDto DefaultSettings() => SettingsDefaults.UnifiedForEnvironment(installRoot, databasePath);
@@ -79,6 +83,8 @@ public sealed class SettingsSaveCoordinator(
         await StoreAsync(connection, transaction, "playback.playerPath", clean.Playback.UseSystemDefault ? "" : clean.Playback.PlayerPath, "string", token);
         await StoreAsync(connection, transaction, "ratingHistory.enabled", clean.RatingRetention.Enabled, "boolean", token);
         await StoreAsync(connection, transaction, "appearance.themeMode", clean.Appearance.ThemeMode, "string", token);
+        await StoreAsync(connection, transaction, "movieWall.posterOrientation", clean.MovieWallDisplay.PosterOrientation, "string", token);
+        await StoreAsync(connection, transaction, "movieWall.posterSize", clean.MovieWallDisplay.PosterSize, "string", token);
         await StoreAsync(connection, transaction, "mediaStorage.rootPath", clean.MediaStorage.RootPath, "string", token);
         await StoreAsync(connection, transaction, "mediaStorage.directory.posters", clean.MediaStorage.PostersDirectory, "string", token);
         await StoreAsync(connection, transaction, "mediaStorage.directory.thumbnails", clean.MediaStorage.ThumbnailsDirectory, "string", token);
@@ -109,6 +115,9 @@ public sealed class SettingsSaveCoordinator(
                 throw new ArgumentException("播放器路径必须指向现有的 Windows 可执行文件。", nameof(input.Playback.PlayerPath));
         }
         string theme = string.Equals(input.Appearance.ThemeMode, "light", StringComparison.OrdinalIgnoreCase) ? "light" : "dark";
+        MovieWallDisplaySettingsDto movieWallInput = input.MovieWallDisplay ?? SettingsDefaults.Unified.MovieWallDisplay;
+        string posterOrientation = string.Equals(movieWallInput.PosterOrientation, "landscape", StringComparison.OrdinalIgnoreCase) ? "landscape" : "portrait";
+        string posterSize = movieWallInput.PosterSize?.ToLowerInvariant() is "small" or "large" ? movieWallInput.PosterSize.ToLowerInvariant() : "medium";
         MediaStorageSettingsDto mediaStorage = NormalizeMediaStorage(input.MediaStorage, createMissingMediaStorageRoot);
         return new(
             input.MetaTube with
@@ -121,7 +130,8 @@ public sealed class SettingsSaveCoordinator(
             new(player, useSystemDefault),
             new(input.RatingRetention.Enabled),
             new(theme),
-            mediaStorage);
+            mediaStorage,
+            new(posterOrientation, posterSize));
     }
 
     private static string NormalizeDirectory(string value, string label)
@@ -145,6 +155,28 @@ public sealed class SettingsSaveCoordinator(
             catch (JsonException) { }
         }
         return new(string.Equals(theme, "light", StringComparison.OrdinalIgnoreCase) ? "light" : "dark");
+    }
+
+    private async Task<MovieWallDisplaySettingsDto> ReadMovieWallDisplayAsync(CancellationToken token)
+    {
+        await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadOnly, token);
+        string orientation = SettingsDefaults.Unified.MovieWallDisplay.PosterOrientation;
+        string size = SettingsDefaults.Unified.MovieWallDisplay.PosterSize;
+        string? rawOrientation = await ScalarTextAsync(connection, "SELECT ValueJson FROM AppSettings WHERE Key='movieWall.posterOrientation'", token);
+        string? rawSize = await ScalarTextAsync(connection, "SELECT ValueJson FROM AppSettings WHERE Key='movieWall.posterSize'", token);
+        if (!string.IsNullOrWhiteSpace(rawOrientation))
+        {
+            try { orientation = JsonSerializer.Deserialize<string>(rawOrientation) ?? orientation; }
+            catch (JsonException) { }
+        }
+        if (!string.IsNullOrWhiteSpace(rawSize))
+        {
+            try { size = JsonSerializer.Deserialize<string>(rawSize) ?? size; }
+            catch (JsonException) { }
+        }
+        orientation = string.Equals(orientation, "landscape", StringComparison.OrdinalIgnoreCase) ? "landscape" : "portrait";
+        size = size.ToLowerInvariant() is "small" or "large" ? size.ToLowerInvariant() : "medium";
+        return new(orientation, size);
     }
 
     private async Task<MediaStorageSettingsDto> ReadMediaStorageAsync(CancellationToken token)
@@ -342,6 +374,7 @@ public sealed class SettingsSaveCoordinator(
         if (before.RatingRetention != after.RatingRetention) changed.Add("ratingRetention");
         if (before.Appearance != after.Appearance) changed.Add("appearance");
         if (before.MediaStorage != after.MediaStorage) changed.Add("mediaStorage");
+        if (before.MovieWallDisplay != after.MovieWallDisplay) changed.Add("movieWallDisplay");
         return changed;
     }
 
@@ -363,7 +396,8 @@ public static class SettingsDefaults
         new("", true),
         new(true),
         new("dark"),
-        MediaStorageForEnvironment(installRoot, databasePath));
+        MediaStorageForEnvironment(installRoot, databasePath),
+        new("portrait", "medium"));
 
     public static MediaStorageSettingsDto MediaStorageForEnvironment(
         string? installRoot,

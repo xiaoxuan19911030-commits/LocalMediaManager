@@ -6,10 +6,10 @@ import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
 import RestoreRoundedIcon from '@mui/icons-material/RestoreRounded'
 import SettingsBackupRestoreRoundedIcon from '@mui/icons-material/SettingsBackupRestoreRounded'
 import UploadFileRoundedIcon from '@mui/icons-material/UploadFileRounded'
-import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, FormControlLabel, List, ListItemButton, ListItemText, MenuItem, Paper, Snackbar, Stack, Switch, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, ButtonBase, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, FormControlLabel, List, ListItemButton, ListItemText, MenuItem, Paper, Snackbar, Stack, Switch, TextField, Typography } from '@mui/material'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useBlocker, useNavigate } from 'react-router'
 import { BrandMark } from '@/components/BrandMark'
 import { HealthMeter, SurfaceSection } from '@/components/ProductComponents'
@@ -17,10 +17,11 @@ import { DangerConfirmDialog } from '@/components/workspace/DangerConfirmDialog'
 import { StatusBadge } from '@/components/workspace/StatusBadges'
 import { WorkspacePage, refreshAction } from '@/components/workspace/Workspace'
 import { buildInfo } from '@/buildInfo'
+import { defaultMovieWallDisplay, normalizeMovieWallDisplay } from '@/components/workspace/movieWallDisplay'
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
 import type { BridgeHealth } from '@/types/media'
-import type { BackupValidation, DataSafetyOverview, DiagnosticCheck, MediaStorageSettings, MetaTubeSettings, NfoSettings, PlaybackSettings, RatingRetentionSettings, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings } from '@/types/settings'
+import type { BackupValidation, DataSafetyOverview, DiagnosticCheck, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, NfoSettings, PlaybackSettings, RatingRetentionSettings, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 
 const categories = [
@@ -255,7 +256,10 @@ export default function SettingsPage() {
         {category === 'playback' && <PlaybackSection playback={draft.playback} setPlayback={(value) => updateDraft('playback', value)}/>}
         {category === 'search' && <PlannedSection labels={['默认搜索范围', '默认排序', '默认卡片/列表模式', '保存页面筛选状态']} fields={legacyFields}/>}
         {category === 'shortcuts' && <ShortcutSection/>}
-        {category === 'appearance' && <AppearanceSection mode={draft.appearance.themeMode} setMode={(value) => updateDraft('appearance', { themeMode: value })}/>}
+        {category === 'appearance' && <Stack spacing={2}>
+          <AppearanceSection mode={draft.appearance.themeMode} setMode={(value) => updateDraft('appearance', { themeMode: value })}/>
+          <MovieWallSection value={normalizeMovieWallDisplay(draft.movieWallDisplay ?? defaultMovieWallDisplay)} setValue={(value) => updateDraft('movieWallDisplay', normalizeMovieWallDisplay(value))}/>
+        </Stack>}
         {category === 'data' && <DataSection overview={overview} ratingRetention={draft.ratingRetention} setRatingRetention={(value) => updateDraft('ratingRetention', value)} backupPath={backupPath} setBackupPath={setBackupPath} restoreMode={restoreMode} setRestoreMode={setRestoreMode} validation={backupValidation} setValidation={setBackupValidation} importJson={importJson} setImportJson={setImportJson} importPreview={importPreview} previewImport={previewImport} onBackup={() => setConfirm('backup')} onRestore={() => setConfirm('restore')}/>}
         {category === 'logs' && <LogsSection diagnostics={diagnostics} runDiagnostics={() => bridge.settingsDiagnostics().then(setDiagnostics).catch((reason: Error) => setError(reason.message))} onCleanLogs={() => setConfirm('logs')}/>}
         {category === 'about' && <AboutSection overview={overview} health={health}/>}
@@ -368,6 +372,66 @@ function MediaStorageSection({ mediaStorage, defaults, setMediaStorage, setNotic
 }
 function PlaybackSection({ playback, setPlayback }: { playback: PlaybackSettings; setPlayback: (v: PlaybackSettings) => void }) {
   return <SurfaceSection title="播放器" description="复用现有播放服务，不新增播放器内核。"><Stack spacing={1.5}><FormControlLabel control={<Switch checked={playback.useSystemDefault} onChange={event => setPlayback({ ...playback, useSystemDefault: event.target.checked })}/>} label="使用系统默认播放器"/><TextField disabled={playback.useSystemDefault} size="small" label="外部播放器路径" value={playback.playerPath} onChange={event => setPlayback({ ...playback, playerPath: event.target.value })}/></Stack></SurfaceSection>
+}
+function MovieWallSection({ value, setValue }: { value: MovieWallDisplaySettings; setValue: (value: MovieWallDisplaySettings) => void }) {
+  const sizes: { key: MovieWallDisplaySettings['posterSize']; label: string; width: number; height: number }[] = [
+    { key: 'small', label: '小', width: 46, height: 64 },
+    { key: 'medium', label: '中', width: 58, height: 72 },
+    { key: 'large', label: '大', width: 78, height: 64 },
+  ]
+  const orientations: { key: MovieWallDisplaySettings['posterOrientation']; label: string; description: string; width: number; height: number }[] = [
+    { key: 'landscape', label: '横版海报', description: '显示横幅大图', width: 140, height: 78 },
+    { key: 'portrait', label: '竖版海报', description: '显示竖向封面图', width: 66, height: 96 },
+  ]
+  return <SurfaceSection title="影片墙显示" description="统一调整影片墙卡片密度和海报比例，所有复用 MovieWall 的页面同步生效。">
+    <Stack spacing={3}>
+      <Box>
+        <Typography sx={{ fontWeight: 850, mb: 0.5 }}>影片卡片大小</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>影响卡片视图的海报尺寸和每页可见密度；不会改变当前搜索、筛选、排序或页码。</Typography>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' }, gap: 1.5 }}>
+          {sizes.map(option => <VisualOptionCard key={option.key} selected={value.posterSize === option.key} label={option.label} onClick={() => setValue({ ...value, posterSize: option.key })}>
+            <PreviewRail><PreviewPoster width={option.width} height={option.height}/></PreviewRail>
+          </VisualOptionCard>)}
+        </Box>
+      </Box>
+      <Box>
+        <Typography sx={{ fontWeight: 850, mb: 0.5 }}>海报方向</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>只影响卡片视图；列表视图保持现有布局。</Typography>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, gap: 1.5 }}>
+          {orientations.map(option => <VisualOptionCard key={option.key} selected={value.posterOrientation === option.key} label={option.label} description={option.description} onClick={() => setValue({ ...value, posterOrientation: option.key })}>
+            <PreviewRail><PreviewPoster width={option.width} height={option.height}/></PreviewRail>
+          </VisualOptionCard>)}
+        </Box>
+      </Box>
+      <Typography variant="body2" color="text.secondary">默认值：竖版海报 / 中。点击“保存设置”后持久化，重启后恢复。</Typography>
+    </Stack>
+  </SurfaceSection>
+}
+
+function VisualOptionCard({ selected, label, description, onClick, children }: { selected: boolean; label: string; description?: string; onClick: () => void; children: ReactNode }) {
+  return <ButtonBase onClick={onClick} sx={{ display: 'block', width: '100%', textAlign: 'inherit', borderRadius: 2 }}>
+    <Paper variant="outlined" sx={{
+      p: 1.5,
+      minHeight: 150,
+      borderRadius: 2,
+      borderColor: selected ? 'primary.main' : 'divider',
+      bgcolor: selected ? 'primary.main' : 'background.paper',
+      color: selected ? 'primary.contrastText' : 'text.primary',
+      boxShadow: selected ? theme => `0 0 0 1px ${theme.palette.primary.main} inset` : undefined,
+    }}>
+      {children}
+      <Typography sx={{ mt: 1.25, fontWeight: 900, textAlign: 'center' }}>{label}</Typography>
+      {description && <Typography variant="caption" sx={{ display: 'block', textAlign: 'center', color: selected ? 'primary.contrastText' : 'text.secondary', opacity: selected ? 0.78 : 1 }}>{description}</Typography>}
+    </Paper>
+  </ButtonBase>
+}
+
+function PreviewRail({ children }: { children: ReactNode }) {
+  return <Box sx={{ height: 78, borderRadius: 1.5, bgcolor: theme => theme.palette.mode === 'dark' ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.06)', display: 'grid', placeItems: 'center', overflow: 'hidden' }}>{children}</Box>
+}
+
+function PreviewPoster({ width, height }: { width: number; height: number }) {
+  return <Box sx={{ width, height, borderRadius: 1, bgcolor: 'primary.light' }}/>
 }
 function PlannedSection({ labels, fields }: { labels: string[]; fields: unknown[] }) {
   return <SurfaceSection title="计划与兼容设置" description="可读取的旧配置会显示在下方；暂无后端能力的选项只标记计划支持。"><Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>{labels.map(label => <Chip key={label} label={label} variant="outlined"/>)}<StatusBadge tone={fields.length ? 'info' : 'neutral'} label={`${fields.length} 个兼容字段`}/></Stack></SurfaceSection>

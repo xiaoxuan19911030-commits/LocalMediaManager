@@ -33,6 +33,7 @@ export interface NfoSettings { exportPolicy: 'SkipExisting' | 'SeparateFile'; ou
 export interface PlaybackSettings { playerPath: string; useSystemDefault: boolean }
 export interface RatingRetentionSettings { enabled: boolean }
 export interface AppearanceSettings { themeMode: 'light' | 'dark' }
+export interface MovieWallDisplaySettings { posterOrientation: 'portrait' | 'landscape'; posterSize: 'small' | 'medium' | 'large' }
 export interface MediaStorageSettings {
   rootPath: string
   postersDirectory: string
@@ -54,6 +55,7 @@ export interface UnifiedSettings {
   ratingRetention: RatingRetentionSettings
   appearance: AppearanceSettings
   mediaStorage: MediaStorageSettings
+  movieWallDisplay: MovieWallDisplaySettings
 }
 export interface UnifiedSettingsSaveResult { settings: UnifiedSettings; changedFields: string[]; message: string }
 

@@ -1,12 +1,13 @@
 import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
-import { Box, Button, Card, CardContent, Pagination, Rating, Stack, Tooltip, Typography } from '@mui/material'
+import { Box, Button, Card, CardContent, Rating, Stack, Tooltip, Typography } from '@mui/material'
 import { useEffect, useRef } from 'react'
 import type { MouseEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { MediaCard, MediaCardGrid } from '@/components/MediaCard'
 import { EmptyState, SectionTitle } from '@/components/ProductComponents'
 import { MetadataStatusBadge, StatusBadge } from '@/components/workspace/StatusBadges'
+import type { MovieWallDisplaySettings } from '@/components/workspace/movieWallDisplay'
 import type { MediaItem } from '@/types/media'
 import type { WorkspaceViewMode } from '@/components/workspace/Workspace'
 
@@ -32,9 +33,7 @@ export function MovieResultContainer({
   total,
   items,
   view = 'grid',
-  page,
-  pageSize,
-  onPageChange,
+  display,
   onPlay,
   onOpen,
   emptyTitle = '暂无影片',
@@ -49,9 +48,7 @@ export function MovieResultContainer({
   total?: number
   items: MediaItem[]
   view?: WorkspaceViewMode
-  page?: number
-  pageSize?: number
-  onPageChange?: (page: number) => void
+  display: MovieWallDisplaySettings
   onPlay: (item: MediaItem) => void
   onOpen: (item: MediaItem) => void
   emptyTitle?: string
@@ -62,15 +59,11 @@ export function MovieResultContainer({
   onRatingClick?: (item: MediaItem) => void
   onContextMenu?: (event: MouseEvent, item: MediaItem) => void
 }) {
-  const pages = total && pageSize ? Math.ceil(total / pageSize) : 0
   return <Stack spacing={2}>
     {title && <SectionTitle title={total === undefined ? title : `${title}（${total}）`}/>}
     {items.length === 0 ? <EmptyState title={emptyTitle} description={emptyDescription}/> : view === 'list'
       ? <MovieList items={items} onPlay={onPlay} onOpen={onOpen} onContextMenu={onContextMenu}/>
-      : <MediaCardGrid>{items.map(item => <MediaCard key={item.dataId} item={item} selected={selectedIds.includes(item.dataId)} onSelect={selectable ? onSelect : undefined} onRatingClick={onRatingClick} onContextMenu={onContextMenu} onPlay={onPlay} onOpen={onOpen}/>)}</MediaCardGrid>}
-    {pages > 1 && page && onPageChange && <Box sx={{ display: 'flex', justifyContent: 'center', pt: 1 }}>
-      <Pagination count={pages} page={page} onChange={(_, value) => onPageChange(value)} color="primary"/>
-    </Box>}
+      : <MediaCardGrid display={display}>{items.map(item => <MediaCard key={item.dataId} item={item} display={display} selected={selectedIds.includes(item.dataId)} onSelect={selectable ? onSelect : undefined} onRatingClick={onRatingClick} onContextMenu={onContextMenu} onPlay={onPlay} onOpen={onOpen}/>)}</MediaCardGrid>}
   </Stack>
 }
 

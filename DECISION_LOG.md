@@ -44,6 +44,7 @@ docs/               → 证据、Release 验收、字段映射、矩阵
 | [DEC-009](#dec-009-legacy-read-unified-write-separation) | Legacy Read / Unified Write 分离 | MediaStorage | 0.5.0-17 | `2437e39` |
 | [DEC-010](#dec-010-generatedcard-wallcrops-unified-pipeline) | GeneratedCard/WallCrops 纳入统一管线 | MediaStorage | 0.5.0-17 | `2437e39` |
 | [DEC-011](#dec-011-smart-search-and-entity-taxonomy) | Smart Search 与实体标签语义边界 | Search / Entities | 0.5.0-18 | `5b68aa5` |
+| [DEC-012](#dec-012-moviewall-display-preferences-and-floating-pagination) | MovieWall 显示偏好与悬浮分页 | MovieWall / Settings | 0.5.0-20 | `ab01df9` |
 
 ---
 
@@ -1011,6 +1012,92 @@ entity click:
 
 ---
 
+## Sprint 0.5.0-20 — MovieWall Display Optimization
+
+**分支：** `sprint/0.5.0-20-moviewall-display`
+**时间：** 2026-07-18
+**目标：** 在不修改 Smart Search、FilterBar、标签导航、详情页和图片生成逻辑的前提下，优化影片墙卡片显示、海报方向/大小、悬浮分页和页码交互。
+
+---
+
+### DEC-012: MovieWall Display Preferences And Floating Pagination
+
+| 字段 | 值 |
+|------|-----|
+| **Decision ID** | DEC-012 |
+| **模块** | MovieWall / Settings |
+| **Sprint** | 0.5.0-20 |
+| **日期** | 2026-07-18 |
+
+#### 背景
+
+MovieWall Consistency 后，所有影片列表已经复用同一 `MovieWall`，但默认卡片过小、大屏单行数量过多，分页仍位于内容流底部，导致下方留白和分页位置体验不稳定。用户还需要统一控制海报方向和大小，且这些偏好必须跨全部 MovieWall 页面共享。
+
+#### 讨论方案
+
+| 方案 | 描述 | 结论 |
+|------|------|------|
+| **A. 每个页面单独保存显示偏好** | 收藏、搜索、标签等页面各自保存卡片大小 | ❌ 拒绝 — 破坏 MovieWall 统一与状态恢复 |
+| **B. localStorage 页面偏好** | React 本地持久化，不进 Settings | ❌ 拒绝 — 形成第二套 Settings |
+| **C. `UnifiedSettings.movieWallDisplay` + MovieWall 统一渲染** | 显示偏好作为统一 Settings 域；MovieWall 读取后传给卡片网格 | ✅ 定案 |
+
+#### 最终方案
+
+`UnifiedSettingsDto` 新增 `MovieWallDisplaySettingsDto`：
+
+```text
+movieWall.posterOrientation = portrait | landscape
+movieWall.posterSize        = small | medium | large
+```
+
+默认值：`portrait / medium`。
+
+显示规则：
+
+- 竖版海报比例：`2:3`
+- 横版海报比例：`16:9`
+- 小/中/大映射为不同 CSS Grid `minmax()` 最小宽度
+- 卡片模式使用响应式 Grid 自动计算列数，不写死列数
+- 列表模式不受海报方向与大小影响
+
+分页规则：
+
+- 分页从 `MovieResultContainer` 移到 `MovieWall`
+- 右下角固定半透明悬浮卡片
+- 显示上一页、当前页/总页数、下一页
+- 点击当前页进入输入状态，`Enter` 跳转，`Esc` 取消
+- 左/右方向键翻页，`Ctrl+G` 聚焦页码输入
+- 输入框、表单、下拉框或弹窗获得焦点时不触发 MovieWall 快捷键
+
+#### 为什么选它
+
+- 保持 MovieWall 是唯一影片墙交互入口，不新增第二套列表或分页
+- 遵守 DEC-001：用户偏好进入统一 Settings，随 `PUT /api/settings/all` 单事务保存
+- 显示偏好不进入搜索依赖，不触发重新查询、不重置搜索/筛选/排序/页码
+- 分页由 MovieWall 统一管理后，所有复用页面自动一致
+
+#### 实现
+
+- `SettingsSaveCoordinator`：读写 `movieWall.*` 键，非法值归一化到默认语义
+- `SettingsPage`：外观分区新增可视化卡片选择器
+- `MovieWall`：读取显示偏好、计算总页数、悬浮分页、页码输入、键盘快捷键
+- `MediaCard` / `MediaCardGrid`：支持方向、比例与尺寸映射
+
+#### 以后必须遵守
+
+- 影片墙显示偏好必须通过 `UnifiedSettings.movieWallDisplay` 保存
+- 不得为收藏页、搜索页、标签页等单独保存海报大小/方向
+- 不得在 Dashboard、详情页或非 MovieWall 页面强行套用 MovieWall 分页快捷键
+- 不得用固定列数代替响应式 Grid
+
+#### 禁止事项
+
+- 禁止修改 Smart Search / FilterBar / 标签导航来实现显示优化
+- 禁止新增第二套 MovieWall、第二套分页或第二套影片卡片列表
+- 禁止在本决策范围内新建复杂图片生成或智能卡图系统
+
+---
+
 ## PROJECT §21 Sprint History（摘要）
 
 | Sprint | 摘要 | 决策 |
@@ -1019,6 +1106,7 @@ entity click:
 | 0.5.0-16 | MediaStorage 纳入 Settings；动态 RootPath；Documents 回退 | DEC-004 ～ DEC-007 |
 | 0.5.0-17 | 统一写入 Resolver；Legacy Read 保留；WallCrops 纳入 | DEC-008 ～ DEC-010 |
 | 0.5.0-18 | Smart Search；实体标签语义区分；导航分类补齐 | DEC-011 |
+| 0.5.0-20 | MovieWall 显示偏好、响应式卡片尺寸和悬浮分页交互 | DEC-012 |
 
 ---
 

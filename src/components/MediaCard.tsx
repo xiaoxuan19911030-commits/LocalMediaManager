@@ -5,6 +5,7 @@ import { Box, Card, CardContent, Checkbox, Chip, IconButton, Rating, Tooltip, Ty
 import { alpha } from '@mui/material/styles'
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { SmartImage } from '@/components/SmartImage'
+import { defaultMovieWallDisplay, movieWallAspectRatio, movieWallMinWidth, type MovieWallDisplaySettings } from '@/components/workspace/movieWallDisplay'
 import type { MediaItem } from '@/types/media'
 
 const isRecent = (value: string) => {
@@ -13,11 +14,17 @@ const isRecent = (value: string) => {
   return Number.isFinite(time) && Date.now() - time < 30 * 24 * 60 * 60 * 1000
 }
 
-export function MediaCardGrid({ children, minWidth = 148 }: { children: ReactNode; minWidth?: number }) {
-  return <Box sx={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${minWidth}px, 1fr))`, gap: { xs: 1.25, md: 1.5 } }}>{children}</Box>
+export function MediaCardGrid({ children, display = defaultMovieWallDisplay }: { children: ReactNode; display?: MovieWallDisplaySettings }) {
+  const minWidth = movieWallMinWidth[display.posterOrientation][display.posterSize]
+  return <Box sx={{
+    display: 'grid',
+    gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${minWidth}px), 1fr))`,
+    gap: { xs: 1.25, md: 1.5 },
+    minWidth: 0,
+  }}>{children}</Box>
 }
 
-export function MediaCard({ item, onPlay, onOpen, selected, onSelect, onRatingClick, onContextMenu }: { item: MediaItem; onPlay: (item: MediaItem) => void; onOpen?: (item: MediaItem) => void; selected?: boolean; onSelect?: (item: MediaItem, selected: boolean) => void; onRatingClick?: (item: MediaItem) => void; onContextMenu?: (event: MouseEvent, item: MediaItem) => void }) {
+export function MediaCard({ item, display = defaultMovieWallDisplay, onPlay, onOpen, selected, onSelect, onRatingClick, onContextMenu }: { item: MediaItem; display?: MovieWallDisplaySettings; onPlay: (item: MediaItem) => void; onOpen?: (item: MediaItem) => void; selected?: boolean; onSelect?: (item: MediaItem, selected: boolean) => void; onRatingClick?: (item: MediaItem) => void; onContextMenu?: (event: MouseEvent, item: MediaItem) => void }) {
   const [coverFailed, setCoverFailed] = useState(false)
   const clickTimer = useRef<number | undefined>(undefined)
   useEffect(() => setCoverFailed(false), [item.coverUrl])
@@ -34,13 +41,13 @@ export function MediaCard({ item, onPlay, onOpen, selected, onSelect, onRatingCl
         '&:hover': onOpen ? { transform: 'translateY(-5px)', borderColor: 'primary.main', boxShadow: (theme) => `0 14px 32px ${alpha(theme.palette.common.black, theme.palette.mode === 'dark' ? .32 : .14)}` } : undefined,
         '&:hover .media-play': { opacity: 1, transform: 'translate(-50%,-50%) scale(1)' }, '&:hover .media-image': { transform: 'scale(1.025)' },
         '@media (prefers-reduced-motion: reduce)': { transition: 'none', '& .media-image, & .media-play': { transition: 'none' } } }}>
-      <Box sx={{ position: 'relative', aspectRatio: '2 / 3', bgcolor: 'action.hover', overflow: 'hidden' }}>
+      <Box sx={{ position: 'relative', aspectRatio: movieWallAspectRatio[display.posterOrientation], bgcolor: 'action.hover', overflow: 'hidden' }}>
         {item.coverUrl && !coverFailed ? (
           <Box className="media-image" sx={{ position: 'absolute', inset: 0, transition: 'transform .35s cubic-bezier(.2,.8,.2,1)' }}>
             <SmartImage src={item.coverUrl} alt={primaryText} onError={() => setCoverFailed(true)}/>
           </Box>
         ) : (
-          <Box sx={{ height: '100%', display: 'grid', placeItems: 'center', color: 'text.disabled', px: 1.5, textAlign: 'center' }}>{coverFailed ? '图片损坏或不可用' : '暂无海报'}</Box>
+          <Box sx={{ height: '100%', display: 'grid', placeItems: 'center', color: 'text.disabled', px: 1.5, textAlign: 'center', bgcolor: 'action.hover' }}>{coverFailed ? '图片损坏或不可用' : '暂无海报'}</Box>
         )}
         <Box sx={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(5,8,14,.08) 45%, rgba(5,8,14,.78) 100%)', pointerEvents: 'none' }}/>
         <Box sx={{ position: 'absolute', top: 8, left: 8, right: 8, display: 'flex', gap: .75, alignItems: 'start', flexWrap: 'wrap' }}>
@@ -69,8 +76,8 @@ export function MediaCard({ item, onPlay, onOpen, selected, onSelect, onRatingCl
         </Tooltip>}
       </Box>
       <CardContent sx={{ p: 1.4, '&:last-child': { pb: 1.4 } }}>
-        <Tooltip title={primaryText} placement="top"><Typography noWrap sx={{ fontWeight: 800, letterSpacing: '.01em' }}>{primaryText}</Typography></Tooltip>
-        {displayTitle && displayTitle !== item.code && <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', mt: .25 }}>{displayTitle}</Typography>}
+        <Tooltip title={primaryText} placement="top"><Typography sx={{ fontWeight: 800, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', minHeight: '2.8em' }}>{primaryText}</Typography></Tooltip>
+        {displayTitle && displayTitle !== item.code && <Typography variant="caption" color="text.secondary" sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', mt: .25 }}>{displayTitle}</Typography>}
         <Typography variant="body2" color="text.secondary" noWrap sx={{ mt: 0.7 }}>
           {item.importedAt?.slice(0, 10) || '日期未知'}
         </Typography>
