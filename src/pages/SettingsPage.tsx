@@ -36,6 +36,7 @@ const planned = ['计划支持']
 const size = (bytes?: number) => bytes ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : '0 MB'
 const stable = (value: unknown) => JSON.stringify(value)
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+const mediaStorageFallbackNoticeKey = 'lmm.mediaStorageFallbackNotice.v1'
 
 export default function SettingsPage() {
   const navigate = useNavigate()
@@ -79,6 +80,10 @@ export default function SettingsPage() {
       .then(([settings, data, all, defaultValues, healthValue]) => {
         setSnapshot(settings); setOverview(data); setOriginal(clone(all)); setDraft(clone(all)); setDefaults(defaultValues); setHealth(healthValue)
         setMode(all.appearance.themeMode)
+        if (all.mediaStorage.usingFallbackDefault && window.localStorage.getItem(mediaStorageFallbackNoticeKey) !== 'shown') {
+          setNotice('检测到软件安装在 Windows 受保护目录。媒体资源默认保存到：我的文档\\Local Media Manager\\MediaStorage。你可以随时在：设置 → 媒体存储 修改保存位置。')
+          window.localStorage.setItem(mediaStorageFallbackNoticeKey, 'shown')
+        }
       })
       .catch((reason: Error) => setError(reason.message))
   }, [setMode])
@@ -332,6 +337,7 @@ function MediaStorageSection({ mediaStorage, defaults, setMediaStorage, setNotic
   ]
   const previewRows = buildMediaStoragePreview(mediaStorage)
   return <Stack spacing={2}>
+    {mediaStorage.usingFallbackDefault && <Alert severity="info">检测到默认数据目录不可写，当前默认使用“我的文档\Local Media Manager\MediaStorage”。</Alert>}
     <SurfaceSection title="媒体资源根目录" description="用于保存海报、缩略图、背景图、预览图、截图、GIF 和 NFO。修改后不会自动移动现有文件。">
       <Stack spacing={1.5}>
         <TextField size="small" label="根目录路径" value={mediaStorage.rootPath} onChange={event => update('rootPath', event.target.value)} helperText="建议使用独立数据目录，不要放在程序安装目录、resources 或 Web assets 内。"/>

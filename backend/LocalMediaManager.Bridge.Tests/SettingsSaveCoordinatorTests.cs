@@ -9,6 +9,8 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
     private readonly string root = Path.Combine(Path.GetTempPath(), "lmm-settings-save-tests", Guid.NewGuid().ToString("N"));
     private string Database => Path.Combine(root, "settings.db");
     private string LegacyDatabase => Path.Combine(root, "legacy.db");
+    private string InstallRoot => Path.Combine(root, "Local Media Manager Next");
+    private string DocumentsRoot => Path.Combine(root, "Documents");
     private SettingsSaveCoordinator coordinator = null!;
 
     public async Task InitializeAsync()
@@ -22,18 +24,21 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
             command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
             await command.ExecuteNonQueryAsync();
         }
+        Directory.CreateDirectory(InstallRoot);
+        Directory.CreateDirectory(DocumentsRoot);
         coordinator = new SettingsSaveCoordinator(Database,
+            InstallRoot,
             new MetadataProviderSettingsService(Database),
             new NfoService(Database),
             new PlaybackSettingsService(Database, LegacyDatabase),
             new RatingHistoryService(Database));
-        Directory.CreateDirectory(SettingsDefaults.MediaStorageForDatabase(Database).RootPath);
+        Directory.CreateDirectory(SettingsDefaults.MediaStorageForEnvironment(InstallRoot, Database).RootPath);
     }
 
     [Fact]
     public async Task UnifiedSettingsLoadMatchesDefaultsForFreshDatabase()
     {
-        UnifiedSettingsDto defaults = SettingsSaveCoordinator.Defaults(Database);
+        UnifiedSettingsDto defaults = SettingsSaveCoordinator.Defaults(Database, InstallRoot);
         UnifiedSettingsDto loaded = await coordinator.ReadAsync();
 
         Assert.Equal(defaults.MetaTube, loaded.MetaTube);
@@ -234,7 +239,7 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
             Appearance = new("light"),
         };
         await coordinator.SaveAsync(modified);
-        UnifiedSettingsDto defaults = SettingsSaveCoordinator.Defaults(Database);
+        UnifiedSettingsDto defaults = SettingsSaveCoordinator.Defaults(Database, InstallRoot);
 
         UnifiedSettingsDto beforeSave = await coordinator.ReadAsync();
         Assert.NotEqual(defaults.RatingRetention, beforeSave.RatingRetention);
@@ -244,6 +249,116 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
         Assert.Equal(defaults.RatingRetention, afterSave.RatingRetention);
         Assert.Equal(defaults.Appearance, afterSave.Appearance);
         Assert.Equal(defaults.MediaStorage, afterSave.MediaStorage);
+    }
+
+    [Fact]
+    public void MediaStorageDefaultFollowsInstallRoot()
+    {
+        string installA = Path.Combine(root, "AppA", "Local Media Manager");
+        string installB = Path.Combine(root, "AppB", "Local Media Manager");
+        Directory.CreateDirectory(installA);
+        Directory.CreateDirectory(installB);
+
+        MediaStorageSettingsDto first = SettingsDefaults.MediaStorageForEnvironment(installA, Database, DocumentsRoot, _ => true);
+        MediaStorageSettingsDto second = SettingsDefaults.MediaStorageForEnvironment(installB, Database, DocumentsRoot, _ => true);
+
+        Assert.Equal(Path.Combine(root, "AppA", "Local Media Manager Data", "MediaStorage"), first.RootPath);
+        Assert.Equal(Path.Combine(root, "AppB", "Local Media Manager Data", "MediaStorage"), second.RootPath);
+        Assert.False(first.UsingFallbackDefault);
+        Assert.False(second.UsingFallbackDefault);
+    }
+
+    [Fact]
+    public void MediaStorageDefaultCanResolveDifferentDriveInstallRoot()
+    {
+        MediaStorageSettingsDto defaults = SettingsDefaults.MediaStorageForEnvironment(@"E:\Apps\Local Media Manager", Database, DocumentsRoot, _ => true);
+
+        Assert.Equal(@"E:\Apps\Local Media Manager Data\MediaStorage", defaults.RootPath);
+        Assert.False(defaults.UsingFallbackDefault);
+    }
+
+    [Fact]
+    public void MediaStorageDefaultFallsBackFromProgramFiles()
+    {
+        string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        if (string.IsNullOrWhiteSpace(programFiles)) return;
+        string install = Path.Combine(programFiles, "Local Media Manager");
+
+        MediaStorageSettingsDto defaults = SettingsDefaults.MediaStorageForEnvironment(install, Database, DocumentsRoot, _ => true);
+
+        Assert.Equal(Path.Combine(DocumentsRoot, "Local Media Manager", "MediaStorage"), defaults.RootPath);
+        Assert.True(defaults.UsingFallbackDefault);
+    }
+
+    [Fact]
+    public void MediaStorageDefaultFallsBackWhenBesideDataRootIsNotWritable()
+    {
+        string install = Path.Combine(root, "Apps", "Local Media Manager");
+
+        MediaStorageSettingsDto defaults = SettingsDefaults.MediaStorageForEnvironment(install, Database, DocumentsRoot, _ => false);
+
+        Assert.Equal(Path.Combine(DocumentsRoot, "Local Media Manager", "MediaStorage"), defaults.RootPath);
+        Assert.True(defaults.UsingFallbackDefault);
+    }
+
+    [Fact]
+    public async Task MediaStorageSavedUserRootHasHighestPriority()
+    {
+        string customRoot = Path.Combine(root, "custom-root");
+        Directory.CreateDirectory(customRoot);
+        UnifiedSettingsDto current = await coordinator.ReadAsync();
+        await coordinator.SaveAsync(current with { MediaStorage = current.MediaStorage with { RootPath = customRoot } });
+        string movedInstallRoot = Path.Combine(root, "Moved", "Local Media Manager");
+        Directory.CreateDirectory(movedInstallRoot);
+        var movedCoordinator = new SettingsSaveCoordinator(Database,
+            movedInstallRoot,
+            new MetadataProviderSettingsService(Database),
+            new NfoService(Database),
+            new PlaybackSettingsService(Database, LegacyDatabase),
+            new RatingHistoryService(Database));
+
+        UnifiedSettingsDto loaded = await movedCoordinator.ReadAsync();
+
+        Assert.Equal(Path.GetFullPath(customRoot), loaded.MediaStorage.RootPath);
+        Assert.False(loaded.MediaStorage.UsingFallbackDefault);
+    }
+
+    [Fact]
+    public async Task EmptyMediaStorageRootReturnsRuntimeDefault()
+    {
+        await using var connection = new SqliteConnection($"Data Source={Database}");
+        await connection.OpenAsync();
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "UPDATE AppSettings SET ValueJson='\"\"' WHERE Key='mediaStorage.rootPath'";
+        await command.ExecuteNonQueryAsync();
+
+        UnifiedSettingsDto loaded = await coordinator.ReadAsync();
+
+        Assert.Equal(Path.Combine(root, "Local Media Manager Next Data", "MediaStorage"), loaded.MediaStorage.RootPath);
+        Assert.False(loaded.MediaStorage.UsingFallbackDefault);
+    }
+
+    [Fact]
+    public async Task MediaStorageMigrationDoesNotSeedFixedAbsoluteRoot()
+    {
+        string migration = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", "0012_MediaStorageSettings.sql"));
+
+        Assert.Contains("('mediaStorage.rootPath','\"\"'", migration);
+        Assert.DoesNotContain("D:\\", migration);
+        Assert.DoesNotContain("C:\\", migration);
+        Assert.DoesNotContain("Local Media Manager Next Data", migration);
+    }
+
+    [Fact]
+    public void MediaStorageDefaultsEndpointValueCanBeUsedAsDraftDefault()
+    {
+        string install = Path.Combine(root, "E-Apps", "Local Media Manager");
+        Directory.CreateDirectory(install);
+        MediaStorageSettingsDto defaults = SettingsDefaults.MediaStorageForEnvironment(install, Database, DocumentsRoot, _ => true);
+        UnifiedSettingsDto endpointDefaults = SettingsSaveCoordinator.Defaults(Database, install);
+
+        Assert.Equal(defaults.RootPath, endpointDefaults.MediaStorage.RootPath);
+        Assert.Equal(defaults.PostersDirectory, endpointDefaults.MediaStorage.PostersDirectory);
     }
 
     public Task DisposeAsync()

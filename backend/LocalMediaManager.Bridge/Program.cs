@@ -9,6 +9,7 @@ string installedRoot = Environment.GetEnvironmentVariable("LMM_LEGACY_ROOT")
     ?? @"D:\Jvedio\Jvedio5.0";
 string databasePath = Environment.GetEnvironmentVariable("LMM_DATABASE_PATH")
     ?? @"D:\Local Media Manager Next Data\data\LocalMediaManager.db";
+string installRoot = ResolveInstallRoot(AppContext.BaseDirectory);
 string configDatabasePath = Environment.GetEnvironmentVariable("LMM_CONFIG_DATABASE_PATH")
     ?? Path.Combine(installedRoot, "data", Environment.UserName, "app_configs.sqlite");
 string imageRoot = Environment.GetEnvironmentVariable("LMM_IMAGE_ROOT")
@@ -39,6 +40,7 @@ builder.Services.AddSingleton<ImageDownloadService>();
 builder.Services.AddSingleton(new NfoService(databasePath));
 builder.Services.AddSingleton(serviceProvider => new SettingsSaveCoordinator(
     databasePath,
+    installRoot,
     serviceProvider.GetRequiredService<MetadataProviderSettingsService>(),
     serviceProvider.GetRequiredService<NfoService>(),
     serviceProvider.GetRequiredService<PlaybackSettingsService>(),
@@ -448,6 +450,24 @@ app.MapPost("/api/videos/{dataId:long}/play", async (long dataId, ProductWriter 
 Console.WriteLine($"Local Media Manager Bridge: {bridgeUrl}");
 Console.WriteLine($"Database (read/write via authenticated commands): {databasePath}");
 await app.RunAsync();
+
+static string ResolveInstallRoot(string baseDirectory)
+{
+    string current = Path.GetFullPath(baseDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    DirectoryInfo? directory = new(current);
+    if (directory.Name.Equals("bridge", StringComparison.OrdinalIgnoreCase)
+        && directory.Parent?.Name.Equals("resources", StringComparison.OrdinalIgnoreCase) == true
+        && directory.Parent.Parent is not null)
+    {
+        return directory.Parent.Parent.FullName;
+    }
+    if (directory.Name.Equals("resources", StringComparison.OrdinalIgnoreCase)
+        && directory.Parent is not null)
+    {
+        return directory.Parent.FullName;
+    }
+    return current;
+}
 
 static async Task<SqliteConnection> OpenReadOnlyAsync(string databasePath)
 {

@@ -16,7 +16,8 @@ public sealed record MediaStorageSettingsDto(
     string GifDirectory,
     string NfoDirectory,
     string MovieFolderTemplate,
-    string FileNameTemplate);
+    string FileNameTemplate,
+    bool UsingFallbackDefault = false);
 
 public sealed record UnifiedSettingsDto(
     MetaTubeSettingsDto MetaTube,
@@ -30,6 +31,7 @@ public sealed record UnifiedSettingsSaveResult(UnifiedSettingsDto Settings, IRea
 
 public sealed class SettingsSaveCoordinator(
     string databasePath,
+    string installRoot,
     MetadataProviderSettingsService metadata,
     NfoService nfo,
     PlaybackSettingsService playback,
@@ -50,8 +52,8 @@ public sealed class SettingsSaveCoordinator(
             mediaStorage);
     }
 
-    public UnifiedSettingsDto DefaultSettings() => SettingsDefaults.UnifiedForDatabase(databasePath);
-    public static UnifiedSettingsDto Defaults(string? databasePath = null) => SettingsDefaults.UnifiedForDatabase(databasePath);
+    public UnifiedSettingsDto DefaultSettings() => SettingsDefaults.UnifiedForEnvironment(installRoot, databasePath);
+    public static UnifiedSettingsDto Defaults(string? databasePath = null, string? installRoot = null) => SettingsDefaults.UnifiedForEnvironment(installRoot, databasePath);
 
     public async Task<UnifiedSettingsSaveResult> SaveAsync(UnifiedSettingsDto input, bool createMissingMediaStorageRoot = false, CancellationToken token = default)
     {
@@ -145,7 +147,7 @@ public sealed class SettingsSaveCoordinator(
 
     private async Task<MediaStorageSettingsDto> ReadMediaStorageAsync(CancellationToken token)
     {
-        MediaStorageSettingsDto defaults = SettingsDefaults.MediaStorageForDatabase(databasePath);
+        MediaStorageSettingsDto defaults = SettingsDefaults.MediaStorageForEnvironment(installRoot, databasePath);
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadOnly, token);
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         await using SqliteCommand command = connection.CreateCommand();
@@ -153,7 +155,8 @@ public sealed class SettingsSaveCoordinator(
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(token);
         while (await reader.ReadAsync()) values[reader.GetString(0)] = reader.GetString(1);
         string root = TextSetting(values, "mediaStorage.rootPath", "");
-        if (string.IsNullOrWhiteSpace(root)) root = defaults.RootPath;
+        bool usesRuntimeDefault = string.IsNullOrWhiteSpace(root);
+        if (usesRuntimeDefault) root = defaults.RootPath;
         return new(
             root,
             TextSetting(values, "mediaStorage.directory.posters", defaults.PostersDirectory),
@@ -164,7 +167,8 @@ public sealed class SettingsSaveCoordinator(
             TextSetting(values, "mediaStorage.directory.gif", defaults.GifDirectory),
             TextSetting(values, "mediaStorage.directory.nfo", defaults.NfoDirectory),
             TextSetting(values, "mediaStorage.template.movieFolder", defaults.MovieFolderTemplate),
-            TextSetting(values, "mediaStorage.template.fileName", defaults.FileNameTemplate));
+            TextSetting(values, "mediaStorage.template.fileName", defaults.FileNameTemplate),
+            usesRuntimeDefault && defaults.UsingFallbackDefault);
     }
 
     private MediaStorageSettingsDto NormalizeMediaStorage(MediaStorageSettingsDto input, bool createMissingRoot)
@@ -347,21 +351,25 @@ public sealed class SettingsSaveCoordinator(
 
 public static class SettingsDefaults
 {
-    public static UnifiedSettingsDto Unified => UnifiedForDatabase(null);
+    public static UnifiedSettingsDto Unified => UnifiedForEnvironment(null, null);
 
-    public static UnifiedSettingsDto UnifiedForDatabase(string? databasePath) => new(
+    public static UnifiedSettingsDto UnifiedForEnvironment(string? installRoot, string? databasePath) => new(
         new(true, "http://127.0.0.1:8080/", 30, true, false, true, true),
         new("SkipExisting", "", true, true),
         new("", true),
         new(true),
         new("dark"),
-        MediaStorageForDatabase(databasePath));
+        MediaStorageForEnvironment(installRoot, databasePath));
 
-    public static MediaStorageSettingsDto MediaStorageForDatabase(string? databasePath)
+    public static MediaStorageSettingsDto MediaStorageForEnvironment(
+        string? installRoot,
+        string? databasePath,
+        string? documentsRoot = null,
+        Func<string, bool>? canUseBesideDataRoot = null)
     {
-        string dataRoot = DefaultDataRoot(databasePath);
+        MediaStorageDefaultRoot root = ResolveMediaStorageDefaultRoot(installRoot, databasePath, documentsRoot, canUseBesideDataRoot);
         return new(
-            Path.Combine(dataRoot, "MediaStorage"),
+            root.RootPath,
             "Posters",
             "Thumbnails",
             "Fanart",
@@ -370,15 +378,112 @@ public static class SettingsDefaults
             "GIF",
             "NFO",
             "{MovieCode}",
-            "{MovieCode}");
+            "{MovieCode}",
+            root.UsingFallback);
     }
 
-    private static string DefaultDataRoot(string? databasePath)
+    private static MediaStorageDefaultRoot ResolveMediaStorageDefaultRoot(
+        string? installRoot,
+        string? databasePath,
+        string? documentsRoot,
+        Func<string, bool>? canUseBesideDataRoot)
     {
-        if (string.IsNullOrWhiteSpace(databasePath)) return @"D:\Local Media Manager Next Data";
-        string databaseDirectory = Path.GetDirectoryName(Path.GetFullPath(databasePath)) ?? @"D:\Local Media Manager Next Data";
+        string? cleanInstallRoot = NormalizeOptionalFullPath(installRoot);
+        if (!string.IsNullOrWhiteSpace(cleanInstallRoot))
+        {
+            string dataRoot = cleanInstallRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + " Data";
+            bool protectedInstall = IsProtectedInstallRoot(cleanInstallRoot);
+            bool canUseBeside = !protectedInstall && (canUseBesideDataRoot ?? CanUseBesideDataRoot)(dataRoot);
+            if (canUseBeside)
+            {
+                return new(Path.Combine(dataRoot, "MediaStorage"), false);
+            }
+
+            Console.Error.WriteLine("Media storage default path fallback: install root is protected or beside data root is not writable.");
+        }
+        else if (!string.IsNullOrWhiteSpace(databasePath))
+        {
+            string? dataRoot = DataRootFromDatabasePath(databasePath);
+            if (!string.IsNullOrWhiteSpace(dataRoot))
+            {
+                return new(Path.Combine(dataRoot, "MediaStorage"), false);
+            }
+        }
+
+        string docs = string.IsNullOrWhiteSpace(documentsRoot)
+            ? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+            : documentsRoot;
+        if (string.IsNullOrWhiteSpace(docs))
+        {
+            docs = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        }
+        return new(Path.Combine(docs, "Local Media Manager", "MediaStorage"), true);
+    }
+
+    private static string? NormalizeOptionalFullPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        try { return Path.GetFullPath(path.Trim()); }
+        catch (Exception error) when (error is ArgumentException or NotSupportedException or PathTooLongException) { return null; }
+    }
+
+    private static string? DataRootFromDatabasePath(string? databasePath)
+    {
+        string? databaseDirectory = Path.GetDirectoryName(Path.GetFullPath(databasePath ?? ""));
+        if (string.IsNullOrWhiteSpace(databaseDirectory)) return null;
         return string.Equals(Path.GetFileName(databaseDirectory), "data", StringComparison.OrdinalIgnoreCase)
-            ? Path.GetDirectoryName(databaseDirectory) ?? databaseDirectory
+            ? Path.GetDirectoryName(databaseDirectory)
             : databaseDirectory;
     }
+
+    private static bool CanUseBesideDataRoot(string dataRoot)
+    {
+        try
+        {
+            string fullDataRoot = Path.GetFullPath(dataRoot);
+            if (Directory.Exists(fullDataRoot))
+            {
+                string probe = Path.Combine(fullDataRoot, $".lmm-write-test-{Guid.NewGuid():N}.tmp");
+                try
+                {
+                    File.WriteAllText(probe, "ok");
+                    return true;
+                }
+                finally
+                {
+                    try { if (File.Exists(probe)) File.Delete(probe); } catch { }
+                }
+            }
+
+            string? parent = Path.GetDirectoryName(fullDataRoot);
+            if (string.IsNullOrWhiteSpace(parent) || !Directory.Exists(parent)) return false;
+            string probeDirectory = Path.Combine(parent, $".lmm-media-storage-probe-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(probeDirectory);
+            Directory.Delete(probeDirectory);
+            return true;
+        }
+        catch (Exception error) when (error is UnauthorizedAccessException or IOException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsProtectedInstallRoot(string installRoot)
+    {
+        string root = Path.GetFullPath(installRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return IsSameOrChild(root, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles))
+            || IsSameOrChild(root, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86))
+            || IsSameOrChild(root, Environment.GetFolderPath(Environment.SpecialFolder.Windows));
+    }
+
+    private static bool IsSameOrChild(string child, string? parent)
+    {
+        if (string.IsNullOrWhiteSpace(parent)) return false;
+        string childFull = Path.GetFullPath(child).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string parentFull = Path.GetFullPath(parent).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return childFull.Equals(parentFull, StringComparison.OrdinalIgnoreCase)
+            || childFull.StartsWith(parentFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed record MediaStorageDefaultRoot(string RootPath, bool UsingFallback);
 }

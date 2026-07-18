@@ -44,6 +44,7 @@ export interface MediaStorageSettings {
   nfoDirectory: string
   movieFolderTemplate: string
   fileNameTemplate: string
+  usingFallbackDefault?: boolean
 }
 export interface UnifiedSettings {
   metaTube: MetaTubeSettings
