@@ -29,7 +29,7 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
         coordinator = new SettingsSaveCoordinator(Database,
             InstallRoot,
             new MetadataProviderSettingsService(Database),
-            new NfoService(Database),
+            new NfoService(Database, new MediaStoragePathResolver(Database, InstallRoot)),
             new PlaybackSettingsService(Database, LegacyDatabase),
             new RatingHistoryService(Database));
         Directory.CreateDirectory(SettingsDefaults.MediaStorageForEnvironment(InstallRoot, Database).RootPath);
@@ -104,7 +104,7 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
         Directory.CreateDirectory(mediaRoot);
         UnifiedSettingsDto draft = (await coordinator.ReadAsync()) with
         {
-            MediaStorage = new(mediaRoot, "Posters2", "Thumbs2", "Fanart2", "Previews2", "Shots2", "Gifs2", "Nfos2", "{MovieCode}", "{MovieCode}-{MovieTitle}"),
+            MediaStorage = new(mediaRoot, "Posters2", "Thumbs2", "Fanart2", "Previews2", "Shots2", "WallCrops2", "Gifs2", "Nfos2", "{MovieCode}", "{MovieCode}-{MovieTitle}"),
         };
 
         UnifiedSettingsSaveResult result = await coordinator.SaveAsync(draft);
@@ -313,7 +313,7 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
         var movedCoordinator = new SettingsSaveCoordinator(Database,
             movedInstallRoot,
             new MetadataProviderSettingsService(Database),
-            new NfoService(Database),
+            new NfoService(Database, new MediaStoragePathResolver(Database, movedInstallRoot)),
             new PlaybackSettingsService(Database, LegacyDatabase),
             new RatingHistoryService(Database));
 

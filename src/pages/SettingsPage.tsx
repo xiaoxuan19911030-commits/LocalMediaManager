@@ -327,6 +327,7 @@ function MediaStorageSection({ mediaStorage, defaults, setMediaStorage, setNotic
   }
   const update = <K extends keyof MediaStorageSettings>(key: K, value: MediaStorageSettings[K]) => setMediaStorage({ ...mediaStorage, [key]: value })
   const rows: [keyof MediaStorageSettings, string][] = [
+    ['wallCropsDirectory', '影片墙裁切目录'],
     ['postersDirectory', '海报目录'],
     ['thumbnailsDirectory', '缩略图目录'],
     ['fanartDirectory', '背景图目录'],
@@ -413,6 +414,7 @@ function buildMediaStoragePreview(settings: MediaStorageSettings) {
   const root = settings.rootPath || '<RootPath>'
   const join = (...parts: string[]) => parts.map(part => part.trim().replace(/^\\+|\\+$/g, '')).filter(Boolean).join('\\')
   return [
+    { label: 'WallCrop', path: join(root, settings.wallCropsDirectory, movieFolder, `${fileName}.jpg`) },
     { label: 'Poster', path: join(root, settings.postersDirectory, movieFolder, `${fileName}.jpg`) },
     { label: 'Thumbnail', path: join(root, settings.thumbnailsDirectory, movieFolder, `${fileName}.jpg`) },
     { label: 'Fanart', path: join(root, settings.fanartDirectory, movieFolder, `${fileName}.jpg`) },

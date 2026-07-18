@@ -17,11 +17,12 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
         Directory.CreateDirectory(root);
         await using var connection = new SqliteConnection($"Data Source={Database}");
         await connection.OpenAsync();
-        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql" }) {
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0012_MediaStorageSettings.sql" }) {
             await using var command = connection.CreateCommand();
             command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
             await command.ExecuteNonQueryAsync();
         }
+        await Execute(connection, "UPDATE AppSettings SET ValueJson=$root WHERE Key='mediaStorage.rootPath'", ("$root", System.Text.Json.JsonSerializer.Serialize(Path.Combine(root, "MediaStorage"))));
     }
 
     [Fact]
@@ -44,15 +45,18 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
         var service = new ImageDownloadService(new FakeHttpClientFactory(_ => new(HttpStatusCode.OK) {
             Content = new ByteArrayContent(png) { Headers = { ContentType = new("image/png") } }
         }));
+        await using (SqliteConnection connection = await Open())
+            await InsertMovie(connection, 1, "TEST-001", "Test Title");
 
-        IReadOnlyList<SavedImage> first = await service.DownloadAsync(ImageRoot, "TEST-001", [new("Poster", "https://img.example/poster")], 10, CancellationToken.None);
-        IReadOnlyList<SavedImage> second = await service.DownloadAsync(ImageRoot, "TEST-001", [new("Poster", "https://img.example/poster")], 10, CancellationToken.None);
+        IReadOnlyList<SavedImage> first = await service.DownloadAsync(Resolver(), new(1, "TEST-001", "Test Title"), [new("Poster", "https://img.example/poster")], 10, CancellationToken.None);
+        IReadOnlyList<SavedImage> second = await service.DownloadAsync(Resolver(), new(1, "TEST-001", "Test Title"), [new("Poster", "https://img.example/poster")], 10, CancellationToken.None);
 
         Assert.Single(first); Assert.True(first[0].Created); Assert.Equal(48, first[0].Width); Assert.Equal(72, first[0].Height);
-        Assert.EndsWith(Path.Combine("BigPic", "TEST-001.png"), first[0].Path, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(Path.Combine("MediaStorage", "Posters", "TEST-001", "TEST-001.png"), first[0].Path, StringComparison.OrdinalIgnoreCase);
         Assert.Single(second); Assert.False(second[0].Created);
-        Assert.Empty(Directory.Exists(Path.Combine(ImageRoot, ".lmm-temp"))
-            ? Directory.EnumerateFiles(Path.Combine(ImageRoot, ".lmm-temp"), "*", SearchOption.AllDirectories)
+        string mediaRoot = Path.Combine(root, "MediaStorage");
+        Assert.Empty(Directory.Exists(Path.Combine(mediaRoot, ".lmm-temp"))
+            ? Directory.EnumerateFiles(Path.Combine(mediaRoot, ".lmm-temp"), "*", SearchOption.AllDirectories)
             : []);
     }
 
@@ -65,13 +69,34 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
         var service = new ImageDownloadService(new FakeHttpClientFactory(_ => new(HttpStatusCode.OK) {
             Content = new StringContent("<html>blocked</html>") { Headers = { ContentType = new("image/jpeg") } }
         }));
+        await using (SqliteConnection connection = await Open())
+            await InsertMovie(connection, 2, "TEST-002", "Test Title");
 
-        await Assert.ThrowsAsync<InvalidDataException>(() => service.DownloadAsync(ImageRoot, "TEST-002", [new("Poster", "https://img.example/error")], 10, CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.DownloadAsync(Resolver(), new(2, "TEST-002", "Test Title"), [new("Poster", "https://img.example/error")], 10, CancellationToken.None));
 
         Assert.True(File.Exists(protectedFile));
         Assert.Empty(Directory.Exists(Path.Combine(ImageRoot, ".lmm-temp"))
             ? Directory.EnumerateFiles(Path.Combine(ImageRoot, ".lmm-temp"), "*", SearchOption.AllDirectories)
             : []);
+    }
+
+    [Fact]
+    public async Task GeneratedCardReplacementWritesToWallCropsDirectory()
+    {
+        string source = Path.Combine(root, "manual-crop.png");
+        await File.WriteAllBytesAsync(source, CreatePng(64, 96, SKColors.Teal));
+        await using (SqliteConnection connection = await Open())
+            await InsertMovie(connection, 3, "WALL-001", "Wall Crop");
+        var workflow = new ImageWorkflowService(Database, ImageRoot, Resolver());
+
+        ImageMutationResult result = await workflow.ReplaceAsync(3, "GeneratedCard", source);
+
+        Assert.True(result.Changed);
+        await using SqliteConnection verify = await Open();
+        string? savedPath = await Text(verify, "SELECT FilePath FROM Images WHERE MovieId=3 AND ImageType='GeneratedCard' ORDER BY Id DESC LIMIT 1");
+        Assert.NotNull(savedPath);
+        Assert.Contains(Path.Combine("MediaStorage", "WallCrops", "WALL-001"), savedPath!, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(savedPath));
     }
 
     [Fact]
@@ -145,7 +170,7 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
             string at = DateTimeOffset.UtcNow.ToString("O");
             await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES(1,'IMG-001','Image',0,0,'pending','Test',$at,$at)", ("$at", at));
         }
-        var service = new ImageWorkflowService(Database, ImageRoot);
+        var service = new ImageWorkflowService(Database, ImageRoot, Resolver());
 
         ImageMutationResult replaced = await service.ReplaceAsync(1, "Poster", source);
         long imageId;
@@ -178,8 +203,8 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
             await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES(1,'GEN-001','Generate',0,0,'pending','Test',$at,$at)", ("$at", at));
             await Execute(connection, "INSERT INTO MediaFiles(Id,MovieId,FilePath,NormalizedPath,FileName,Extension,MediaType,SourceType,FileSize,ExistsState,IsPrimary,CreatedAt,UpdatedAt) VALUES(1,1,$path,$path,'movie.mp4','.mp4','Video','Test',5,'Exists',1,$at,$at)", ("$path", video), ("$at", at));
         }
-        var workflow = new ImageWorkflowService(Database, ImageRoot);
-        var generator = new ImageGenerationTaskService(Database, ImageRoot, workflow, new TaskLogService(Database), new FfmpegLocator(Database, root));
+        var workflow = new ImageWorkflowService(Database, ImageRoot, Resolver());
+        var generator = new ImageGenerationTaskService(Database, Resolver(), workflow, new TaskLogService(Database), new FfmpegLocator(Database, root));
 
         ImageTaskLaunchResult launch = await generator.EnqueueAsync(1, "Screenshot");
 
@@ -190,7 +215,13 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
     }
 
     public Task DisposeAsync() { try { Directory.Delete(root, true); } catch { } return Task.CompletedTask; }
+    private MediaStoragePathResolver Resolver() => new(Database, root);
     private async Task<SqliteConnection> Open() { var connection = new SqliteConnection($"Data Source={Database}"); await connection.OpenAsync(); return connection; }
+    private static Task InsertMovie(SqliteConnection connection, long id, string code, string title)
+    {
+        string at = DateTimeOffset.UtcNow.ToString("O");
+        return Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES($id,$code,$title,0,0,'pending','Test',$at,$at)", ("$id", id), ("$code", code), ("$title", title), ("$at", at));
+    }
     private static async Task Execute(SqliteConnection connection, string sql, params (string, object?)[] values) { await using var command=connection.CreateCommand();command.CommandText=sql;foreach((string name,object? value) in values)command.Parameters.AddWithValue(name,value??DBNull.Value);await command.ExecuteNonQueryAsync(); }
     private static async Task<long> Scalar(SqliteConnection connection, string sql) { await using var command=connection.CreateCommand();command.CommandText=sql;return Convert.ToInt64(await command.ExecuteScalarAsync() ?? 0L); }
     private static async Task<string?> Text(SqliteConnection connection, string sql) { await using var command=connection.CreateCommand();command.CommandText=sql;return (await command.ExecuteScalarAsync())?.ToString(); }

@@ -14,10 +14,10 @@ public sealed record ImageDeletePreview(long ImageId, string Type, string FileNa
 public sealed record ImageDeleteCommand(string ConfirmationToken);
 public sealed record ImageTaskLaunchResult(long TaskId, string Status, string Type, string Message);
 
-public sealed class ImageWorkflowService(string databasePath, string imageRoot)
+public sealed class ImageWorkflowService(string databasePath, string imageRoot, MediaStoragePathResolver pathResolver)
 {
     private static readonly HashSet<string> SupportedTypes = new(StringComparer.OrdinalIgnoreCase)
-        { "Poster", "Thumbnail", "Fanart", "Preview", "Screenshot", "GIF" };
+        { "Poster", "Thumbnail", "Fanart", "Preview", "Screenshot", "GeneratedCard", "GIF" };
     private string CacheRoot => Path.GetFullPath(Path.Combine(imageRoot, ".lmm-cache", "thumbnails"));
 
     public async Task<ImageMutationResult> ReplaceAsync(long movieId, string type, string sourcePath,
@@ -38,12 +38,12 @@ public sealed class ImageWorkflowService(string databasePath, string imageRoot)
                 cancellationToken, ("$movie", movieId), ("$type", normalized)) > 0)
             throw new InvalidOperationException("该类型图片已锁定，请先解除锁定再替换。");
 
-        string targetDirectory = Path.Combine(imageRoot, "LMM", "Movies", movieId.ToString(), normalized);
-        Directory.CreateDirectory(targetDirectory);
-        string target = Path.Combine(targetDirectory, $"{normalized}-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}{Extension(validation.ContentType)}");
+        string suffix = $"user-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}";
+        string target = (await pathResolver.ResolveForMovieAsync(movieId, normalized, Extension(validation.ContentType), null, suffix, cancellationToken)).FullPath;
+        pathResolver.EnsureDirectoryForWrite(target);
         File.Copy(fullSource, target, false);
         await RegisterImageAsync(connection, movieId, normalized, target, validation, "User", false,
-            normalized is "Poster" or "Thumbnail" or "Fanart" or "Preview", "LocalReplace", cancellationToken);
+            normalized is "Poster" or "Thumbnail" or "Fanart" or "Preview" or "GeneratedCard", "LocalReplace", cancellationToken);
         await InvalidateMovieCacheAsync(connection, movieId, cancellationToken);
         return new(true, $"{Label(normalized)} 已替换并锁定，缓存已刷新。");
     }
@@ -53,7 +53,7 @@ public sealed class ImageWorkflowService(string databasePath, string imageRoot)
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadOnly, cancellationToken);
         ImageRow row = await ReadImageRowAsync(connection, imageId, cancellationToken);
         string fileName = row.Path is null ? row.Type : Path.GetFileName(row.Path);
-        bool fileWillBeDeleted = row.Path is not null && File.Exists(row.Path) && IsInsideImageRoot(row.Path);
+        bool fileWillBeDeleted = row.Path is not null && File.Exists(row.Path) && await IsInsideControlledImageRootAsync(row.Path, cancellationToken);
         var warnings = new List<string> { "将删除图片登记并刷新缓存。" };
         warnings.Add(fileWillBeDeleted ? "图片文件位于受控图片目录内，会一并删除。" : "图片文件不在受控图片目录内或不存在，只会删除数据库登记。");
         if (row.Locked) warnings.Add("该图片处于锁定状态，本次确认后仍会删除。");
@@ -101,7 +101,7 @@ public sealed class ImageWorkflowService(string databasePath, string imageRoot)
         if (!validation.Valid) throw new InvalidDataException(validation.Error ?? "生成图片校验失败。");
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, cancellationToken);
         await RegisterImageAsync(connection, movieId, normalized, path, validation, "Generated", true,
-            normalized is "Poster" or "Preview", "FFmpeg", cancellationToken);
+            normalized is "Poster" or "Preview" or "GeneratedCard", "FFmpeg", cancellationToken);
         await InvalidateMovieCacheAsync(connection, movieId, cancellationToken);
     }
 
@@ -155,11 +155,12 @@ public sealed class ImageWorkflowService(string databasePath, string imageRoot)
             reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetInt64(4) == 1, reader.GetString(5), reader.GetInt64(6));
     }
 
-    private bool IsInsideImageRoot(string path)
+    private async Task<bool> IsInsideControlledImageRootAsync(string path, CancellationToken cancellationToken)
     {
         string full = Path.GetFullPath(path);
         string root = Path.GetFullPath(imageRoot);
-        return full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        return full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || await pathResolver.IsInsideMediaStorageAsync(path, cancellationToken);
     }
 
     private bool IsInsideCache(string path)
@@ -178,6 +179,7 @@ public sealed class ImageWorkflowService(string databasePath, string imageRoot)
         "thumb" or "thumbnail" or "smallpic" => "Thumbnail",
         "bigpic" or "fanart" or "background" => "Fanart",
         "extrapic" or "preview" => "Preview",
+        "generatedcard" or "cardcover" or "cardcovers" or "wallcrop" or "wallcrops" => "GeneratedCard",
         "gif" => "GIF",
         "screenshot" or "screen" => "Screenshot",
         _ => "Poster",
@@ -188,6 +190,7 @@ public sealed class ImageWorkflowService(string databasePath, string imageRoot)
         "Fanart" => "背景图",
         "Preview" => "预览图",
         "Screenshot" => "截图",
+        "GeneratedCard" => "Wall crop",
         "GIF" => "GIF",
         _ => "封面",
     };
@@ -231,7 +234,7 @@ public sealed class ImageWorkflowService(string databasePath, string imageRoot)
 
 public sealed class ImageGenerationTaskService(
     string databasePath,
-    string imageRoot,
+    MediaStoragePathResolver pathResolver,
     ImageWorkflowService images,
     TaskLogService logs,
     FfmpegLocator ffmpegLocator) : BackgroundService
@@ -318,8 +321,8 @@ public sealed class ImageGenerationTaskService(
             if (!lookup.Found || string.IsNullOrWhiteSpace(lookup.Path))
                 throw new FileNotFoundException(lookup.Message);
             string ffmpeg = lookup.Path;
-            string target = TargetPath(input.MovieId, input.Type);
-            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            string target = await TargetPathAsync(input.MovieId, input.Type, token);
+            pathResolver.EnsureDirectoryForWrite(target);
             await logs.WriteAsync(taskId, "Info", $"使用 FFmpeg 生成 {ImageWorkflowService.Label(input.Type)}（{lookup.Source}）。", token);
             await ExecuteAsync(await OpenAsync(SqliteOpenMode.ReadWrite, token),
                 "UPDATE Tasks SET Status='Running',Stage='Running',Progress=25,StartedAt=COALESCE(StartedAt,$at),UpdatedAt=$at WHERE Id=$id",
@@ -361,10 +364,11 @@ public sealed class ImageGenerationTaskService(
             token, ("$movie", movieId));
     }
 
-    private string TargetPath(long movieId, string type)
+    private async Task<string> TargetPathAsync(long movieId, string type, CancellationToken token)
     {
         string extension = type.Equals("GIF", StringComparison.OrdinalIgnoreCase) ? ".gif" : ".jpg";
-        return Path.Combine(imageRoot, "LMM", "Movies", movieId.ToString(), type, $"{type}-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}{extension}");
+        string suffix = $"generated-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}";
+        return (await pathResolver.ResolveForMovieAsync(movieId, type, extension, null, suffix, token)).FullPath;
     }
 
     private static async Task RunFfmpegAsync(string ffmpeg, string videoPath, string target, string type, CancellationToken token)

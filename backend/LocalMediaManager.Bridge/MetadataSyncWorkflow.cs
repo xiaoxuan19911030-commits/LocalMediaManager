@@ -36,25 +36,24 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
 {
     private const long MaximumDownloadBytes = 64L * 1024 * 1024;
 
-    public async Task<IReadOnlyList<SavedImage>> DownloadAsync(string imageRoot, string code,
+    public async Task<IReadOnlyList<SavedImage>> DownloadAsync(MediaStoragePathResolver pathResolver, MediaStorageMovie movie,
         IReadOnlyList<MetadataImage> images, int timeoutSeconds, CancellationToken cancellationToken)
     {
         var saved = new List<SavedImage>();
         if (images.Count == 0) return saved;
-        string safeCode = SafeFileName(code);
         using HttpClient client = clients.CreateClient("MetadataImages");
         client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
         int previewIndex = 0;
-        string temporaryRoot = Path.Combine(imageRoot, ".lmm-temp", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(temporaryRoot);
+        string temporaryRoot = await pathResolver.TemporaryRootAsync(cancellationToken);
         try {
             foreach (MetadataImage image in images) {
                 cancellationToken.ThrowIfCancellationRequested();
-                (string folder, string suffix, string normalizedType) = Destination(image.Type, ++previewIndex);
-                if (normalizedType != "Preview") previewIndex--;
-                string targetDirectory = Path.Combine(imageRoot, folder);
-                Directory.CreateDirectory(targetDirectory);
-                string baseName = safeCode + suffix;
+                string normalizedType = MediaStoragePathResolver.NormalizeResourceType(image.Type);
+                if (normalizedType == "Preview") previewIndex++;
+                int? index = normalizedType == "Preview" ? previewIndex : null;
+                MediaStorageResourcePath targetPath = await pathResolver.ResolveForMovieAsync(movie, normalizedType, ".jpg", index, null, cancellationToken);
+                string targetDirectory = Path.GetDirectoryName(targetPath.FullPath)!;
+                string baseName = Path.GetFileNameWithoutExtension(targetPath.FullPath);
                 string? existing = FindExisting(targetDirectory, baseName);
                 if (existing is not null) {
                     ImageValidationResult current = await ImageFileValidator.ValidateAsync(existing, null, cancellationToken);
@@ -77,7 +76,8 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
                     await CopyWithLimitAsync(source, destination, cancellationToken);
                 ImageValidationResult validation = await ImageFileValidator.ValidateAsync(temporary, declaredType, cancellationToken);
                 if (!validation.Valid) throw new InvalidDataException(validation.Error ?? "图片校验失败。");
-                string target = Path.Combine(targetDirectory, baseName + Extension(validation.ContentType));
+                string target = (await pathResolver.ResolveForMovieAsync(movie, normalizedType, Extension(validation.ContentType), index, null, cancellationToken)).FullPath;
+                pathResolver.EnsureDirectoryForWrite(target);
                 if (File.Exists(target)) {
                     File.Delete(temporary);
                     ImageValidationResult concurrent = await ImageFileValidator.ValidateAsync(target, null, cancellationToken);
@@ -96,17 +96,6 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
         return saved;
     }
 
-    private static string SafeFileName(string value) {
-        string result = string.Concat(value.Select(ch => Path.GetInvalidFileNameChars().Contains(ch) ? '_' : ch)).Trim();
-        return string.IsNullOrWhiteSpace(result) ? "unknown" : result;
-    }
-    private static (string Folder, string Suffix, string Type) Destination(string type, int previewIndex) => type switch {
-        "Thumbnail" or "Thumb" => ("SmallPic", "", "Thumbnail"),
-        "Fanart" => ("BigPic", "-fanart", "Fanart"),
-        "BigPic" => ("BigPic", "", "BigPic"),
-        "Preview" or "ExtraPic" => ("ExtraPic", $"-{previewIndex:00}", "Preview"),
-        _ => ("BigPic", "", "Poster"),
-    };
     private static string? FindExisting(string directory, string baseName) {
         foreach (string extension in new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif" }) {
             string candidate = Path.Combine(directory, baseName + extension);
@@ -226,7 +215,7 @@ public sealed class MetadataWriteService(string databasePath)
 
 public sealed class MetadataSyncExecutor(
     string databasePath,
-    string imageRoot,
+    MediaStoragePathResolver pathResolver,
     MetadataProviderSettingsService settingsService,
     IMetadataProvider provider,
     MetadataWriteService writer,
@@ -320,7 +309,7 @@ public sealed class MetadataSyncExecutor(
             IReadOnlyList<SavedImage> savedImages = [];
             if (settings.DownloadImages) {
                 await StageAsync(taskId, "DownloadingImages", 48, $"下载图片（{metadata.Images.Count} 项）", cancellationToken);
-                savedImages = await images.DownloadAsync(imageRoot, movie.Code, await provider.GetImagesAsync(metadata, cancellationToken), settings.TimeoutSeconds, cancellationToken);
+                savedImages = await images.DownloadAsync(pathResolver, new(movie.Id, movie.Code, movie.Title), await provider.GetImagesAsync(metadata, cancellationToken), settings.TimeoutSeconds, cancellationToken);
                 createdPaths.AddRange(savedImages.Where(value => value.Created).Select(value => value.Path));
             }
             string? nfoPath = null;

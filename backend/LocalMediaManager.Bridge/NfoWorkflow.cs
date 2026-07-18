@@ -19,7 +19,7 @@ public sealed record NfoConfirmCommand(string ConfirmationToken);
 public sealed record NfoMutationResult(bool Changed, string Path, string Ownership, bool Locked, string Message);
 public sealed record NfoSettingsDto(string ExportPolicy, string OutputDirectory, bool FillEmptyOnly, bool IncludeImages);
 
-public sealed class NfoService(string databasePath)
+public sealed class NfoService(string databasePath, MediaStoragePathResolver pathResolver)
 {
     public async Task<NfoSettingsDto> ReadSettingsAsync(CancellationToken cancellationToken = default)
     {
@@ -53,16 +53,7 @@ public sealed class NfoService(string databasePath)
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(movie.PrimaryFile)) return (null, false);
-        NfoSettingsDto settings = await ReadSettingsAsync(cancellationToken);
-        string path;
-        if (string.IsNullOrWhiteSpace(settings.OutputDirectory)) {
-            path = Path.ChangeExtension(movie.PrimaryFile, ".nfo");
-        } else {
-            Directory.CreateDirectory(settings.OutputDirectory);
-            string fileName = string.Concat((string.IsNullOrWhiteSpace(movie.Code) ? $"movie-{movie.Id}" : movie.Code)
-                .Select(character => Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
-            path = Path.Combine(settings.OutputDirectory, fileName + ".nfo");
-        }
+        string path = (await pathResolver.ResolveForMovieAsync(new MediaStorageMovie(movie.Id, movie.Code, movie.Title), "NFO", ".nfo", null, null, cancellationToken)).FullPath;
         NfoData data = new(metadata.Code, metadata.Title ?? movie.Title, metadata.Title,
             metadata.Description, null, metadata.ReleaseDate,
             metadata.DurationSeconds is > 0 ? metadata.DurationSeconds / 60 : null,
@@ -249,9 +240,7 @@ public sealed class NfoService(string databasePath)
         DatabaseMovie movie = await ReadMovieAsync(connection, movieId, token);
         string? primary = await ScalarTextAsync(connection, "SELECT FilePath FROM MediaFiles WHERE MovieId=$id AND IsPrimary=1 ORDER BY Id LIMIT 1", token, ("$id", movieId));
         if (string.IsNullOrWhiteSpace(primary)) throw new InvalidOperationException("影片没有主媒体文件，无法确定 NFO 输出位置。");
-        string output = await SettingAsync(connection, "nfo.export.outputDirectory", token) ?? "";
-        string fileName = SafeName(string.IsNullOrWhiteSpace(movie.Code) ? Path.GetFileNameWithoutExtension(primary) : movie.Code) + ".nfo";
-        string path = Directory.Exists(output) ? Path.Combine(output, fileName) : Path.Combine(Path.GetDirectoryName(primary)!, fileName);
+        string path = (await pathResolver.ResolveForMovieAsync(new MediaStorageMovie(movieId, movie.Code ?? "", movie.Title), "NFO", ".nfo", null, null, token)).FullPath;
         var data = new NfoData(movie.Code ?? "", movie.Title, movie.OriginalTitle, movie.Description, movie.ProviderRating,
             movie.ReleaseDate, movie.DurationSeconds > 0 ? movie.DurationSeconds / 60 : null,
             await FirstRelationAsync(connection, movieId, "Directors", "MovieDirectors", "DirectorId", token),

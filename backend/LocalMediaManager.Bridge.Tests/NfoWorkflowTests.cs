@@ -9,14 +9,16 @@ public sealed class NfoWorkflowTests : IAsyncLifetime
     private readonly string root = Path.Combine(Path.GetTempPath(), "lmm-nfo-tests", Guid.NewGuid().ToString("N"));
     private string Database => Path.Combine(root, "test.db");
     private string Video => Path.Combine(root, "media", "SPECIAL-001.mp4");
+    private string InstallRoot => Path.Combine(root, "Local Media Manager Next");
 
     public async Task InitializeAsync()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Video)!);
         await File.WriteAllBytesAsync(Video, [0, 1, 2, 3]);
+        Directory.CreateDirectory(InstallRoot);
         await using var connection = new SqliteConnection($"Data Source={Database}");
         await connection.OpenAsync();
-        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql" }) {
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0012_MediaStorageSettings.sql" }) {
             await using var command = connection.CreateCommand();
             command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
             await command.ExecuteNonQueryAsync();
@@ -36,7 +38,7 @@ public sealed class NfoWorkflowTests : IAsyncLifetime
     [Fact]
     public async Task ExportAndParseRoundTripPreservesUnicodeRelationshipsAndEscaping()
     {
-        var service = new NfoService(Database);
+        var service = Service();
         NfoPreview preview = await service.PreviewExportAsync(1);
         NfoMutationResult result = await service.ExportAsync(1, preview.ConfirmationToken);
         NfoData parsed = await NfoService.ParseAsync(result.Path);
@@ -53,21 +55,20 @@ public sealed class NfoWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ExistingUserNfoIsLockedAndCanOnlyExportToSeparateFile()
+    public async Task ExistingUserNfoIsPreservedWhenExportWritesMediaStorageNfo()
     {
         string path = Path.ChangeExtension(Video, ".nfo");
         const string original = "<?xml version=\"1.0\" encoding=\"utf-8\"?><movie><title>User title</title><id>SPECIAL-001</id></movie>";
         await File.WriteAllTextAsync(path, original);
-        var service = new NfoService(Database);
+        var service = Service();
 
         NfoPreview preview = await service.PreviewExportAsync(1);
-        NfoMutationResult skipped = await service.ExportAsync(1, preview.ConfirmationToken);
-        NfoPreview secondPreview = await service.PreviewExportAsync(1);
-        NfoMutationResult separate = await service.ExportAsync(1, secondPreview.ConfirmationToken, true);
+        NfoMutationResult exported = await service.ExportAsync(1, preview.ConfirmationToken);
 
-        Assert.False(skipped.Changed); Assert.Equal(original, await File.ReadAllTextAsync(path));
-        Assert.EndsWith(".lmm.nfo", separate.Path, StringComparison.OrdinalIgnoreCase);
-        Assert.True(File.Exists(separate.Path)); Assert.Equal(original, await File.ReadAllTextAsync(path));
+        Assert.True(exported.Changed);
+        Assert.Contains(Path.Combine("MediaStorage", "NFO", "SPECIAL-001", "SPECIAL-001.nfo"), exported.Path, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(exported.Path));
+        Assert.Equal(original, await File.ReadAllTextAsync(path));
     }
 
     [Fact]
@@ -81,7 +82,7 @@ public sealed class NfoWorkflowTests : IAsyncLifetime
             """);
         await using (SqliteConnection connection = await Open())
             await Execute(connection, "UPDATE Movies SET Description=NULL,NfoPath=$path WHERE Id=1", ("$path", path));
-        var service = new NfoService(Database);
+        var service = Service();
 
         NfoPreview preview = await service.PreviewImportAsync(1);
         NfoMutationResult result = await service.ImportAsync(1, preview.ConfirmationToken);
@@ -103,7 +104,7 @@ public sealed class NfoWorkflowTests : IAsyncLifetime
         await File.WriteAllTextAsync(path, "<movie><title>broken");
         await using (SqliteConnection connection = await Open())
             await Execute(connection, "UPDATE Movies SET NfoPath=$path WHERE Id=1", ("$path", path));
-        var service = new NfoService(Database);
+        var service = Service();
 
         await Assert.ThrowsAsync<InvalidDataException>(() => service.PreviewImportAsync(1));
 
@@ -113,11 +114,9 @@ public sealed class NfoWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AutomaticProviderWriteUsesConfiguredOutputDirectory()
+    public async Task AutomaticProviderWriteUsesMediaStorageNfoDirectory()
     {
-        string output = Path.Combine(root, "isolated-nfo");
-        var service = new NfoService(Database);
-        await service.SaveSettingsAsync(new("SkipExisting", output, true, true));
+        var service = Service();
         var movie = new SyncMovie(1, "SPECIAL-001", "标题", null, null, 0, Video, null);
         var metadata = new ProviderMetadata("MetaTube", "provider-id", "SPECIAL-001", "Provider title", null,
             null, null, null, null, null, null, null, [], [], []);
@@ -125,7 +124,7 @@ public sealed class NfoWorkflowTests : IAsyncLifetime
         (string? path, bool created) = await service.WriteAsync(movie, metadata, CancellationToken.None);
 
         Assert.True(created);
-        Assert.Equal(Path.Combine(output, "SPECIAL-001.nfo"), path);
+        Assert.Equal(Path.Combine(root, "Local Media Manager Next Data", "MediaStorage", "NFO", "SPECIAL-001", "SPECIAL-001.nfo"), path);
         Assert.True(File.Exists(path));
         Assert.False(File.Exists(Path.ChangeExtension(Video, ".nfo")));
     }
@@ -135,8 +134,9 @@ public sealed class NfoWorkflowTests : IAsyncLifetime
     {
         string blockedOutput = Path.Combine(root, "blocked-output");
         await File.WriteAllTextAsync(blockedOutput, "this path is a file");
-        var service = new NfoService(Database);
-        await service.SaveSettingsAsync(new("SkipExisting", blockedOutput, true, true));
+        var service = Service();
+        await using (SqliteConnection configure = await Open())
+            await Execute(configure, "UPDATE AppSettings SET ValueJson=$root WHERE Key='mediaStorage.rootPath'", ("$root", System.Text.Json.JsonSerializer.Serialize(blockedOutput)));
         var movie = new SyncMovie(1, "SPECIAL-001", "标题", null, null, 0, Video, null);
         var metadata = new ProviderMetadata("MetaTube", "provider-id", "SPECIAL-001", "Provider title", null,
             null, null, null, null, null, null, null, [], [], []);
@@ -150,6 +150,7 @@ public sealed class NfoWorkflowTests : IAsyncLifetime
     }
 
     public Task DisposeAsync() { try { Directory.Delete(root, true); } catch { } return Task.CompletedTask; }
+    private NfoService Service() => new(Database, new MediaStoragePathResolver(Database, InstallRoot));
     private async Task<SqliteConnection> Open() { var connection = new SqliteConnection($"Data Source={Database}"); await connection.OpenAsync(); return connection; }
     private static async Task Execute(SqliteConnection connection, string sql, params (string, object?)[] values) { await using var command=connection.CreateCommand();command.CommandText=sql;foreach((string name,object? value) in values)command.Parameters.AddWithValue(name,value??DBNull.Value);await command.ExecuteNonQueryAsync(); }
     private static async Task<long> Scalar(SqliteConnection connection, string sql) { await using var command=connection.CreateCommand();command.CommandText=sql;return Convert.ToInt64(await command.ExecuteScalarAsync()??0L); }

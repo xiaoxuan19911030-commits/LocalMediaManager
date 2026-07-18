@@ -16,7 +16,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         Directory.CreateDirectory(root);
         await using var connection = new SqliteConnection($"Data Source={Database}");
         await connection.OpenAsync();
-        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql" }) {
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0012_MediaStorageSettings.sql" }) {
             await using var command = connection.CreateCommand();
             command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
             await command.ExecuteNonQueryAsync();
@@ -103,8 +103,9 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         var settings = new MetadataProviderSettingsService(Database);
         await settings.SaveMetaTubeAsync(new(false, "http://127.0.0.1:8080/", 30, false, false, false, true));
         var factory = new FakeHttpClientFactory(_ => new(HttpStatusCode.ServiceUnavailable));
-        var executor = new MetadataSyncExecutor(Database, root, settings, new MetaTubeProvider(factory),
-            new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database), new TaskLogService(Database));
+        var resolver = new MediaStoragePathResolver(Database, root);
+        var executor = new MetadataSyncExecutor(Database, resolver, settings, new MetaTubeProvider(factory),
+            new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database, resolver), new TaskLogService(Database));
 
         await executor.StartAsync(CancellationToken.None);
         await Task.Delay(150);
@@ -161,8 +162,9 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
     {
         var settings = new MetadataProviderSettingsService(Database);
         var factory = new FakeHttpClientFactory(_ => new(HttpStatusCode.ServiceUnavailable));
-        return new(Database, root, settings, new MetaTubeProvider(factory),
-            new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database), new TaskLogService(Database));
+        var resolver = new MediaStoragePathResolver(Database, root);
+        return new(Database, resolver, settings, new MetaTubeProvider(factory),
+            new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database, resolver), new TaskLogService(Database));
     }
     private async Task<SqliteConnection> Open() { var c = new SqliteConnection($"Data Source={Database}"); await c.OpenAsync(); return c; }
     private static Task InsertMovie(SqliteConnection c, long id, string code)

@@ -28,16 +28,22 @@ builder.Services.AddSingleton(new PlaybackSettingsService(databasePath, configDa
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton(new LibraryWorkflowService(databasePath));
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<LibraryWorkflowService>());
+builder.Services.AddSingleton(new MediaStoragePathResolver(databasePath, installRoot));
 builder.Services.AddSingleton(new MetadataProviderSettingsService(databasePath));
 builder.Services.AddSingleton(new MetadataWriteService(databasePath));
 builder.Services.AddSingleton(new TaskLogService(databasePath));
 builder.Services.AddSingleton(new FfmpegLocator(databasePath, AppContext.BaseDirectory));
 builder.Services.AddSingleton(new ImageAssetService(databasePath, imageRoot));
-builder.Services.AddSingleton(new ImageWorkflowService(databasePath, imageRoot));
+builder.Services.AddSingleton(serviceProvider => new ImageWorkflowService(
+    databasePath,
+    imageRoot,
+    serviceProvider.GetRequiredService<MediaStoragePathResolver>()));
 builder.Services.AddSingleton(new DataSafetyService(databasePath, configDatabasePath, imageRoot));
 builder.Services.AddSingleton<PlatformCommandService>();
 builder.Services.AddSingleton<ImageDownloadService>();
-builder.Services.AddSingleton(new NfoService(databasePath));
+builder.Services.AddSingleton(serviceProvider => new NfoService(
+    databasePath,
+    serviceProvider.GetRequiredService<MediaStoragePathResolver>()));
 builder.Services.AddSingleton(serviceProvider => new SettingsSaveCoordinator(
     databasePath,
     installRoot,
@@ -47,7 +53,8 @@ builder.Services.AddSingleton(serviceProvider => new SettingsSaveCoordinator(
     serviceProvider.GetRequiredService<RatingHistoryService>()));
 builder.Services.AddSingleton<IMetadataProvider, MetaTubeProvider>();
 builder.Services.AddSingleton(serviceProvider => new MetadataSyncExecutor(
-    databasePath, imageRoot,
+    databasePath,
+    serviceProvider.GetRequiredService<MediaStoragePathResolver>(),
     serviceProvider.GetRequiredService<MetadataProviderSettingsService>(),
     serviceProvider.GetRequiredService<IMetadataProvider>(),
     serviceProvider.GetRequiredService<MetadataWriteService>(),
@@ -62,7 +69,7 @@ builder.Services.AddSingleton(serviceProvider => new ImageCacheTaskService(
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<ImageCacheTaskService>());
 builder.Services.AddSingleton(serviceProvider => new ImageGenerationTaskService(
     databasePath,
-    imageRoot,
+    serviceProvider.GetRequiredService<MediaStoragePathResolver>(),
     serviceProvider.GetRequiredService<ImageWorkflowService>(),
     serviceProvider.GetRequiredService<TaskLogService>(),
     serviceProvider.GetRequiredService<FfmpegLocator>()));

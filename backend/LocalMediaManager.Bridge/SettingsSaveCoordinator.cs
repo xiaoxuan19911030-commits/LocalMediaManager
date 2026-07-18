@@ -13,6 +13,7 @@ public sealed record MediaStorageSettingsDto(
     string FanartDirectory,
     string PreviewsDirectory,
     string ScreenshotsDirectory,
+    string WallCropsDirectory,
     string GifDirectory,
     string NfoDirectory,
     string MovieFolderTemplate,
@@ -84,6 +85,7 @@ public sealed class SettingsSaveCoordinator(
         await StoreAsync(connection, transaction, "mediaStorage.directory.fanart", clean.MediaStorage.FanartDirectory, "string", token);
         await StoreAsync(connection, transaction, "mediaStorage.directory.previews", clean.MediaStorage.PreviewsDirectory, "string", token);
         await StoreAsync(connection, transaction, "mediaStorage.directory.screenshots", clean.MediaStorage.ScreenshotsDirectory, "string", token);
+        await StoreAsync(connection, transaction, "mediaStorage.directory.wallCrops", clean.MediaStorage.WallCropsDirectory, "string", token);
         await StoreAsync(connection, transaction, "mediaStorage.directory.gif", clean.MediaStorage.GifDirectory, "string", token);
         await StoreAsync(connection, transaction, "mediaStorage.directory.nfo", clean.MediaStorage.NfoDirectory, "string", token);
         await StoreAsync(connection, transaction, "mediaStorage.template.movieFolder", clean.MediaStorage.MovieFolderTemplate, "string", token);
@@ -164,6 +166,7 @@ public sealed class SettingsSaveCoordinator(
             TextSetting(values, "mediaStorage.directory.fanart", defaults.FanartDirectory),
             TextSetting(values, "mediaStorage.directory.previews", defaults.PreviewsDirectory),
             TextSetting(values, "mediaStorage.directory.screenshots", defaults.ScreenshotsDirectory),
+            TextSetting(values, "mediaStorage.directory.wallCrops", defaults.WallCropsDirectory),
             TextSetting(values, "mediaStorage.directory.gif", defaults.GifDirectory),
             TextSetting(values, "mediaStorage.directory.nfo", defaults.NfoDirectory),
             TextSetting(values, "mediaStorage.template.movieFolder", defaults.MovieFolderTemplate),
@@ -175,6 +178,7 @@ public sealed class SettingsSaveCoordinator(
     {
         string root = NormalizeMediaStorageRoot(input.RootPath, createMissingRoot);
         string[] directories = [
+            NormalizeRelativeDirectory(input.WallCropsDirectory, "Wall crop directory"),
             NormalizeRelativeDirectory(input.PostersDirectory, "海报目录"),
             NormalizeRelativeDirectory(input.ThumbnailsDirectory, "缩略图目录"),
             NormalizeRelativeDirectory(input.FanartDirectory, "背景图目录"),
@@ -187,7 +191,7 @@ public sealed class SettingsSaveCoordinator(
             throw new ArgumentException("媒体存储资源目录不能重复。", nameof(input.PostersDirectory));
         string movieFolder = NormalizeTemplate(input.MovieFolderTemplate, "影片资源文件夹规则");
         string fileName = NormalizeTemplate(input.FileNameTemplate, "文件名规则");
-        return new(root, directories[0], directories[1], directories[2], directories[3], directories[4], directories[5], directories[6], movieFolder, fileName);
+        return new(root, directories[1], directories[2], directories[3], directories[4], directories[5], directories[0], directories[6], directories[7], movieFolder, fileName);
     }
 
     private static string NormalizeMediaStorageRoot(string value, bool createMissingRoot)
@@ -375,6 +379,7 @@ public static class SettingsDefaults
             "Fanart",
             "Previews",
             "Screenshots",
+            "WallCrops",
             "GIF",
             "NFO",
             "{MovieCode}",

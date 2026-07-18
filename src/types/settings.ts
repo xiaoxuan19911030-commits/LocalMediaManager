@@ -40,6 +40,7 @@ export interface MediaStorageSettings {
   fanartDirectory: string
   previewsDirectory: string
   screenshotsDirectory: string
+  wallCropsDirectory: string
   gifDirectory: string
   nfoDirectory: string
   movieFolderTemplate: string
