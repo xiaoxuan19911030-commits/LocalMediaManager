@@ -8,6 +8,7 @@ import StorageRoundedIcon from '@mui/icons-material/StorageRounded'
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded'
 import { Alert, Autocomplete, Box, Button, Card, CardContent, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, IconButton, MenuItem, Stack, TextField, Tooltip, Typography } from '@mui/material'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router'
 import { EmptyState, HealthMeter, StatCard } from '@/components/ProductComponents'
 import { StatusBadge } from '@/components/workspace/StatusBadges'
 import { WorkspacePage, refreshAction } from '@/components/workspace/Workspace'
@@ -18,6 +19,7 @@ const blankFolder = (): LibraryFolderInput => ({ path: '', includeSubfolders: tr
 const blankLibrary = (): LibraryInput => ({ name: '', description: '', enabled: true, folders: [blankFolder()] })
 
 export default function LibrariesPage() {
+  const navigate = useNavigate()
   const [libraries, setLibraries] = useState<MediaLibrary[]>()
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -82,6 +84,7 @@ export default function LibrariesPage() {
           <Box sx={{ display: 'flex', gap: 1.5 }}><Box sx={{ width: 46, height: 46, borderRadius: 2.25, bgcolor: 'action.hover', display: 'grid', placeItems: 'center' }}><StorageRoundedIcon color="primary"/></Box><Box><Typography variant="h6" sx={{ fontWeight: 800 }}>{library.name}</Typography><Typography variant="body2" color="text.secondary">{library.description || '本地媒体库'} · {library.movieCount} 部影片</Typography></Box></Box>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
             <StatusBadge tone={library.enabled ? 'success' : 'neutral'} label={library.enabled ? '已启用' : '已停用'}/>
+            <Button size="small" variant="outlined" onClick={() => navigate(`/media?libraryId=${library.id}&libraryName=${encodeURIComponent(library.name)}`)}>查看影片</Button>
             <Button size="small" variant="outlined" startIcon={<RefreshRoundedIcon/>} disabled={!library.enabled || scanning !== undefined} onClick={() => void scan(library.id, false)}>增量扫描</Button>
             <Button size="small" variant="outlined" disabled={!library.enabled || scanning !== undefined} onClick={() => void scan(library.id, true)}>全量扫描</Button>
             <Tooltip title="编辑媒体库"><IconButton aria-label="编辑媒体库" onClick={() => openEdit(library)}><EditRoundedIcon/></IconButton></Tooltip>

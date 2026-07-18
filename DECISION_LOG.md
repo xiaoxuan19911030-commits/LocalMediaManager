@@ -932,11 +932,12 @@ structured fields:
   系列:          → Series/MovieSeries
 
 navigation:
-  /tags        → custom tags
-  /movie-tags  → movie tags
-  /actors      → actors
-  /directors   → directors
-  /series      → series
+  /tags              → category page
+  /tags/directors    → directors
+  /tags/movie-tags   → movie tags
+  /tags/series       → series
+  /tags/custom       → custom tags
+  /actors            → actors entity ability
 
 entity click:
   /media?directorId=...
@@ -952,6 +953,7 @@ entity click:
 - 保留 Bridge → ProductReader → SQLite 的既有边界
 - 不新增第二套影片卡片列表，分类浏览复用影片墙
 - `Tags.Source` 已由 Migration/NFO/ProductWriter 写入，可区分 LegacyStamp/User 与 NFO/Scraper/LegacyLabel
+- `新加入`、`已收藏` 是状态 Badge，不进入标签分类统计
 - 旧库缺少 `Directors/MovieDirectors` 时返回空列表，避免安装版崩溃
 
 #### 实现
@@ -966,12 +968,14 @@ entity click:
 
 - `标签:` 默认只表示影片自带标签，不得同时查用户自定义标签
 - `自定义标签:` 只表示用户标签与 Legacy stamp
+- `新加入`、`已收藏` 只作为影片状态 Badge；收藏浏览走左侧 `收藏`
 - Genre 是 `Genres/MovieGenres`，不是影片标签
 - 新实体入口应先复用实体列表 + 影片墙筛选，除非 Human 明确批准中心页
 
 #### 禁止事项
 
 - 禁止合并影片标签与自定义标签统计
+- 禁止把状态 Badge 写入标签导航或标签统计
 - 禁止为导演/系列/影片标签新建第二套影片列表
 - 禁止把导演、系列、影片标签放入媒体库分组
 - 禁止未参数化拼接用户输入；实体类型只能来自白名单

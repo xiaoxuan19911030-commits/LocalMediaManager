@@ -52,8 +52,8 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
         await Execute(connection, "INSERT INTO MovieActors(MovieId,ActorId,RoleName,SortOrder) VALUES(1,1,'',0),(2,2,'',0)");
         await Execute(connection, "INSERT INTO Directors(Id,Name,NormalizedName) VALUES(1,'导演A','导演a')");
         await Execute(connection, "INSERT INTO MovieDirectors(MovieId,DirectorId) VALUES(1,1)");
-        await Execute(connection, "INSERT INTO Tags(Id,Name,NormalizedName,Source,CreatedAt,UpdatedAt) VALUES(1,'长发','长发','Scraper',$at,$at),(2,'收藏候选','收藏候选','User',$at,$at),(3,'legacy stamp','legacy stamp','LegacyStamp',$at,$at),(4,'space tag + alpha','space tag + alpha','NFO',$at,$at)", ("$at", At));
-        await Execute(connection, "INSERT INTO MovieTags(MovieId,TagId,CreatedAt) VALUES(1,1,$at),(1,2,$at),(2,3,$at),(1,4,$at)", ("$at", At));
+        await Execute(connection, "INSERT INTO Tags(Id,Name,NormalizedName,Source,CreatedAt,UpdatedAt) VALUES(1,'长发','长发','Scraper',$at,$at),(2,'收藏候选','收藏候选','User',$at,$at),(3,'legacy stamp','legacy stamp','LegacyStamp',$at,$at),(4,'space tag + alpha','space tag + alpha','NFO',$at,$at),(5,'已收藏','已收藏','LegacyLabel',$at,$at),(6,'新加入','新加入','LegacyStamp',$at,$at)", ("$at", At));
+        await Execute(connection, "INSERT INTO MovieTags(MovieId,TagId,CreatedAt) VALUES(1,1,$at),(1,2,$at),(2,3,$at),(1,4,$at),(1,5,$at),(2,6,$at)", ("$at", At));
         await Execute(connection, "INSERT INTO Genres(Id,Name,NormalizedName) VALUES(1,'办公室','办公室')");
         await Execute(connection, "INSERT INTO MovieGenres(MovieId,GenreId) VALUES(1,1)");
         await Execute(connection, "INSERT INTO Studios(Id,Name,NormalizedName) VALUES(1,'S1','s1')");
@@ -118,9 +118,11 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
 
         Assert.Contains(movieTags.Items, item => item.Name == "长发");
         Assert.DoesNotContain(movieTags.Items, item => item.Name == "收藏候选");
+        Assert.DoesNotContain(movieTags.Items, item => item.Name == "已收藏");
         Assert.Contains(customTags.Items, item => item.Name == "收藏候选");
         Assert.Contains(customTags.Items, item => item.Name == "legacy stamp");
         Assert.DoesNotContain(customTags.Items, item => item.Name == "长发");
+        Assert.DoesNotContain(customTags.Items, item => item.Name == "新加入");
     }
 
     [Fact]

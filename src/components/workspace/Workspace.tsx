@@ -1,4 +1,3 @@
-import ClearRoundedIcon from '@mui/icons-material/ClearRounded'
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
 import ViewListRoundedIcon from '@mui/icons-material/ViewListRounded'
 import ViewModuleRoundedIcon from '@mui/icons-material/ViewModuleRounded'
@@ -74,10 +73,9 @@ export function FilterBar({ children, activeCount = 0, onClear }: { children: Re
   return <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 3, mb: 2 }}>
     <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.25} sx={{ alignItems: { xs: 'stretch', lg: 'center' } }}>
       <Box sx={{ flex: 1, minWidth: 0 }}>{children}</Box>
-      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'flex-end' }}>
-        <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>{activeCount} 个条件</Typography>
-        {onClear && <Button size="small" color="inherit" startIcon={<ClearRoundedIcon/>} onClick={onClear}>清空</Button>}
-      </Stack>
+      {onClear && activeCount > 0 && <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'flex-end' }}>
+        <Button size="small" color="inherit" onClick={onClear}>清空</Button>
+      </Stack>}
     </Stack>
   </Paper>
 }

@@ -48,8 +48,8 @@ internal sealed record EntityConfig(string Table, string Relation, string Key, s
     public static EntityConfig? For(string type, string bridgeUrl) => type.ToLowerInvariant() switch {
         "actors" => new("Actors", "MovieActors", "ActorId", "", id => $"{bridgeUrl}/api/actors/{id}/image"),
         "directors" => new("Directors", "MovieDirectors", "DirectorId", "", _ => null),
-        "tags" or "custom-tags" => new("Tags", "MovieTags", "TagId", ProductReader.CustomTagSourceCondition("e"), _ => null),
-        "movie-tags" => new("Tags", "MovieTags", "TagId", ProductReader.MovieTagSourceCondition("e"), _ => null),
+        "tags" or "custom-tags" => new("Tags", "MovieTags", "TagId", $"{ProductReader.CustomTagSourceCondition("e")} AND {ProductReader.NotStatusBadgeTagCondition("e")}", _ => null),
+        "movie-tags" => new("Tags", "MovieTags", "TagId", $"{ProductReader.MovieTagSourceCondition("e")} AND {ProductReader.NotStatusBadgeTagCondition("e")}", _ => null),
         "series" => new("Series", "MovieSeries", "SeriesId", "", _ => null),
         _ => null,
     };
@@ -370,6 +370,8 @@ public static class ProductReader
     internal static string CustomTagSourceCondition(string alias) => $"COALESCE({alias}.Source,'User') IN ('User','LegacyStamp')";
 
     internal static string MovieTagSourceCondition(string alias) => $"COALESCE({alias}.Source,'User') NOT IN ('User','LegacyStamp')";
+
+    internal static string NotStatusBadgeTagCondition(string alias) => $"trim(COALESCE({alias}.Name,'')) NOT IN ('新加入','已收藏')";
 
     private static void AddLibraryNameCondition(List<string> conditions, List<(string, object)> parameters, string value, ref int index)
     {

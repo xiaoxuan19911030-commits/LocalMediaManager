@@ -8,6 +8,7 @@ import MovieDetailPage from '@/pages/MovieDetailPage'
 import SearchPage from '@/pages/SearchPage'
 import TasksPage from '@/pages/TasksPage'
 import EntityPage from '@/pages/EntityPage'
+import TagCategoriesPage from '@/pages/TagCategoriesPage'
 import CollectionPage from '@/pages/CollectionPage'
 import MetadataPage from '@/pages/MetadataPage'
 import DiagnosticsPage from '@/pages/DiagnosticsPage'
@@ -22,11 +23,12 @@ export const router = createHashRouter([{ path: '/', Component: AppShell, childr
   { path: 'movies/:id', Component: MovieDetailPage },
   { path: 'search', Component: SearchPage },
   { path: 'libraries', Component: LibrariesPage },
-  { path: 'tags', element: <EntityPage type="tags" /> },
-  { path: 'movie-tags', element: <EntityPage type="movie-tags" /> },
+  { path: 'tags', Component: TagCategoriesPage },
+  { path: 'tags/custom', element: <EntityPage type="tags" /> },
+  { path: 'tags/movie-tags', element: <EntityPage type="movie-tags" /> },
+  { path: 'tags/directors', element: <EntityPage type="directors" /> },
+  { path: 'tags/series', element: <EntityPage type="series" /> },
   { path: 'actors', element: <EntityPage type="actors" /> },
-  { path: 'directors', element: <EntityPage type="directors" /> },
-  { path: 'series', element: <EntityPage type="series" /> },
   { path: 'favorites', element: <CollectionPage kind="favorites" /> },
   { path: 'history', element: <CollectionPage kind="history" /> },
   { path: 'metadata', Component: MetadataPage },

@@ -233,7 +233,7 @@ LMM Next 与旧 WPF 版**完全隔离**：
 
 LMM 使用**持久左侧导航**（不是顶部 Tab）：
 
-**一级模块（primary）：** 首页 · 影片墙 · 媒体库 · 自定义标签 · 影片标签 · 演员 · 导演 · 系列 · 收藏 · 最近播放
+**一级模块（primary）：** 首页 · 影片墙 · 媒体库 · 标签 · 收藏 · 最近播放
 
 **工具模块（utility）：** 元数据中心 · 诊断中心 · 查重结果 · Maintenance · 任务中心 · 插件中心 · AI Provider · 设置
 
@@ -1628,11 +1628,12 @@ Local Media Manager
 │   └── Metadata Sync（单部/批量 → Tasks）
 │
 ├── 实体与集合
-│   ├── Custom Tags（自定义标签）
-│   ├── Movie Tags（影片标签）
-│   ├── Actors（演员）
-│   ├── Directors（导演）
-│   ├── Series（系列）
+│   ├── Tags Category（标签分类页）
+│   │   ├── Directors（导演）
+│   │   ├── Movie Tags（影片标签）
+│   │   ├── Series（系列）
+│   │   └── Custom Tags（自定义标签）
+│   ├── Actors（演员，实体能力）
 │   ├── Favorites（收藏）
 │   └── History（最近播放）
 │
@@ -1698,7 +1699,9 @@ Local Media Manager
 
 **Smart Search：** 影片墙与搜索页共用 `GET /api/search/advanced`。普通关键词以 AND 组合；每个关键词在番号、标题、原始标题、简介、文件路径/名、演员、导演、影片标签、自定义标签、Genre、厂商、系列、媒体库名之间 OR 匹配。结构化字段支持 `演员:`、`导演:`、`标签:`、`自定义标签:`、`系列:`、`厂商:`、`媒体库:`、年份与评分比较、收藏/观看布尔条件。`标签:` 仅指影片自带标签；`自定义标签:` 仅指用户手动/Legacy stamp 标签。分类入口参数、FilterBar 与 Smart Search 条件统一 AND。
 
-**列表返回状态：** 影片墙和搜索结果进入详情前记录当前列表状态签名与 scrollY；从详情返回且分类、搜索、FilterBar、排序、页码、视图未变时恢复滚动。用户改变查询条件后不复用旧滚动。
+**MovieWall：** 所有本质属于影片列表的页面复用 `MovieWall`：全部影片、收藏、最近播放、搜索结果、导演/系列/影片标签/自定义标签/媒体库进入后的结果页。`MovieWall` 统一 Smart Search、FilterBar、排序、分页、卡片/列表视图和详情返回滚动恢复。
+
+**列表返回状态：** `MovieWall` 进入详情前记录当前列表状态签名与 scrollY；从详情返回且默认条件、搜索、FilterBar、排序、页码、视图未变时恢复滚动。用户改变查询条件后不复用旧滚动。
 
 ### 16.3 媒体库管理
 
@@ -1727,18 +1730,19 @@ Local Media Manager
 
 | 模块 | 路由 | Bridge 入口 |
 |------|------|------------|
-| **Custom Tags** | `/tags` | `GET /api/entities/tags`、CRUD `/api/tags` |
-| **Movie Tags** | `/movie-tags` | `GET /api/entities/movie-tags` |
+| **Tags Category** | `/tags` | 二级分类页：导演、影片标签、系列、自定义标签 |
+| **Custom Tags** | `/tags/custom` | `GET /api/entities/tags`、CRUD `/api/tags` |
+| **Movie Tags** | `/tags/movie-tags` | `GET /api/entities/movie-tags` |
 | **Actors** | `/actors` | `GET /api/entities/actors`、PUT `/api/actors/{id}` |
-| **Directors** | `/directors` | `GET /api/entities/directors` |
-| **Series** | `/series` | `GET /api/entities/series` |
+| **Directors** | `/tags/directors` | `GET /api/entities/directors` |
+| **Series** | `/tags/series` | `GET /api/entities/series` |
 | **Actor Repair** | Metadata/Maintenance | `GET/POST /api/actors/repair-*` |
 | **Favorites** | `/favorites` | `GET /api/collections/favorites` |
 | **History** | `/history` | `GET /api/collections/history` |
 
 **批量操作：** `POST /api/videos/batch/favorite`、`/batch/rating`、`/batch/tags`
 
-**实体来源：** 影片标签与自定义标签共享 `Tags/MovieTags`，但用 `Tags.Source` 区分：`User` 与 `LegacyStamp` 是自定义标签；`NFO`、`Scraper`、`LegacyLabel` 等非用户来源是影片自带标签。Genre 使用独立 `Genres/MovieGenres`，不是影片标签。系列使用 `Series/MovieSeries`；导演使用 `Directors/MovieDirectors`（旧库可不存在，UI 显示空态）。实体列表数量使用 `COUNT(DISTINCT MovieId)`，点击实体后跳转影片墙并传递明确 ID 参数（如 `directorId`、`seriesId`、`movieTagId`、`customTagId`），不创建第二套影片列表。
+**实体来源：** 影片标签与自定义标签共享 `Tags/MovieTags`，但用 `Tags.Source` 区分：`User` 与 `LegacyStamp` 是自定义标签；`NFO`、`Scraper`、`LegacyLabel` 等非用户来源是影片自带标签。状态 Badge（如 `新加入`、`已收藏`）不是标签分类，不进入 `/tags` 二级分类与标签统计。Genre 使用独立 `Genres/MovieGenres`，不是影片标签。系列使用 `Series/MovieSeries`；导演使用 `Directors/MovieDirectors`（旧库可不存在，UI 显示空态）。实体列表数量使用 `COUNT(DISTINCT MovieId)`，点击实体后跳转影片墙并传递明确 ID 参数（如 `directorId`、`seriesId`、`movieTagId`、`customTagId`），不创建第二套影片列表。
 
 ### 16.6 媒体资源（Images & MediaStorage）
 
