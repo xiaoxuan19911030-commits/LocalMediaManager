@@ -52,15 +52,15 @@ public sealed class LegacyCompletionPart2Tests : IAsyncLifetime
         }
         await Execute(connection, "INSERT INTO UserMovieState(MovieId,IsFavorite,UserRating,HasUserRating,UpdatedAt) VALUES(1,0,5,1,$at),(2,0,4.5,1,$at),(3,0,3,1,$at),(4,0,0,0,$at)", ("$at", at));
 
-        MediaPageDto five = await ProductReader.AdvancedSearchAsync(Database, "http://127.0.0.1:47831", "", null, null, null, null, 0, "5", "all", "all", "all", null, "newest", 24, 0);
+        MediaPageDto five = await ProductReader.AdvancedSearchAsync(Database, "http://127.0.0.1:47831", "", null, null, null, null, null, null, null, null, 0, "5", "all", "all", "all", null, "newest", 24, 0);
         Assert.Single(five.Items);
         Assert.Equal("RATE-001", five.Items[0].Code);
 
-        MediaPageDto four = await ProductReader.AdvancedSearchAsync(Database, "http://127.0.0.1:47831", "", null, null, null, null, 0, "4", "all", "all", "all", null, "newest", 24, 0);
+        MediaPageDto four = await ProductReader.AdvancedSearchAsync(Database, "http://127.0.0.1:47831", "", null, null, null, null, null, null, null, null, 0, "4", "all", "all", "all", null, "newest", 24, 0);
         Assert.Single(four.Items);
         Assert.Equal("RATE-002", four.Items[0].Code);
 
-        MediaPageDto unrated = await ProductReader.AdvancedSearchAsync(Database, "http://127.0.0.1:47831", "", null, null, null, null, 0, "unrated", "all", "all", "all", null, "newest", 24, 0);
+        MediaPageDto unrated = await ProductReader.AdvancedSearchAsync(Database, "http://127.0.0.1:47831", "", null, null, null, null, null, null, null, null, 0, "unrated", "all", "all", "all", null, "newest", 24, 0);
         Assert.Single(unrated.Items);
         Assert.Equal("RATE-004", unrated.Items[0].Code);
     }

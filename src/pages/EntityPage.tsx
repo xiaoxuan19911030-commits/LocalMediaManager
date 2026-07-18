@@ -1,5 +1,4 @@
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
-import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded'
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded'
 import EditRoundedIcon from '@mui/icons-material/EditRounded'
 import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded'
@@ -10,17 +9,26 @@ import { Alert, Avatar, Box, Button, Card, CardActionArea, CardActions, CardCont
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { EmptyState } from '@/components/ProductComponents'
-import { MovieResultContainer } from '@/components/workspace/MovieResults'
 import { StatusBadge } from '@/components/workspace/StatusBadges'
-import { WorkspacePage, WorkspaceLoading, refreshAction } from '@/components/workspace/Workspace'
+import { WorkspacePage, refreshAction } from '@/components/workspace/Workspace'
 import { bridge } from '@/services/bridge'
-import type { ActorRepairPreview, EntityCard, MediaItem } from '@/types/media'
+import type { ActorRepairPreview, EntityCard } from '@/types/media'
 
 const pageSize = 48
 const readable = (value: string) => value && !value.includes('\uFFFD') ? value : '名称待修复'
+type EntityPageType = 'actors' | 'directors' | 'series' | 'tags' | 'movie-tags'
+const pageMeta: Record<EntityPageType, { title: string; description: string; searchPlaceholder: string; mediaParam: string; mediaNameParam: string; noun: string }> = {
+  tags: { title: '自定义标签', description: '浏览用户手动创建和维护的自定义标签。', searchPlaceholder: '搜索自定义标签', mediaParam: 'customTagId', mediaNameParam: 'customTagName', noun: '自定义标签' },
+  'movie-tags': { title: '影片标签', description: '浏览刮削或 NFO 导入的影片自带标签。', searchPlaceholder: '搜索影片标签', mediaParam: 'movieTagId', mediaNameParam: 'movieTagName', noun: '影片标签' },
+  actors: { title: '演员', description: '按作品数量或名称浏览演员及其关联影片。', searchPlaceholder: '搜索演员', mediaParam: 'actorId', mediaNameParam: 'actorName', noun: '演员' },
+  directors: { title: '导演', description: '按作品数量或名称浏览导演及其关联影片。', searchPlaceholder: '搜索导演', mediaParam: 'directorId', mediaNameParam: 'directorName', noun: '导演' },
+  series: { title: '系列', description: '按作品数量或名称浏览系列及其关联影片。', searchPlaceholder: '搜索系列', mediaParam: 'seriesId', mediaNameParam: 'seriesName', noun: '系列' },
+}
 
-export default function EntityPage({ type }: { type: 'actors' | 'tags' }) {
+export default function EntityPage({ type }: { type: EntityPageType }) {
   const actorMode = type === 'actors'
+  const customTagMode = type === 'tags'
+  const meta = pageMeta[type]
   const navigate = useNavigate()
   const [items, setItems] = useState<EntityCard[]>([])
   const [total, setTotal] = useState(0)
@@ -30,8 +38,6 @@ export default function EntityPage({ type }: { type: 'actors' | 'tags' }) {
   const [sort, setSort] = useState('count')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [selected, setSelected] = useState<EntityCard>()
-  const [movies, setMovies] = useState<MediaItem[]>()
   const [notice, setNotice] = useState('')
   const [editItem, setEditItem] = useState<EntityCard | null>()
   const [editName, setEditName] = useState('')
@@ -55,11 +61,9 @@ export default function EntityPage({ type }: { type: 'actors' | 'tags' }) {
   useEffect(load, [load])
 
   const open = (item: EntityCard) => {
-    setSelected(item)
-    setMovies(undefined)
-    bridge.entityMovies(type, item.id).then((result) => setMovies(result.items)).catch((reason: Error) => setError(reason.message))
+    const target = new URLSearchParams({ [meta.mediaParam]: String(item.id), [meta.mediaNameParam]: readable(item.name) })
+    navigate(`/media?${target.toString()}`)
   }
-  const play = (item: MediaItem) => bridge.play(item.dataId).then(() => setNotice(`正在打开：${item.code}`)).catch((reason: Error) => setNotice(reason.message))
   const submit = (event: FormEvent) => { event.preventDefault(); setPage(1); setQuery(input.trim()) }
   const clearFilters = () => { setInput(''); setQuery(''); setSort('count'); setPage(1) }
   const startCreate = () => { setCreating(true); setEditItem({ id: 0, name: '', movieCount: 0 }); setEditName('') }
@@ -101,35 +105,32 @@ export default function EntityPage({ type }: { type: 'actors' | 'tags' }) {
     bridge.applyActorRepair(actorRepair.confirmationToken).then((result) => { setNotice(result.message); setActorRepair(undefined); load() }).catch((reason: Error) => setError(reason.message))
   }
 
-  if (selected) {
-    return <WorkspacePage title={readable(selected.name)} description={`${selected.movieCount} 部关联影片`}
-      primaryActions={[{ key: 'back', label: `返回${actorMode ? '演员' : '标签'}`, icon: <ArrowBackRoundedIcon/>, onClick: () => { setSelected(undefined); setMovies(undefined) } }]}>
-      {movies === undefined
-        ? <WorkspaceLoading/>
-        : <MovieResultContainer items={movies} onPlay={play} onOpen={(item) => navigate(`/movies/${item.dataId}`)} emptyTitle="暂无关联影片" emptyDescription="数据已迁移，但该关联当前没有可展示影片。"/>}
-    </WorkspacePage>
-  }
-
   const filters = <Box component="form" onSubmit={submit} sx={{ display: 'flex', gap: 1.25, flexWrap: 'wrap' }}>
-    <TextField size="small" value={input} onChange={(event) => setInput(event.target.value)} placeholder={actorMode ? '搜索演员' : '搜索标签'} sx={{ minWidth: 260 }} slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchRoundedIcon fontSize="small"/></InputAdornment> } }}/>
+    <TextField size="small" value={input} onChange={(event) => setInput(event.target.value)} placeholder={meta.searchPlaceholder} sx={{ minWidth: 260 }} slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchRoundedIcon fontSize="small"/></InputAdornment> } }}/>
     <TextField select size="small" value={sort} onChange={(event) => { setPage(1); setSort(event.target.value) }} sx={{ width: 150 }}><MenuItem value="count">作品数量</MenuItem><MenuItem value="name">名称排序</MenuItem></TextField>
     <Button type="submit" variant="contained" size="small">搜索</Button>
   </Box>
 
   const stats = <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
-    <StatusBadge tone="info" label={`${total} 个${actorMode ? '演员' : '标签'}`}/>
+    <StatusBadge tone="info" label={`${total} 个${meta.noun}`}/>
     <StatusBadge tone={query ? 'warning' : 'neutral'} label={query ? `搜索：${query}` : '全部'}/>
   </Stack>
+  const icon = actorMode ? <GroupsRoundedIcon/> : <LocalOfferRoundedIcon/>
+  const primaryActions = actorMode
+    ? [{ key: 'repair', label: '检查关系', icon: <HandymanRoundedIcon/>, variant: 'outlined' as const, onClick: repairActors }]
+    : customTagMode
+      ? [{ key: 'create', label: '新建标签', icon: <AddRoundedIcon/>, variant: 'contained' as const, onClick: startCreate }]
+      : undefined
 
-  return <WorkspacePage title={actorMode ? '演员' : '标签'} description={actorMode ? '按作品数量或名称浏览演员及其关联影片。' : '浏览自定义标签、兼容标签和影片关联。'} stats={stats}
+  return <WorkspacePage title={meta.title} description={meta.description} stats={stats}
     filters={filters} activeFilterCount={(query ? 1 : 0) + (sort !== 'count' ? 1 : 0)} onClearFilters={clearFilters} loading={loading} error={error}
-    primaryActions={actorMode ? [{ key: 'repair', label: '检查关系', icon: <HandymanRoundedIcon/>, variant: 'outlined', onClick: repairActors }] : [{ key: 'create', label: '新建标签', icon: <AddRoundedIcon/>, variant: 'contained', onClick: startCreate }]}
+    primaryActions={primaryActions}
     secondaryActions={[refreshAction(load)]}>
     {items.length ? <Box sx={{ display: 'grid', gridTemplateColumns: actorMode ? 'repeat(auto-fill,minmax(150px,1fr))' : 'repeat(auto-fill,minmax(190px,1fr))', gap: 1.25 }}>
       {items.map((item) => <Card key={item.id} sx={{ display: 'flex', flexDirection: 'column' }}><CardActionArea onClick={() => open(item)} sx={{ flex: 1 }}><CardContent sx={{ display: 'flex', flexDirection: actorMode ? 'column' : 'row', alignItems: 'center', gap: 1.25, textAlign: actorMode ? 'center' : 'left' }}>
-        {actorMode ? <Avatar src={item.imageUrl} alt={readable(item.name)} sx={{ width: 82, height: 82, bgcolor: 'action.selected' }}><GroupsRoundedIcon/></Avatar> : <Box sx={{ width: 38, height: 38, borderRadius: 2, bgcolor: 'action.hover', color: 'primary.main', display: 'grid', placeItems: 'center' }}><LocalOfferRoundedIcon/></Box>}
+        {actorMode ? <Avatar src={item.imageUrl} alt={readable(item.name)} sx={{ width: 82, height: 82, bgcolor: 'action.selected' }}>{icon}</Avatar> : <Box sx={{ width: 38, height: 38, borderRadius: 2, bgcolor: 'action.hover', color: 'primary.main', display: 'grid', placeItems: 'center' }}>{icon}</Box>}
         <Box sx={{ minWidth: 0, flex: 1 }}><Typography noWrap sx={{ fontWeight: 800 }}>{readable(item.name)}</Typography><Typography variant="body2" color="text.secondary">{item.movieCount} 部影片</Typography></Box>
-      </CardContent></CardActionArea><CardActions sx={{ justifyContent: 'flex-end', pt: 0 }}><Tooltip title="编辑"><IconButton size="small" onClick={() => startEdit(item)}><EditRoundedIcon fontSize="small"/></IconButton></Tooltip>{!actorMode && <Tooltip title="删除"><IconButton size="small" color="error" onClick={() => requestDelete(item)}><DeleteOutlineRoundedIcon fontSize="small"/></IconButton></Tooltip>}</CardActions></Card>)}
+      </CardContent></CardActionArea>{(actorMode || customTagMode) && <CardActions sx={{ justifyContent: 'flex-end', pt: 0 }}><Tooltip title="编辑"><IconButton size="small" onClick={() => startEdit(item)}><EditRoundedIcon fontSize="small"/></IconButton></Tooltip>{customTagMode && <Tooltip title="删除"><IconButton size="small" color="error" onClick={() => requestDelete(item)}><DeleteOutlineRoundedIcon fontSize="small"/></IconButton></Tooltip>}</CardActions>}</Card>)}
     </Box> : <EmptyState title="没有匹配内容" description="尝试清除搜索条件。"/>}
     {total > pageSize && <Stack sx={{ pt: 3, alignItems: 'center' }}><Pagination count={Math.ceil(total / pageSize)} page={page} onChange={(_, value) => setPage(value)} color="primary"/></Stack>}
     {notice && <Alert severity="info" onClose={() => setNotice('')} action={undoAudit ? <Button color="inherit" size="small" onClick={undoDelete}>撤销</Button> : undefined} sx={{ mt: 2 }}>{notice}</Alert>}

@@ -7,16 +7,20 @@ import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import StarRoundedIcon from '@mui/icons-material/StarRounded'
 import SyncRoundedIcon from '@mui/icons-material/SyncRounded'
 import { Autocomplete, Button, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, Divider, InputAdornment, ListItemIcon, Menu, MenuItem, Snackbar, Stack, TextField, Typography } from '@mui/material'
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
+import { useSearchParams } from 'react-router'
 import { MovieResultContainer, useMovieActions } from '@/components/workspace/MovieResults'
 import { SafeDeleteDialog } from '@/components/SafeDeleteDialog'
 import { ViewModeToggle, WorkspacePage, refreshAction } from '@/components/workspace/Workspace'
+import { StatusBadge } from '@/components/workspace/StatusBadges'
 import { bridge } from '@/services/bridge'
 import type { MediaItem, MediaLibrary, NamedItem, SafeDeletePreview, SafeDeletePreviewCommand } from '@/types/media'
 import type { WorkspaceViewMode } from '@/components/workspace/Workspace'
 
 const pageSize = 24
 const mediaStateKey = 'lmm.mediaPage.filters'
+
+const normalizeSearch = (value: string) => value.replace(/\u3000/g, ' ').replace(/\s+/g, ' ').trim()
 
 interface SavedMediaState {
   page?: number
@@ -28,8 +32,12 @@ interface SavedMediaState {
   metadataStatus?: string
   imageStatus?: string
   libraryId?: number
+  categorySignature?: string
   moreOpen?: boolean
   view?: WorkspaceViewMode
+  scrollY?: number
+  restoreScroll?: boolean
+  restoreSignature?: string
 }
 
 const readSavedState = (): SavedMediaState => {
@@ -40,21 +48,42 @@ const readSavedState = (): SavedMediaState => {
   }
 }
 
+const numericParam = (params: URLSearchParams, name: string) => {
+  const value = Number(params.get(name) || 0)
+  return Number.isFinite(value) && value > 0 ? value : undefined
+}
+
 export default function MediaPage() {
+  const [params] = useSearchParams()
+  const category = useMemo(() => {
+    const actorId = numericParam(params, 'actorId')
+    const directorId = numericParam(params, 'directorId')
+    const movieTagId = numericParam(params, 'movieTagId')
+    const customTagId = numericParam(params, 'customTagId')
+    const seriesId = numericParam(params, 'seriesId')
+    const label = actorId ? `演员：${params.get('actorName') || actorId}` :
+      directorId ? `导演：${params.get('directorName') || directorId}` :
+      movieTagId ? `影片标签：${params.get('movieTagName') || movieTagId}` :
+      customTagId ? `自定义标签：${params.get('customTagName') || customTagId}` :
+      seriesId ? `系列：${params.get('seriesName') || seriesId}` : ''
+    return { actorId, directorId, movieTagId, customTagId, seriesId, label }
+  }, [params])
+  const categorySignature = useMemo(() => JSON.stringify({ actorId: category.actorId, directorId: category.directorId, movieTagId: category.movieTagId, customTagId: category.customTagId, seriesId: category.seriesId }), [category.actorId, category.customTagId, category.directorId, category.movieTagId, category.seriesId])
   const saved = useMemo(readSavedState, [])
+  const canReuseSavedState = saved.categorySignature === categorySignature
   const [items, setItems] = useState<MediaItem[]>([])
   const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(saved.page ?? 1)
-  const [search, setSearch] = useState(saved.search ?? '')
-  const [query, setQuery] = useState(saved.query ?? '')
-  const [sort, setSort] = useState(saved.sort ?? 'newest')
-  const [rating, setRating] = useState(saved.rating && saved.rating !== '0' ? String(saved.rating) : 'all')
-  const [tagId, setTagId] = useState(saved.tagId ?? 0)
-  const [metadataStatus, setMetadataStatus] = useState(saved.metadataStatus ?? 'all')
-  const [imageStatus, setImageStatus] = useState(saved.imageStatus ?? 'all')
-  const [libraryId, setLibraryId] = useState(saved.libraryId ?? 0)
-  const [moreOpen, setMoreOpen] = useState(saved.moreOpen ?? true)
-  const [view, setView] = useState<WorkspaceViewMode>(saved.view ?? 'grid')
+  const [page, setPage] = useState(canReuseSavedState ? saved.page ?? 1 : 1)
+  const [search, setSearch] = useState(canReuseSavedState ? saved.search ?? '' : '')
+  const [query, setQuery] = useState(canReuseSavedState ? saved.query ?? '' : '')
+  const [sort, setSort] = useState(canReuseSavedState ? saved.sort ?? 'newest' : 'newest')
+  const [rating, setRating] = useState(canReuseSavedState && saved.rating && saved.rating !== '0' ? String(saved.rating) : 'all')
+  const [tagId, setTagId] = useState(canReuseSavedState ? saved.tagId ?? 0 : 0)
+  const [metadataStatus, setMetadataStatus] = useState(canReuseSavedState ? saved.metadataStatus ?? 'all' : 'all')
+  const [imageStatus, setImageStatus] = useState(canReuseSavedState ? saved.imageStatus ?? 'all' : 'all')
+  const [libraryId, setLibraryId] = useState(canReuseSavedState ? saved.libraryId ?? 0 : 0)
+  const [moreOpen, setMoreOpen] = useState(canReuseSavedState ? saved.moreOpen ?? true : true)
+  const [view, setView] = useState<WorkspaceViewMode>(canReuseSavedState ? saved.view ?? 'grid' : 'grid')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -71,13 +100,24 @@ export default function MediaPage() {
   const [deleteCommand, setDeleteCommand] = useState<SafeDeletePreviewCommand>()
   const [editMode, setEditMode] = useState(false)
   const [subMenu, setSubMenu] = useState<{ kind: 'edit' | 'image' | 'open'; anchor: HTMLElement }>()
+  const loadSeq = useRef(0)
   const movieActions = useMovieActions({ onNotice: setNotice, play: bridge.play })
+  const stateSignature = useMemo(() => JSON.stringify({ categorySignature, page, query, sort, rating, tagId, metadataStatus, imageStatus, libraryId, view }), [categorySignature, imageStatus, libraryId, metadataStatus, page, query, rating, sort, tagId, view])
+  const shouldRestoreScroll = useRef(saved.restoreScroll === true && saved.restoreSignature === stateSignature)
+  const pendingScrollY = useRef(typeof saved.scrollY === 'number' ? saved.scrollY : 0)
+  const buildSavedState = useCallback((): SavedMediaState => ({ page, search, query, sort, rating, tagId, metadataStatus, imageStatus, libraryId, categorySignature, moreOpen, view }), [categorySignature, imageStatus, libraryId, metadataStatus, moreOpen, page, query, rating, search, sort, tagId, view])
 
   const load = useCallback(() => {
+    const seq = ++loadSeq.current
     setLoading(true); setError('')
     const effectiveMetadataStatus = imageStatus === 'missing' ? 'missing-images' : imageStatus === 'normal' ? 'complete' : metadataStatus
     bridge.advancedSearch({
       query,
+      actorId: category.actorId,
+      directorId: category.directorId,
+      movieTagId: category.movieTagId,
+      customTagId: category.customTagId,
+      seriesId: category.seriesId,
       ratingFilter: rating,
       tagId: tagId || undefined,
       metadataStatus: effectiveMetadataStatus,
@@ -86,19 +126,41 @@ export default function MediaPage() {
       limit: pageSize,
       offset: (page - 1) * pageSize,
     })
-      .then((result) => { setItems(result.items); setTotal(result.total) })
-      .catch((reason: Error) => setError(reason.message))
-      .finally(() => setLoading(false))
-  }, [imageStatus, libraryId, metadataStatus, page, query, rating, sort, tagId])
+      .then((result) => { if (seq === loadSeq.current) { setItems(result.items); setTotal(result.total) } })
+      .catch((reason: Error) => { if (seq === loadSeq.current) setError(reason.message) })
+      .finally(() => { if (seq === loadSeq.current) setLoading(false) })
+  }, [category.actorId, category.customTagId, category.directorId, category.movieTagId, category.seriesId, imageStatus, libraryId, metadataStatus, page, query, rating, sort, tagId])
 
   useEffect(load, [load])
+  useEffect(() => () => { loadSeq.current += 1 }, [])
   useEffect(() => {
     bridge.libraries().then(setLibraries).catch(() => undefined)
     bridge.entities('tags', '', 'name', 96, 0).then((result) => setTags(result.items)).catch(() => undefined)
   }, [])
   useEffect(() => {
-    window.sessionStorage.setItem(mediaStateKey, JSON.stringify({ page, search, query, sort, rating, tagId, metadataStatus, imageStatus, libraryId, moreOpen, view }))
-  }, [imageStatus, libraryId, metadataStatus, moreOpen, page, query, rating, search, sort, tagId, view])
+    const next = buildSavedState()
+    if (shouldRestoreScroll.current && saved.restoreSignature === stateSignature) {
+      window.sessionStorage.setItem(mediaStateKey, JSON.stringify({ ...next, scrollY: pendingScrollY.current, restoreScroll: true, restoreSignature: stateSignature }))
+      return
+    }
+    shouldRestoreScroll.current = false
+    window.sessionStorage.setItem(mediaStateKey, JSON.stringify(next))
+  }, [buildSavedState, saved.restoreSignature, stateSignature])
+  useLayoutEffect(() => {
+    if (!shouldRestoreScroll.current || loading || error) return
+    shouldRestoreScroll.current = false
+    window.scrollTo(0, pendingScrollY.current)
+    window.sessionStorage.setItem(mediaStateKey, JSON.stringify(buildSavedState()))
+  }, [buildSavedState, error, items.length, loading, total])
+  useEffect(() => {
+    const next = normalizeSearch(search)
+    if (next === query) return
+    const timer = window.setTimeout(() => {
+      setPage(1)
+      setQuery(next)
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [query, search])
 
   const activeFilterCount = useMemo(() => [
     query,
@@ -108,12 +170,27 @@ export default function MediaPage() {
     metadataStatus !== 'all',
     imageStatus !== 'all',
     libraryId > 0,
-  ].filter(Boolean).length, [imageStatus, libraryId, metadataStatus, query, rating, sort, tagId])
+    category.actorId,
+    category.directorId,
+    category.movieTagId,
+    category.customTagId,
+    category.seriesId,
+  ].filter(Boolean).length, [category.actorId, category.customTagId, category.directorId, category.movieTagId, category.seriesId, imageStatus, libraryId, metadataStatus, query, rating, sort, tagId])
 
-  const submitSearch = () => { setPage(1); setQuery(search.trim()) }
+  const submitSearch = () => { setPage(1); setQuery(normalizeSearch(search)) }
+  const clearSearch = () => { setSearch(''); setQuery(''); setPage(1) }
   const clearFilters = () => {
-    setSearch(''); setQuery(''); setSort('newest'); setRating('all')
+    setSort('newest'); setRating('all')
     setTagId(0); setMetadataStatus('all'); setImageStatus('all'); setLibraryId(0); setPage(1)
+  }
+  const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      submitSearch()
+    } else if (event.key === 'Escape') {
+      if (search) clearSearch()
+      else event.currentTarget.blur()
+    }
   }
   const batchFavorite = (value: boolean) => bridge.setBatchFavorite(selected, value).then((result) => { setNotice(result.message); setSelected([]); load() }).catch((reason: Error) => setNotice(reason.message))
   const openBatchTags = () => { setAddTags([]); setRemoveTags([]); setTagDialog(true); bridge.entities('tags', '', 'name', 96, 0).then((result) => setTags(result.items)).catch((reason: Error) => setNotice(reason.message)) }
@@ -125,7 +202,11 @@ export default function MediaPage() {
   const syncContextMovie = () => { const item = contextMenu?.item; closeContextMenu(); if (item) bridge.syncMovie(item.dataId).then((result) => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message)) }
   const generateContextImage = (type: string) => { const item = contextMenu?.item; closeContextMenu(); if (item) bridge.generateMovieImage(item.dataId, type).then((result) => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message)) }
   const createBatchImageTasks = (type: string) => Promise.all(selected.map((id) => bridge.generateMovieImage(id, type))).then((results) => { setNotice(`已创建 ${results.length} 个${type === 'GIF' ? ' GIF' : '截图'}任务，可在任务中心查看进度。`); setSelected([]) }).catch((reason: Error) => setNotice(reason.message))
-  const openContextMovie = () => { const item = contextMenu?.item; closeContextMenu(); if (item) movieActions.openMovie(item, { search: query, sort }) }
+  const rememberScrollForDetail = useCallback(() => {
+    window.sessionStorage.setItem(mediaStateKey, JSON.stringify({ ...buildSavedState(), scrollY: window.scrollY, restoreScroll: true, restoreSignature: stateSignature }))
+  }, [buildSavedState, stateSignature])
+  const openMovieFromWall = (item: MediaItem) => { rememberScrollForDetail(); movieActions.openMovie(item, { source: 'media', search: query, sort }) }
+  const openContextMovie = () => { const item = contextMenu?.item; closeContextMenu(); if (item) openMovieFromWall(item) }
   const openContextLocation = () => { const item = contextMenu?.item; closeContextMenu(); if (item?.path) bridge.revealFile(item.path).then((result) => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message)); else setNotice('没有可定位的影片文件') }
   const openSafeDelete = (movieIds: number[], mode: 'metadata' | 'media') => {
     closeContextMenu()
@@ -145,7 +226,7 @@ export default function MediaPage() {
 
   const filters = <Stack component="form" onSubmit={(event) => { event.preventDefault(); submitSearch() }} spacing={1.25}>
     <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} useFlexGap sx={{ alignItems: { xs: 'stretch', md: 'center' }, flexWrap: 'wrap' }}>
-      <TextField size="small" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索番号、标题、文件名、演员或标签" sx={{ flex: '1 1 280px' }} slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchRoundedIcon/></InputAdornment> } }}/>
+      <TextField size="small" value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={handleSearchKeyDown} placeholder="搜索标题、番号、演员、标签，或输入“评分>=4 收藏”" sx={{ flex: '1 1 280px' }} slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchRoundedIcon/></InputAdornment> } }}/>
       <TextField select size="small" label="排序" value={sort} onChange={(event) => { setPage(1); setSort(event.target.value) }} sx={{ width: 150 }}>
         <MenuItem value="newest">最新导入</MenuItem><MenuItem value="code">番号</MenuItem><MenuItem value="title">标题</MenuItem><MenuItem value="release">发行日期</MenuItem><MenuItem value="rating">个人评分</MenuItem>
       </TextField>
@@ -160,8 +241,8 @@ export default function MediaPage() {
         <TextField select size="small" label="评分" value={rating} onChange={(event) => { setPage(1); setRating(event.target.value) }} sx={{ minWidth: 130 }}>
           <MenuItem value="all">全部评分</MenuItem><MenuItem value="unrated">未评分</MenuItem>{[5, 4, 3, 2, 1].map((value) => <MenuItem key={value} value={String(value)}>{'★'.repeat(value)}</MenuItem>)}
         </TextField>
-        <TextField select size="small" label="标签" value={tagId} onChange={(event) => { setPage(1); setTagId(Number(event.target.value)) }} sx={{ minWidth: 150 }}>
-          <MenuItem value={0}>全部标签</MenuItem>{tags.map((tag) => <MenuItem key={tag.id} value={tag.id}>{tag.name}</MenuItem>)}
+        <TextField select size="small" label="自定义标签" value={tagId} onChange={(event) => { setPage(1); setTagId(Number(event.target.value)) }} sx={{ minWidth: 150 }}>
+          <MenuItem value={0}>全部自定义标签</MenuItem>{tags.map((tag) => <MenuItem key={tag.id} value={tag.id}>{tag.name}</MenuItem>)}
         </TextField>
         <TextField select size="small" label="元数据状态" value={metadataStatus} onChange={(event) => { setPage(1); setMetadataStatus(event.target.value) }} sx={{ minWidth: 150 }}>
           <MenuItem value="all">全部</MenuItem><MenuItem value="complete">已完整</MenuItem><MenuItem value="unscraped">未刮削</MenuItem><MenuItem value="missing-nfo">缺 NFO</MenuItem><MenuItem value="missing-actors">缺演员</MenuItem><MenuItem value="missing-tags">缺标签</MenuItem><MenuItem value="missing-description">缺简介</MenuItem>
@@ -176,7 +257,9 @@ export default function MediaPage() {
     </Collapse>
   </Stack>
 
-  const stats = editMode && selected.length > 0 && <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap', p: 1.25, border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'action.hover' }}>
+  const stats = <Stack spacing={1}>
+    {category.label && <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}><StatusBadge tone="info" label={category.label}/></Stack>}
+    {editMode && selected.length > 0 && <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap', p: 1.25, border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'action.hover' }}>
     <Typography sx={{ fontWeight: 800 }}>已选择 {selected.length} 部</Typography>
     <Button size="small" startIcon={<FavoriteRoundedIcon/>} onClick={() => batchFavorite(true)}>收藏</Button>
     <Button size="small" startIcon={<FavoriteBorderRoundedIcon/>} onClick={() => batchFavorite(false)}>取消收藏</Button>
@@ -187,11 +270,12 @@ export default function MediaPage() {
     <Button size="small" startIcon={<StarRoundedIcon/>} onClick={() => setRatingDialog(true)}>应用评分</Button>
     <Button size="small" startIcon={<SyncRoundedIcon/>} onClick={createBatchSync}>同步信息</Button>
     <Button size="small" color="inherit" onClick={() => setSelected([])}>取消选择</Button>
+    </Stack>}
   </Stack>
 
   return <WorkspacePage title="影片墙" description={`共 ${total} 部影片，支持搜索、排序、筛选和分页浏览。`} stats={stats} filters={filters} activeFilterCount={activeFilterCount} onClearFilters={clearFilters} loading={loading} error={error}
     primaryActions={[refreshAction(load)]}>
-    <MovieResultContainer items={items} total={total} page={page} pageSize={pageSize} onPageChange={setPage} view={view} selectable={editMode} selectedIds={selected} onSelect={(value, checked) => setSelected((current) => checked ? [...current, value.dataId] : current.filter((id) => id !== value.dataId))} onRatingClick={editMode && selected.length > 0 ? () => setRatingDialog(true) : undefined} onContextMenu={openContextMenu} onPlay={movieActions.playMovie} onOpen={(item) => editMode ? toggleSelect(item) : movieActions.openMovie(item, { search: query, sort })} emptyTitle="暂无影片" emptyDescription="当前媒体库还没有可展示的影片。"/>
+    <MovieResultContainer items={items} total={total} page={page} pageSize={pageSize} onPageChange={setPage} view={view} selectable={editMode} selectedIds={selected} onSelect={(value, checked) => setSelected((current) => checked ? [...current, value.dataId] : current.filter((id) => id !== value.dataId))} onRatingClick={editMode && selected.length > 0 ? () => setRatingDialog(true) : undefined} onContextMenu={openContextMenu} onPlay={movieActions.playMovie} onOpen={(item) => editMode ? toggleSelect(item) : openMovieFromWall(item)} emptyTitle="暂无影片" emptyDescription="当前媒体库还没有可展示的影片。"/>
     <Menu open={Boolean(contextMenu)} onClose={closeContextMenu} anchorReference="anchorPosition" anchorPosition={contextMenu ? { top: contextMenu.mouseY, left: contextMenu.mouseX } : undefined}>
       {editMode && selected.length > 0 ? [
         <MenuItem key="batch-sync" onClick={() => { closeContextMenu(); void createBatchSync() }}><ListItemIcon><SyncRoundedIcon fontSize="small"/></ListItemIcon>全部同步信息</MenuItem>,

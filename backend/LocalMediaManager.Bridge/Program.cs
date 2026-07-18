@@ -232,13 +232,13 @@ app.MapPost("/api/platform/reveal-file", (PlatformPathCommand command, PlatformC
 
 app.MapGet("/api/entities/{entityType}", async (string entityType, string? search, string? sort, int? limit, int? offset) => {
     if (!File.Exists(databasePath)) return Results.Problem($"找不到数据库：{databasePath}", statusCode: 503);
-    if (entityType is not ("actors" or "tags")) return Results.BadRequest("仅支持 actors 或 tags。");
+    if (entityType is not ("actors" or "tags" or "custom-tags" or "movie-tags" or "directors" or "series")) return Results.BadRequest("仅支持 actors、directors、series、tags 或 movie-tags。");
     return Results.Ok(await ProductReader.ReadEntitiesPageAsync(databasePath, bridgeUrl, entityType, search ?? "", sort ?? "count", Math.Clamp(limit ?? 48, 1, 96), Math.Max(offset ?? 0, 0)));
 });
 
 app.MapGet("/api/entities/{entityType}/{entityId:long}/movies", async (string entityType, long entityId, int? limit, int? offset) => {
     if (!File.Exists(databasePath)) return Results.Problem($"找不到数据库：{databasePath}", statusCode: 503);
-    if (entityType is not ("actors" or "tags")) return Results.BadRequest("仅支持 actors 或 tags。");
+    if (entityType is not ("actors" or "tags" or "custom-tags" or "movie-tags" or "directors" or "series")) return Results.BadRequest("仅支持 actors、directors、series、tags 或 movie-tags。");
     return Results.Ok(await ProductReader.ReadEntityMoviesAsync(databasePath, bridgeUrl, entityType, entityId, Math.Clamp(limit ?? 48, 1, 96), Math.Max(offset ?? 0, 0)));
 });
 
@@ -248,9 +248,9 @@ app.MapGet("/api/collections/{kind}", async (string kind, int? limit, int? offse
     return Results.Ok(await ProductReader.ReadCollectionAsync(databasePath, bridgeUrl, kind, Math.Clamp(limit ?? 48, 1, 96), Math.Max(offset ?? 0, 0)));
 });
 
-app.MapGet("/api/search/advanced", async (string? q, long? actorId, long? tagId, bool? favorite, bool? watched, double? ratingMin,
+app.MapGet("/api/search/advanced", async (string? q, long? actorId, long? tagId, long? directorId, long? movieTagId, long? customTagId, long? seriesId, bool? favorite, bool? watched, double? ratingMin,
     string? metadata, string? fileStatus, string? metadataStatus, string? ratingFilter, long? libraryId, string? sort, int? limit, int? offset) => File.Exists(databasePath)
-    ? Results.Ok(await ProductReader.AdvancedSearchAsync(databasePath, bridgeUrl, q ?? "", actorId, tagId, favorite,
+    ? Results.Ok(await ProductReader.AdvancedSearchAsync(databasePath, bridgeUrl, q ?? "", actorId, tagId, directorId, movieTagId, customTagId, seriesId, favorite,
         watched, Math.Clamp(ratingMin ?? 0, 0, 5), ratingFilter ?? "all", metadata ?? "all", fileStatus ?? "all", metadataStatus ?? "all", libraryId, sort ?? "newest",
         Math.Clamp(limit ?? 48, 1, 96), Math.Max(offset ?? 0, 0)))
     : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));

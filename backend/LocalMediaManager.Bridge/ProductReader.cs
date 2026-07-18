@@ -43,6 +43,17 @@ public sealed record MovieDetailDto(long Id, string? Code, string? Title, string
 public sealed record EntityCardDto(long Id, string Name, long MovieCount, string? ImageUrl);
 public sealed record ActorDetailDto(long Id, string Name, string? Alias, int? Gender, string? BirthDate, string? Description);
 public sealed record EntityPageDto(IReadOnlyList<EntityCardDto> Items, long Total, int Limit, int Offset);
+internal sealed record EntityConfig(string Table, string Relation, string Key, string EntityCondition, Func<long, string?> ImageUrl)
+{
+    public static EntityConfig? For(string type, string bridgeUrl) => type.ToLowerInvariant() switch {
+        "actors" => new("Actors", "MovieActors", "ActorId", "", id => $"{bridgeUrl}/api/actors/{id}/image"),
+        "directors" => new("Directors", "MovieDirectors", "DirectorId", "", _ => null),
+        "tags" or "custom-tags" => new("Tags", "MovieTags", "TagId", ProductReader.CustomTagSourceCondition("e"), _ => null),
+        "movie-tags" => new("Tags", "MovieTags", "TagId", ProductReader.MovieTagSourceCondition("e"), _ => null),
+        "series" => new("Series", "MovieSeries", "SeriesId", "", _ => null),
+        _ => null,
+    };
+}
 public sealed record MediaPageDto(IReadOnlyList<MediaCardDto> Items, long Total, int Limit, int Offset);
 public sealed record MetadataOverviewDto(long TotalMovies, long ScrapedMovies, long CompleteMovies, long PendingMovies, long UnscrapedMovies,
     long MissingTitle, long MissingCover, long MissingFanart, long MissingPreview, long MissingActors, long MissingTags,
@@ -53,7 +64,6 @@ public sealed record NeighborsDto(long? PreviousId, long? NextId);
 public sealed record DuplicateMovieDto(long MovieId, string Code, string Title, string FilePath, string? FileHash, string ImportedAt, string Recommendation);
 public sealed record DuplicateGroupDto(string Rule, string Key, long Count, IReadOnlyList<DuplicateMovieDto> Items);
 public sealed record DuplicateResultsDto(long TotalGroups, long TotalMovies, long CodeGroups, long PathGroups, long HashGroups, IReadOnlyList<DuplicateGroupDto> Groups);
-internal sealed record SearchCondition(string Query, bool? Favorite, bool? Watched, double? RatingMin, string? RatingFilter);
 
 public static class ProductReader
 {
@@ -224,22 +234,23 @@ public static class ProductReader
     public static async Task<EntityPageDto> ReadEntitiesPageAsync(string databasePath, string bridgeUrl,
         string entityType, string search, string sort, int limit, int offset)
     {
-        bool actors = entityType.Equals("actors", StringComparison.OrdinalIgnoreCase);
-        string table = actors ? "Actors" : "Tags";
-        string relation = actors ? "MovieActors" : "MovieTags";
-        string key = actors ? "ActorId" : "TagId";
+        EntityConfig? config = EntityConfig.For(entityType, bridgeUrl);
+        if (config is null) throw new ArgumentException($"Unsupported entity type: {entityType}", nameof(entityType));
         string like = $"%{EscapeLike(search.Trim())}%";
         string orderBy = sort.Equals("name", StringComparison.OrdinalIgnoreCase) ? "e.Name COLLATE NOCASE" : "MovieCount DESC,e.Name COLLATE NOCASE";
         await using var connection = await OpenAsync(databasePath);
+        if (!await TableExistsAsync(connection, config.Table) || !await TableExistsAsync(connection, config.Relation))
+            return new([], 0, limit, offset);
+        string entityCondition = string.IsNullOrWhiteSpace(config.EntityCondition) ? "" : $" AND {config.EntityCondition}";
         await using var count = connection.CreateCommand();
-        count.CommandText = $"SELECT COUNT(*) FROM {table} e WHERE $search='' OR e.Name LIKE $like ESCAPE '\\'";
+        count.CommandText = $"SELECT COUNT(*) FROM {config.Table} e WHERE ($search='' OR e.Name LIKE $like ESCAPE '\\'){entityCondition}";
         count.Parameters.AddWithValue("$search", search.Trim()); count.Parameters.AddWithValue("$like", like);
         long total = Convert.ToInt64(await count.ExecuteScalarAsync() ?? 0L);
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
             SELECT e.Id,e.Name,COUNT(DISTINCT r.MovieId) AS MovieCount
-              FROM {table} e LEFT JOIN {relation} r ON r.{key}=e.Id
-             WHERE $search='' OR e.Name LIKE $like ESCAPE '\'
+              FROM {config.Table} e LEFT JOIN {config.Relation} r ON r.{config.Key}=e.Id
+             WHERE ($search='' OR e.Name LIKE $like ESCAPE '\'){entityCondition}
              GROUP BY e.Id ORDER BY {orderBy} LIMIT $limit OFFSET $offset
             """;
         command.Parameters.AddWithValue("$search", search.Trim()); command.Parameters.AddWithValue("$like", like);
@@ -248,7 +259,7 @@ public static class ProductReader
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync()) {
             long id = reader.GetInt64(0);
-            items.Add(new(id, reader.GetString(1), reader.GetInt64(2), actors ? $"{bridgeUrl}/api/actors/{id}/image" : null));
+            items.Add(new(id, reader.GetString(1), reader.GetInt64(2), config.ImageUrl(id)));
         }
         return new(items, total, limit, offset);
     }
@@ -256,11 +267,14 @@ public static class ProductReader
     public static async Task<MediaPageDto> ReadEntityMoviesAsync(string databasePath, string bridgeUrl,
         string entityType, long entityId, int limit, int offset)
     {
-        bool actors = entityType.Equals("actors", StringComparison.OrdinalIgnoreCase);
-        string relation = actors ? "MovieActors" : "MovieTags";
-        string key = actors ? "ActorId" : "TagId";
+        EntityConfig? config = EntityConfig.For(entityType, bridgeUrl);
+        if (config is null) throw new ArgumentException($"Unsupported entity type: {entityType}", nameof(entityType));
+        await using (var connection = await OpenAsync(databasePath))
+            if (!await TableExistsAsync(connection, config.Table) || !await TableExistsAsync(connection, config.Relation))
+                return new([], 0, limit, offset);
+        string extra = string.IsNullOrWhiteSpace(config.EntityCondition) ? "" : $" AND EXISTS(SELECT 1 FROM {config.Table} e WHERE e.Id=er.{config.Key} AND {config.EntityCondition})";
         return await ReadFilteredCardsAsync(databasePath, bridgeUrl,
-            $"EXISTS(SELECT 1 FROM {relation} er WHERE er.MovieId=m.Id AND er.{key}=$entity)",
+            $"EXISTS(SELECT 1 FROM {config.Relation} er WHERE er.MovieId=m.Id AND er.{config.Key}=$entity{extra})",
             [("$entity", entityId)], "m.ImportedAt DESC,m.Id DESC", limit, offset);
     }
 
@@ -288,27 +302,45 @@ public static class ProductReader
     }
 
     public static async Task<MediaPageDto> AdvancedSearchAsync(string databasePath, string bridgeUrl,
-        string query, long? actorId, long? tagId, bool? favorite, bool? watched, double ratingMin, string ratingFilter, string metadata,
+        string query, long? actorId, long? tagId, long? directorId, long? movieTagId, long? customTagId, long? seriesId, bool? favorite, bool? watched, double ratingMin, string ratingFilter, string metadata,
         string fileStatus, string metadataStatus, long? libraryId, string sort, int limit, int offset)
     {
         var conditions = new List<string>(); var parameters = new List<(string,object)>();
-        var parsed = ParseSearchCondition(query);
-        string trimmed = parsed.Query;
+        var parsed = SearchQueryParser.Parse(query);
         favorite ??= parsed.Favorite;
         watched ??= parsed.Watched;
-        ratingMin = Math.Clamp(Math.Max(ratingMin, parsed.RatingMin ?? 0), 0, 5);
-        ratingFilter = string.IsNullOrWhiteSpace(parsed.RatingFilter) ? ratingFilter : parsed.RatingFilter;
         bool hasDirectors = await TableExistsAsync(databasePath, "Directors") && await TableExistsAsync(databasePath, "MovieDirectors");
-        if (trimmed.Length > 0) {
-            string directorCondition = hasDirectors ? """ OR EXISTS(SELECT 1 FROM MovieDirectors md JOIN Directors d ON d.Id=md.DirectorId WHERE md.MovieId=m.Id AND d.Name LIKE $like ESCAPE '\')""" : "";
-            conditions.Add($"""(m.Code LIKE $like ESCAPE '\' OR m.Title LIKE $like ESCAPE '\' OR m.OriginalTitle LIKE $like ESCAPE '\' OR f.FilePath LIKE $like ESCAPE '\' OR f.FileName LIKE $like ESCAPE '\' OR EXISTS(SELECT 1 FROM MovieActors ma JOIN Actors a ON a.Id=ma.ActorId WHERE ma.MovieId=m.Id AND a.Name LIKE $like ESCAPE '\'){directorCondition} OR EXISTS(SELECT 1 FROM MovieTags mt JOIN Tags t ON t.Id=mt.TagId WHERE mt.MovieId=m.Id AND t.Name LIKE $like ESCAPE '\') OR EXISTS(SELECT 1 FROM MovieTags mt JOIN Tags t ON t.Id=mt.TagId WHERE mt.MovieId=m.Id AND t.Source='User' AND t.Name LIKE $like ESCAPE '\') OR EXISTS(SELECT 1 FROM MovieStudios ms JOIN Studios st ON st.Id=ms.StudioId WHERE ms.MovieId=m.Id AND st.Name LIKE $like ESCAPE '\') OR EXISTS(SELECT 1 FROM MovieSeries mse JOIN Series se ON se.Id=mse.SeriesId WHERE mse.MovieId=m.Id AND se.Name LIKE $like ESCAPE '\'))""");
-            parameters.Add(("$like", $"%{EscapeLike(trimmed)}%"));
-        }
+        int index = 0;
+        foreach (string keyword in parsed.Keywords)
+            AddKeywordCondition(conditions, parameters, keyword, hasDirectors, ref index);
+        foreach (string value in parsed.Actors)
+            AddEntityNameCondition(conditions, parameters, "MovieActors", "Actors", "ActorId", value, ref index);
+        if (hasDirectors)
+            foreach (string value in parsed.Directors)
+                AddEntityNameCondition(conditions, parameters, "MovieDirectors", "Directors", "DirectorId", value, ref index);
+        else if (parsed.Directors.Count > 0)
+            conditions.Add("0=1");
+        foreach (string value in parsed.Tags)
+            AddEntityNameCondition(conditions, parameters, "MovieTags", "Tags", "TagId", value, ref index, MovieTagSourceCondition("t"));
+        foreach (string value in parsed.CustomTags)
+            AddEntityNameCondition(conditions, parameters, "MovieTags", "Tags", "TagId", value, ref index, CustomTagSourceCondition("t"));
+        foreach (string value in parsed.Series)
+            AddEntityNameCondition(conditions, parameters, "MovieSeries", "Series", "SeriesId", value, ref index);
+        foreach (string value in parsed.Studios)
+            AddEntityNameCondition(conditions, parameters, "MovieStudios", "Studios", "StudioId", value, ref index);
+        foreach (string value in parsed.Libraries)
+            AddLibraryNameCondition(conditions, parameters, value, ref index);
         if (actorId.HasValue) { conditions.Add("EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id AND ma.ActorId=$actor)"); parameters.Add(("$actor", actorId.Value)); }
-        if (tagId.HasValue) { conditions.Add("EXISTS(SELECT 1 FROM MovieTags mt WHERE mt.MovieId=m.Id AND mt.TagId=$tag)"); parameters.Add(("$tag", tagId.Value)); }
+        if (hasDirectors && directorId.HasValue) { conditions.Add("EXISTS(SELECT 1 FROM MovieDirectors md WHERE md.MovieId=m.Id AND md.DirectorId=$director)"); parameters.Add(("$director", directorId.Value)); }
+        else if (!hasDirectors && directorId.HasValue) conditions.Add("0=1");
+        if (tagId.HasValue) customTagId ??= tagId;
+        if (customTagId.HasValue) { conditions.Add($"EXISTS(SELECT 1 FROM MovieTags mt JOIN Tags t ON t.Id=mt.TagId WHERE mt.MovieId=m.Id AND mt.TagId=$customTag AND {CustomTagSourceCondition("t")})"); parameters.Add(("$customTag", customTagId.Value)); }
+        if (movieTagId.HasValue) { conditions.Add($"EXISTS(SELECT 1 FROM MovieTags mt JOIN Tags t ON t.Id=mt.TagId WHERE mt.MovieId=m.Id AND mt.TagId=$movieTag AND {MovieTagSourceCondition("t")})"); parameters.Add(("$movieTag", movieTagId.Value)); }
+        if (seriesId.HasValue) { conditions.Add("EXISTS(SELECT 1 FROM MovieSeries mse WHERE mse.MovieId=m.Id AND mse.SeriesId=$series)"); parameters.Add(("$series", seriesId.Value)); }
         if (favorite.HasValue) { conditions.Add("COALESCE(s.IsFavorite,0)=$favorite"); parameters.Add(("$favorite", favorite.Value ? 1 : 0)); }
         if (watched.HasValue) conditions.Add(watched.Value ? "COALESCE(s.PlayCount,0)>0" : "COALESCE(s.PlayCount,0)=0");
-        AddRatingCondition(conditions, parameters, ratingFilter, ratingMin);
+        AddRatingCondition(conditions, parameters, parsed.Rating, parsed.Unrated, ratingFilter, ratingMin);
+        AddYearCondition(conditions, parameters, parsed.Year);
         if (metadata == "complete") conditions.Add("m.IsScraped=1"); else if (metadata == "missing") conditions.Add("m.IsScraped=0");
         AddMetadataStatusCondition(conditions, metadataStatus, hasDirectors);
         if (fileStatus == "missing") conditions.Add("f.ExistsState='Missing'"); else if (fileStatus == "available") conditions.Add("f.ExistsState<>'Missing'");
@@ -317,29 +349,40 @@ public static class ProductReader
         return await ReadFilteredCardsAsync(databasePath, bridgeUrl, conditions.Count == 0 ? "1=1" : string.Join(" AND ", conditions), parameters, order, limit, offset);
     }
 
-    private static SearchCondition ParseSearchCondition(string query)
+    private static void AddKeywordCondition(List<string> conditions, List<(string, object)> parameters, string keyword, bool hasDirectors, ref int index)
     {
-        bool? favorite = null;
-        bool? watched = null;
-        double? ratingMin = null;
-        string? ratingFilter = null;
-        var terms = new List<string>();
-        foreach (string token in query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) {
-            string normalized = token.Trim();
-            string lower = normalized.ToLowerInvariant();
-            if (normalized is "收藏" or "已收藏" || lower is "favorite" or "fav") { favorite = true; continue; }
-            if (normalized is "已观看" or "看过" or "已播放" || lower is "watched" or "played") { watched = true; continue; }
-            if (normalized is "未评分" || lower is "unrated") { ratingFilter = "unrated"; continue; }
-            if (TryParseRatingCondition(normalized, out double rating)) { ratingMin = rating; continue; }
-            terms.Add(token);
-        }
-        return new(string.Join(' ', terms), favorite, watched, ratingMin, ratingFilter);
+        string likeName = NextName("like", ref index);
+        string codeName = NextName("code", ref index);
+        string directorCondition = hasDirectors ? $""" OR EXISTS(SELECT 1 FROM MovieDirectors md JOIN Directors d ON d.Id=md.DirectorId WHERE md.MovieId=m.Id AND d.Name LIKE {likeName} ESCAPE '\')""" : "";
+        conditions.Add($"""(m.Code LIKE {likeName} ESCAPE '\' OR {NormalizedCodeSql("m.Code")} LIKE {codeName} ESCAPE '\' OR m.Title LIKE {likeName} ESCAPE '\' OR m.OriginalTitle LIKE {likeName} ESCAPE '\' OR m.Description LIKE {likeName} ESCAPE '\' OR f.FilePath LIKE {likeName} ESCAPE '\' OR f.FileName LIKE {likeName} ESCAPE '\' OR EXISTS(SELECT 1 FROM MovieActors ma JOIN Actors a ON a.Id=ma.ActorId WHERE ma.MovieId=m.Id AND a.Name LIKE {likeName} ESCAPE '\'){directorCondition} OR EXISTS(SELECT 1 FROM MovieTags mt JOIN Tags t ON t.Id=mt.TagId WHERE mt.MovieId=m.Id AND t.Name LIKE {likeName} ESCAPE '\') OR EXISTS(SELECT 1 FROM MovieGenres mg JOIN Genres g ON g.Id=mg.GenreId WHERE mg.MovieId=m.Id AND g.Name LIKE {likeName} ESCAPE '\') OR EXISTS(SELECT 1 FROM MovieStudios ms JOIN Studios st ON st.Id=ms.StudioId WHERE ms.MovieId=m.Id AND st.Name LIKE {likeName} ESCAPE '\') OR EXISTS(SELECT 1 FROM MovieSeries mse JOIN Series se ON se.Id=mse.SeriesId WHERE mse.MovieId=m.Id AND se.Name LIKE {likeName} ESCAPE '\') OR EXISTS(SELECT 1 FROM MediaFiles lf JOIN Libraries l ON l.Id=lf.LibraryId WHERE lf.MovieId=m.Id AND l.Name LIKE {likeName} ESCAPE '\'))""");
+        parameters.Add((likeName, $"%{EscapeLike(keyword)}%"));
+        parameters.Add((codeName, $"%{EscapeLike(NormalizeCode(keyword))}%"));
     }
 
-    private static void AddRatingCondition(List<string> conditions, List<(string, object)> parameters, string ratingFilter, double ratingMin)
+    private static void AddEntityNameCondition(List<string> conditions, List<(string, object)> parameters, string relation, string table, string key, string value, ref int index, string? extra = null)
+    {
+        string name = NextName("entity", ref index);
+        string extraCondition = string.IsNullOrWhiteSpace(extra) ? "" : $" AND {extra}";
+        conditions.Add($"""EXISTS(SELECT 1 FROM {relation} r JOIN {table} t ON t.Id=r.{key} WHERE r.MovieId=m.Id AND t.Name LIKE {name} ESCAPE '\'{extraCondition})""");
+        parameters.Add((name, $"%{EscapeLike(value)}%"));
+    }
+
+    internal static string CustomTagSourceCondition(string alias) => $"COALESCE({alias}.Source,'User') IN ('User','LegacyStamp')";
+
+    internal static string MovieTagSourceCondition(string alias) => $"COALESCE({alias}.Source,'User') NOT IN ('User','LegacyStamp')";
+
+    private static void AddLibraryNameCondition(List<string> conditions, List<(string, object)> parameters, string value, ref int index)
+    {
+        string name = NextName("libraryName", ref index);
+        conditions.Add($"""EXISTS(SELECT 1 FROM MediaFiles lf JOIN Libraries l ON l.Id=lf.LibraryId WHERE lf.MovieId=m.Id AND l.Name LIKE {name} ESCAPE '\')""");
+        parameters.Add((name, $"%{EscapeLike(value)}%"));
+    }
+
+    private static void AddRatingCondition(List<string> conditions, List<(string, object)> parameters,
+        NumericSearchCondition? parsedRating, bool parsedUnrated, string ratingFilter, double ratingMin)
     {
         string normalized = ratingFilter.Trim().ToLowerInvariant();
-        if (normalized is "unrated") {
+        if (parsedUnrated || normalized is "unrated") {
             conditions.Add("COALESCE(s.HasUserRating,0)=0");
             return;
         }
@@ -351,22 +394,37 @@ public static class ProductReader
             if (stars < 5) parameters.Add(("$nextRating", (double)(stars + 1)));
             return;
         }
+        if (parsedRating is not null) {
+            conditions.Add($"COALESCE(s.HasUserRating,0)=1 AND COALESCE(s.UserRating,0){ComparisonSql(parsedRating.Comparison)}$rating");
+            parameters.Add(("$rating", Math.Clamp(parsedRating.Value, 0, 5)));
+            return;
+        }
         if (ratingMin > 0) {
             conditions.Add("COALESCE(s.UserRating,0)>=$rating");
             parameters.Add(("$rating", ratingMin));
         }
     }
 
-    private static bool TryParseRatingCondition(string token, out double rating)
+    private static void AddYearCondition(List<string> conditions, List<(string, object)> parameters, YearSearchCondition? year)
     {
-        rating = 0;
-        string normalized = token.Trim().Replace("＞", ">").Replace("＝", "=");
-        string prefix = normalized.StartsWith("评分>=", StringComparison.OrdinalIgnoreCase) ? "评分>=" :
-            normalized.StartsWith("rating>=", StringComparison.OrdinalIgnoreCase) ? "rating>=" : "";
-        if (prefix.Length == 0) return false;
-        return double.TryParse(normalized[prefix.Length..], System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out rating);
+        if (year is null) return;
+        string expression = "CAST(substr(m.ReleaseDate,1,4) AS INTEGER)";
+        conditions.Add($"trim(COALESCE(m.ReleaseDate,''))<>'' AND {expression}{ComparisonSql(year.Comparison)}$year");
+        parameters.Add(("$year", year.Value));
     }
+
+    private static string ComparisonSql(SearchComparison comparison) => comparison switch
+    {
+        SearchComparison.GreaterThan => ">",
+        SearchComparison.GreaterThanOrEqual => ">=",
+        SearchComparison.LessThan => "<",
+        SearchComparison.LessThanOrEqual => "<=",
+        _ => "=",
+    };
+
+    private static string NextName(string prefix, ref int index) => "$" + prefix + (++index);
+    private static string NormalizeCode(string value) => value.Replace("-", "", StringComparison.Ordinal).Replace("_", "", StringComparison.Ordinal).Replace(" ", "", StringComparison.Ordinal).ToLowerInvariant();
+    private static string NormalizedCodeSql(string expression) => $"lower(replace(replace(replace(COALESCE({expression},''),'-',''),'_',''),' ',''))";
 
     public static async Task<MetadataOverviewDto> ReadMetadataOverviewAsync(string databasePath)
     {
@@ -583,7 +641,7 @@ public static class ProductReader
                    COALESCE(s.UserRating,0),COALESCE(s.IsFavorite,0),COALESCE(m.ReleaseDate,''),COALESCE(m.ImportedAt,m.CreatedAt,''),EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id),
                    {metadataColumns}
               FROM Movies m LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video' LEFT JOIN UserMovieState s ON s.MovieId=m.Id
-             WHERE {condition} ORDER BY {orderBy} LIMIT $limit OFFSET $offset
+             WHERE {condition} GROUP BY m.Id ORDER BY {orderBy} LIMIT $limit OFFSET $offset
             """;
         foreach (var parameter in parameters) command.Parameters.AddWithValue(parameter.Name, parameter.Value);
         command.Parameters.AddWithValue("$limit", limit); command.Parameters.AddWithValue("$offset", offset);
