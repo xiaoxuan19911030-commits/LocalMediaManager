@@ -26,6 +26,8 @@
 
 ### Changed
 
+- Organizer UI Completion: `/organizer` now has a left Organizer Tools rail, a duplicate review surface with poster/file metadata/true reasons/non-binding keep suggestions, and a MovieWall-based Batch Organizer action bar. Batch move, rename, and delete remain visible but disabled placeholders; this sprint does not execute Safe Delete or real file changes.
+
 - 左侧工具区将“查重结果”合并为“整理工具”；旧 `/duplicates` 路由仅作为兼容重定向保留。
 - 影片墙卡片网格改为基于显示偏好的响应式 CSS Grid，不写死列数；列表视图不受海报方向和大小设置影响。
 - 设置中心「外观」分区增加可视化影片墙显示选项卡，参考现有外观配置交互，不新增图片生成或资源来源设置。

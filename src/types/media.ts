@@ -260,6 +260,17 @@ export interface DuplicateMovie {
   fileHash?: string
   importedAt: string
   recommendation: string
+  recommendationReasons: string[]
+  fileName: string
+  fileSize: number
+  resolutionWidth: number
+  resolutionHeight: number
+  favorite: boolean
+  userRating: number
+  userRatingSet: boolean
+  libraryName: string
+  sourceType: string
+  metadataScore: number
 }
 export interface DuplicateGroup {
   rule: 'code' | 'path' | 'hash'

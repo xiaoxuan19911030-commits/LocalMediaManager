@@ -65,7 +65,9 @@ public sealed record MetadataOverviewDto(long TotalMovies, long ScrapedMovies, l
 public sealed record DiagnosticItemDto(string Severity, string Code, string Title, string Detail, long Count);
 public sealed record DiagnosticsDto(string Integrity, long ForeignKeyErrors, IReadOnlyList<DiagnosticItemDto> Items);
 public sealed record NeighborsDto(long? PreviousId, long? NextId);
-public sealed record DuplicateMovieDto(long MovieId, string Code, string Title, string FilePath, string? FileHash, string ImportedAt, string Recommendation);
+public sealed record DuplicateMovieDto(long MovieId, string Code, string Title, string FilePath, string? FileHash, string ImportedAt,
+    string Recommendation, IReadOnlyList<string> RecommendationReasons, string FileName, long FileSize, int ResolutionWidth,
+    int ResolutionHeight, bool Favorite, double UserRating, bool UserRatingSet, string LibraryName, string SourceType, int MetadataScore);
 public sealed record DuplicateGroupDto(string Rule, string Key, long Count, IReadOnlyList<DuplicateMovieDto> Items);
 public sealed record DuplicateResultsDto(long TotalGroups, long TotalMovies, long CodeGroups, long PathGroups, long HashGroups, IReadOnlyList<DuplicateGroupDto> Groups);
 
@@ -556,9 +558,18 @@ public static class ProductReader
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
             SELECT m.Id,COALESCE(m.Code,''),COALESCE(m.Title,''),COALESCE(f.FilePath,''),f.FileHash,COALESCE(m.ImportedAt,m.CreatedAt,''),
-                   COALESCE(s.IsFavorite,0),COALESCE(s.UserRating,0),COALESCE(f.FileSize,0),COALESCE(s.PlayCount,0),COALESCE(s.LastPlayedAt,'')
+                   COALESCE(s.IsFavorite,0),COALESCE(s.UserRating,0),COALESCE(f.FileSize,0),COALESCE(s.PlayCount,0),COALESCE(s.LastPlayedAt,''),
+                   COALESCE(f.FileName,''),COALESCE(f.ResolutionWidth,0),COALESCE(f.ResolutionHeight,0),COALESCE(s.HasUserRating,0),
+                   COALESCE(l.Name,f.SourceType,''),COALESCE(f.SourceType,''),
+                   (CASE WHEN trim(COALESCE(m.Code,''))<>'' THEN 1 ELSE 0 END+
+                    CASE WHEN trim(COALESCE(m.Title,''))<>'' THEN 1 ELSE 0 END+
+                    CASE WHEN trim(COALESCE(m.ReleaseDate,''))<>'' THEN 1 ELSE 0 END+
+                    CASE WHEN trim(COALESCE(m.Description,''))<>'' THEN 1 ELSE 0 END+
+                    CASE WHEN EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id) THEN 1 ELSE 0 END+
+                    CASE WHEN EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id) THEN 1 ELSE 0 END) AS MetadataScore
               FROM Movies m
               LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND (f.IsPrimary=1 OR $rule<>'code')
+              LEFT JOIN Libraries l ON l.Id=f.LibraryId
               LEFT JOIN UserMovieState s ON s.MovieId=m.Id
              WHERE {condition}
              ORDER BY m.Code COLLATE NOCASE,m.Id,f.Id
@@ -568,19 +579,47 @@ public static class ProductReader
         var items = new List<DuplicateMovieDto>();
         var seen = new HashSet<long>();
         await using var reader = await command.ExecuteReaderAsync();
-        var candidates = new List<(DuplicateMovieDto Item, long Favorite, double Rating, long Size, long Plays, string LastPlayed)>();
+        var candidates = new List<(DuplicateMovieDto Item, long Favorite, double Rating, long Size, long Plays, string LastPlayed, int Pixels, int MetadataScore)>();
         while (await reader.ReadAsync()) {
             long id = reader.GetInt64(0);
             if (!seen.Add(id)) continue;
-            candidates.Add((new(id, reader.GetString(1), reader.GetString(2), reader.GetString(3), Text(reader, 4), reader.GetString(5), "建议删除"),
-                reader.GetInt64(6), reader.GetDouble(7), reader.GetInt64(8), reader.GetInt64(9), reader.GetString(10)));
+            int width = reader.GetInt32(12);
+            int height = reader.GetInt32(13);
+            int metadataScore = reader.GetInt32(17);
+            candidates.Add((new(id, reader.GetString(1), reader.GetString(2), reader.GetString(3), Text(reader, 4), reader.GetString(5),
+                    "待选择", Array.Empty<string>(), reader.GetString(11), reader.GetInt64(8), width, height, reader.GetInt64(6)==1,
+                    reader.GetDouble(7), reader.GetInt64(14)==1, reader.GetString(15), reader.GetString(16), metadataScore),
+                reader.GetInt64(6), reader.GetDouble(7), reader.GetInt64(8), reader.GetInt64(9), reader.GetString(10), width * height, metadataScore));
         }
         long keepId = candidates.OrderByDescending(item => item.Favorite).ThenByDescending(item => item.Rating)
-            .ThenByDescending(item => item.Size).ThenByDescending(item => item.Plays)
+            .ThenByDescending(item => item.Pixels).ThenByDescending(item => item.Size).ThenByDescending(item => item.MetadataScore).ThenByDescending(item => item.Plays)
             .ThenByDescending(item => item.LastPlayed, StringComparer.Ordinal).FirstOrDefault().Item?.MovieId ?? 0;
+        int maxPixels = candidates.Count == 0 ? 0 : candidates.Max(item => item.Pixels);
+        long maxSize = candidates.Count == 0 ? 0 : candidates.Max(item => item.Size);
+        int maxMetadata = candidates.Count == 0 ? 0 : candidates.Max(item => item.MetadataScore);
         foreach (var candidate in candidates)
-            items.Add(candidate.Item with { Recommendation = candidate.Item.MovieId == keepId ? "推荐保留" : "建议删除" });
+            items.Add(candidate.Item with {
+                Recommendation = candidate.Item.MovieId == keepId ? "建议保留" : "待选择",
+                RecommendationReasons = candidate.Item.MovieId == keepId
+                    ? DuplicateRecommendationReasons(candidate, maxPixels, maxSize, maxMetadata)
+                    : Array.Empty<string>()
+            });
         return items;
+    }
+
+    private static IReadOnlyList<string> DuplicateRecommendationReasons(
+        (DuplicateMovieDto Item, long Favorite, double Rating, long Size, long Plays, string LastPlayed, int Pixels, int MetadataScore) candidate,
+        int maxPixels,
+        long maxSize,
+        int maxMetadata)
+    {
+        var reasons = new List<string>();
+        if (candidate.Pixels > 0 && candidate.Pixels == maxPixels) reasons.Add("分辨率最高");
+        if (candidate.Size > 0 && candidate.Size == maxSize) reasons.Add("文件最大");
+        if (candidate.Favorite == 1) reasons.Add("收藏");
+        if (candidate.Item.UserRatingSet) reasons.Add("已评分");
+        if (candidate.MetadataScore > 0 && candidate.MetadataScore == maxMetadata) reasons.Add("元数据更完整");
+        return reasons.Count == 0 ? new[] { "排序优先" } : reasons;
     }
 
     public static async Task<MovieDetailDto?> ReadMovieAsync(string databasePath, string bridgeUrl, long movieId)

@@ -197,6 +197,37 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DuplicateResultsExposeOrganizerDisplayFieldsAndKeepReasons()
+    {
+        await using var connection = new SqliteConnection($"Data Source={Database}");
+        await connection.OpenAsync();
+        await Execute(connection, "UPDATE Movies SET Code='DUP-001' WHERE Id IN (1,2)");
+        await Execute(connection, "UPDATE MediaFiles SET FileSize=4096,ResolutionWidth=1920,ResolutionHeight=1080 WHERE Id=1");
+        await Execute(connection, "UPDATE MediaFiles SET FileSize=1024,ResolutionWidth=1280,ResolutionHeight=720 WHERE Id=2");
+
+        DuplicateResultsDto result = await ProductReader.ReadDuplicateResultsAsync(Database, "code", 10);
+
+        DuplicateGroupDto group = Assert.Single(result.Groups);
+        Assert.Equal("code", group.Rule);
+        Assert.Equal(2, group.Count);
+        DuplicateMovieDto movie = Assert.Single(group.Items, item => item.MovieId == 1);
+        Assert.Equal("SONE-104.mp4", movie.FileName);
+        Assert.Equal(4096, movie.FileSize);
+        Assert.Equal(1920, movie.ResolutionWidth);
+        Assert.Equal(1080, movie.ResolutionHeight);
+        Assert.True(movie.Favorite);
+        Assert.True(movie.UserRatingSet);
+        Assert.False(string.IsNullOrWhiteSpace(movie.LibraryName));
+        Assert.Equal("Local", movie.SourceType);
+        Assert.Equal("建议保留", movie.Recommendation);
+        Assert.Contains("分辨率最高", movie.RecommendationReasons);
+        Assert.Contains("文件最大", movie.RecommendationReasons);
+        Assert.Contains("收藏", movie.RecommendationReasons);
+        Assert.Contains("已评分", movie.RecommendationReasons);
+        Assert.Contains("元数据更完整", movie.RecommendationReasons);
+    }
+
+    [Fact]
     public async Task RandomMovieUsesCurrentQueryScope()
     {
         await AssertRandomInSet(await RandomMovie(), [1, 2, 3]);
