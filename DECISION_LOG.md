@@ -46,6 +46,7 @@ docs/               → 证据、Release 验收、字段映射、矩阵
 | [DEC-011](#dec-011-smart-search-and-entity-taxonomy) | Smart Search 与实体标签语义边界 | Search / Entities | 0.5.0-18 | `5b68aa5` |
 | [DEC-012](#dec-012-moviewall-display-preferences-and-floating-pagination) | MovieWall 显示偏好与悬浮分页 | MovieWall / Settings | 0.5.0-20 | `bbed780` |
 | [DEC-013](#dec-013-metadata-ownership-and-user-data-boundary) | 元数据归属与用户数据边界 | Metadata / User Data | Repository Stabilization | `docs(product)` |
+| [DEC-014](#dec-014-image-setas-product-cancelled) | Image SetAs 产品取消 | Images / Feature Parity | Feature Parity | `docs(product)` |
 
 ---
 
@@ -1150,7 +1151,7 @@ LMM 不提供完整影片元数据手动编辑器，也不新增“显示标题�
 - 星级评分
 - 收藏
 - 自定义标签
-- 海报调整、人工裁切、后续图片 SetAs
+- 海报调整、人工裁切
 - 演员显示排序
 - 播放次数、最后播放时间、最近播放
 - 未来明确提出后才开发的用户备注
@@ -1185,6 +1186,50 @@ LMM 不提供完整影片元数据手动编辑器，也不新增“显示标题�
 
 ---
 
+### DEC-014: Image SetAs Product Cancelled
+
+| 字段 | 值 |
+|------|-----|
+| **Decision ID** | DEC-014 |
+| **模块** | Images / Feature Parity |
+| **Sprint** | Feature Parity |
+| **日期** | 2026-07-19 |
+
+#### 背景
+
+旧版 Jvedio 提供从图片列表手动“设为海报 / 缩略图 / 横幅”的操作。Local Media Manager 当前图片资源链路已经由 MetaTube 刮削、NFO 导入和元数据同步统一维护，并保留图片查看、放大、人工裁切、刷新和重新下载图片能力。继续迁移 SetAs 会增加一条手工图片主图维护路径，和当前元数据与图片资源归属边界重复。
+
+#### 最终方案
+
+Image SetAs 功能不再迁移，标记为 Product Cancelled。不开发以下入口：
+
+- 设为海报
+- 设为缩略图
+- 设为横幅
+
+保留并继续维护：
+
+- 图片查看
+- 图片放大
+- 人工裁切
+- 图片刷新
+- 刮削 / NFO / MetaTube 重新下载图片
+
+#### 以后必须遵守
+
+- 不新增 SetAs 海报、SetAs 缩略图或 SetAs 横幅菜单。
+- 不为 SetAs 修改数据库 Schema、图片字段或主图选择模型。
+- 图片资源错误时通过刷新、重新刮削、NFO 导入或 MetaTube 同步修复。
+- 人工裁切仍属于用户可维护的图片调整能力，不因取消 SetAs 而移除。
+
+#### 相关文档
+
+- `docs/ROADMAP.md`
+- `docs/CHANGELOG.md`
+- `docs/migration/FEATURE_PARITY_MATRIX.md`
+
+---
+
 ## PROJECT §21 Sprint History（摘要）
 
 | Sprint | 摘要 | 决策 |
@@ -1195,6 +1240,7 @@ LMM 不提供完整影片元数据手动编辑器，也不新增“显示标题�
 | 0.5.0-18 | Smart Search；实体标签语义区分；导航分类补齐 | DEC-011 |
 | 0.5.0-20 | MovieWall 显示偏好、响应式卡片尺寸和悬浮分页交互 | DEC-012 |
 | Repository Stabilization | 元数据归属规则：取消完整影片编辑器，只维护用户个人数据 | DEC-013 |
+| Feature Parity | Image SetAs 产品取消：图片资源由刮削、NFO 和 MetaTube 统一管理 | DEC-014 |
 
 ---
 

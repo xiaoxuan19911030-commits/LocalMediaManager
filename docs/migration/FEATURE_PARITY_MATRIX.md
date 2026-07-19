@@ -72,7 +72,7 @@
 | 12 | 播放历史 | P0 | 必须保留 | 已完整迁移 | #11；History DTO；位置/时间字段；清理规则 | 数据库写入 | 无 | 0.4.1 | 最近播放顺序、次数和位置与实际操作一致 | Bridge: POST play、GET history；Migration: N/A；Automated: playback transaction test；Smoke: 受控播放器写入后 history 回读；Commit `da9fcdf`；Acceptance: `0.4.1-VERIFICATION.md` |
 | 13 | 上一部/下一部 | P1 | 必须保留 | 已完整迁移 | 查询上下文 DTO；排序/筛选签名；详情缓存/预取 | 无写入 | 无 | 0.4.1 | 保持原筛选/排序连续切换；首尾行为明确 | Bridge: GET `/api/videos/{id}/neighbors`；Migration: N/A；Automated: SQL stable order covered by build/integration smoke；Smoke: 脱敏副本验证前后邻居与安装版按钮；Commit `da9fcdf`；Acceptance: `0.4.1-VERIFICATION.md` |
 | 14 | 外部播放器 | P1 | 必须保留 | 已部分迁移 | Bridge Player Service；Player Settings；路径校验；系统回退 | 低风险写入 | 自定义播放器真实启动与系统关联播放器退出诊断 | 0.5.0 | 系统/自定义播放器均可启动；无效路径错误可理解 | Bridge: GET/PUT `/api/settings/playback` + POST play；Migration: `0009_PlaybackSettings`；Automated: 设置持久化/路径校验；Installed smoke: 系统默认配置读取与页面入口；Commit `ecab877`；自定义 EXE 未做安装版真实播放，故保持部分迁移 |
-| 15 | 图片来源规则 | P1 | 必须保留 | 已部分迁移 | Image Service；Image DTO；Settings；poster/thumb/fanart 映射；人工锁定 | 数据库写入 | 三种用途的完整人工来源选择与安装版写入烟测 | 0.5.0 | 各页面使用正确资源；手选图片不被自动覆盖 | Bridge: 图片列表/原图/缩略图/锁定/导入接口；Migration: `0006_ImageAssetWorkflow`；Automated: 锁定保护、校验、原子替换；Real smoke: 用户图片哈希 5/5 保持；Commit `d98a6a5` |
+| 15 | 图片来源规则 | P1 | 必须保留 | 已部分迁移 | Image Service；Image DTO；Settings；poster/thumb/fanart 映射；人工锁定 | 数据库写入 | 多图画廊、缓存刷新与安装版图片资源验收 | 0.5.0 | 各页面使用正确资源；图片查看、放大、人工裁切、刷新和重新下载图片可用；Image SetAs 已按 DEC-014 产品取消 | Bridge: 图片列表/原图/缩略图/锁定/导入接口；Migration: `0006_ImageAssetWorkflow`；Automated: 锁定保护、校验、原子替换；Real smoke: 用户图片哈希 5/5 保持；Commit `d98a6a5` |
 | 16 | BigPic/ExtraPic | P1 | 必须保留 | 已部分迁移 | Path Resolver；Image Service；文件系统读取；旧目录配置 | 无写入 | 详情画廊的完整安装版交互验收 | 0.5.0 | 统一目录/相对目录样本均能显示 | Bridge: 旧目录导入与资源 DTO；Migration: `0006`；Automated: Poster/Thumb/Fanart/BigPic/ExtraPic/Actor 兼容导入；Commit `d98a6a5`；画廊交互仍待最终等价验收 |
 | 17 | 图片缓存 | P1 | 重要 | 已部分迁移 | Cache Service；Settings；文件系统；限额；Tasks | 文件系统写入 | 缓存限额、跨重启失效和安装版清理验收 | 0.5.0 | 离线可读；清理不删除源图；失败可恢复 | Bridge: cache inspect/clean/rebuild；Automated: 派生缓存清理不触碰源图与锁定图；Commit `d98a6a5`；尚缺完整限额/跨重启验收 |
 | 18 | 高清图片 | P1 | 重要 | 已部分迁移 | Image Service；缩略/原图 DTO；按需加载；缓存 | 无写入 | 多图画廊和弱网/大图验收 | 0.5.0 | 列表不拉原图；详情按需加载高清图 | Bridge: thumbnail/original 分层端点；Installed smoke: 影片墙缩略图与详情原图按页加载；Commit `d98a6a5`；弱网/多图压力测试仍待完成 |
@@ -101,6 +101,8 @@
 | 41 | 其他旧版能力 | P3 | 待确认 | 需要重构 | 持续源码审计；用户确认；Roadmap/TODO | 需要备份与回滚 | 逐项拆分并进入本矩阵 | 0.5.x | 每项建立独立依赖、风险和验收后实施 | 三份旧版审计文档；Commit `83c53b5`；不代表功能完成 |
 | 42 | 厂商分类浏览 | P0 | 必须保留 | 已完整迁移 | `Studios/MovieStudios`；实体列表；MovieWall 默认条件；媒体库范围 | 无写入 | 无 | 0.5.0 | 标签页切到厂商显示厂商与去重影片数；点击进入 MovieWall 后 `studioId` 与 Smart Search、FilterBar、媒体库范围 AND 组合；返回恢复标签页状态 | Bridge: `GET /api/entities/studios` + `GET /api/search/advanced?studioId=`；Migration: N/A（复用 `0001_InitialSchema` 的 `Studios/MovieStudios`）；Automated: `EntityListsReturnDistinctMovieCounts`、`StudioListCanBeScopedToLibraryAndSorted`、`CategoryFiltersComposeWithSearchAndFilterBar`；Smoke: 本 Sprint 安装版只读验证；Commit: 本 Sprint `feat(tags): add studio category browsing` |
 | 43 | MovieWall 随机影片 | P0 | 必须保留 | 已完整迁移 | MovieWall 统一状态；Advanced Search 条件构建；详情返回恢复 | 无写入 | 无 | 0.5.0 | 随机范围为页面默认条件 AND 媒体库范围 AND Smart Search AND FilterBar；空结果提示；点击进入详情后返回恢复 MovieWall | Bridge: `GET /api/search/random`；Migration: N/A；Automated: `RandomMovieUsesCurrentQueryScope`、`RandomMovieHandlesEmptyAndSingleResultScopes`；Smoke: 本 Sprint 安装版随机端点和启动验证；Commit: 本 Sprint `feat(moviewall): add scoped random movie action` |
+| 44 | Image SetAs（设为海报/缩略图/横幅） | P0 | Product Cancelled | Product Cancelled | DEC-014；MetaTube 刮削；NFO；元数据同步 | 不适用 | 不再迁移 | N/A | 图片资源统一由 MetaTube 刮削、NFO 和元数据同步维护；用户需要的图片查看、放大、人工裁切、刷新和重新下载图片继续保留 | Decision: DEC-014；Docs: Roadmap/Changelog/PROJECT 同步；Code: N/A（本决策不修改代码、不改数据库） |
+| 45 | 复制影片信息 | P0 | 必须保留 | 已完整迁移 | MovieDetail 当前详情模型；系统剪贴板；详情页更多菜单 | 无写入 | 无 | 0.5.0 | 详情页可复制标题、番号、演员、厂商、系列、发行日期、评分、文件路径、媒体库和简介；缺失字段有可读占位；不重新查询数据库 | Bridge: N/A（复用当前详情模型）；Migration: N/A；Automated: formatter + clipboard writer stubs cover complete/missing/long/multi-language/failure cases；Smoke: 本 Sprint 安装版详情页菜单验证；Commit: 本 Sprint `feat(details): add copy movie information` |
 
 ## 证据记录格式
 
@@ -156,7 +158,8 @@ Acceptance: 发布验证记录或独立验收文档
 - Decision: DEC-013 makes scraping, NFO import, and metadata sync the authoritative owners of movie metadata.
 - Product-cancelled legacy expectations: full Movie Editor / full-field movie edit, manual edits for title/original title/code/plot/release date/year/runtime/director/studio/series/movie tags/Genre, actor add/delete/search/manual profile edit, display title/custom title/second title, and standalone watched toggle.
 - Status override: these cancelled items move from "not migrated / pending" to "product decision cancelled / no longer developed" and do not count against retained Feature Parity.
-- Retained user-data features: rating, favorite, custom tags, actor display ordering, poster/image adjustment, manual crop, future image SetAs, playback count, last played time, recent playback, and future Human-approved user notes.
+- Retained user-data features: rating, favorite, custom tags, actor display ordering, poster/image adjustment, manual crop, playback count, last played time, recent playback, and future Human-approved user notes.
+- Image SetAs is product-cancelled by DEC-014: manual "set as poster / thumbnail / banner" actions are no longer migrated because image resources are managed by MetaTube scraping, NFO, and metadata sync.
 - Retained Feature Parity order: complete all retained legacy features first and update this matrix after each feature; run Legacy Cleanup only after retained Feature Parity reaches 100% and is stable; start Human-experience-driven product optimization only after Legacy Cleanup.
 - Do not mark custom tags, rating, favorite, actor display order, or image adjustment as cancelled.
 - Non-blocking empty data policy: ordinary empty data, low-use fields, and sparse optional metadata do not create standalone audit sprints. Continue migration unless there is data corruption risk, user-data loss risk, schema incompatibility, clear old/new mismatch, release build failure, installed startup failure, or unusable core functionality.
@@ -184,3 +187,19 @@ Acceptance: 发布验证记录或独立验收文档
 - Scope composition: page defaults, media-library range, Smart Search, and FilterBar use the same AND semantics as `/api/search/advanced`.
 - UI: MovieWall saves its existing detail-return state before navigating to the random movie detail; repeated clicks are disabled while the request is in flight; empty result shows “当前条件下没有可随机的影片”.
 - Automated: random tests cover all movies, media library, favorite, tag, series, studio, custom tag, Smart Search, FilterBar, combined defaults, empty result, and single-result scopes.
+
+## 2026-07-19 Image SetAs Product-Cancelled Evidence Note
+
+- Decision: DEC-014 cancels Image SetAs migration.
+- Cancelled actions: 设为海报, 设为缩略图, 设为横幅.
+- Reason: image resources are owned by MetaTube scraping, NFO import, and metadata sync; adding manual SetAs would create a duplicate image ownership path.
+- Retained image abilities: 图片查看, 图片放大, 人工裁切, 图片刷新, and 刮削 / NFO / MetaTube 重新下载图片.
+- Code/database: no code, database, schema, or image workflow change is required for this product decision.
+
+## 2026-07-19 Copy Movie Information Evidence Note
+
+- Scope: detail page more menu adds 复制影片信息.
+- Data source: current `MovieDetail` model already loaded by the page; no new Bridge query, DTO, database field, or schema migration.
+- Copied fields: 标题, 番号, 演员, 厂商, 系列, 发行日期, 评分, 文件, 媒体库, 简介.
+- Empty handling: missing fields use readable placeholders such as 未知, 未评分, or 暂无.
+- Clipboard: success shows 已复制影片信息; failure shows 复制失败.

@@ -130,32 +130,36 @@ Local Media Manager no longer plans a full Movie Editor or manual metadata editi
 - 显示标题、自定义标题、第二标题
 - 独立“已观看”开关
 
-Retained user-data features remain in scope: scoring, favorite, custom tags, actor display ordering, poster/image adjustment, manual crop, future image SetAs, playback history, and future explicit user notes.
+Retained user-data features remain in scope: scoring, favorite, custom tags, actor display ordering, poster/image adjustment, manual crop, playback history, and future explicit user notes. Image SetAs is product-cancelled because image resources are managed by MetaTube scraping, NFO, and metadata sync.
 
 ### Retained Feature Parity Priority
 
 **P0**
 
-1. 图片 SetAs
-2. 复制影片信息
+- 当前无待迁移项。
 
 **P1**
 
-3. 查重处理流程
-4. 批量整理入口
-5. 日志清理
+1. 查重处理流程
+2. 批量整理入口
+3. 日志清理
 
 **P2**
 
-6. 语言设置
-7. 托盘与关闭行为
-8. 快捷键管理
-9. 检查更新
+4. 语言设置
+5. 托盘与关闭行为
+6. 快捷键管理
+7. 检查更新
 
 ### Completed Retained Parity
 
 - 厂商分类浏览：`/tags` 横向工具栏接入 `Studios/MovieStudios`，并通过统一 MovieWall 的 `studioId` 默认条件进入厂商影片集合。
 - MovieWall 随机影片：所有 MovieWall 页面工具栏提供随机按钮，随机范围复用当前默认条件、Smart Search、FilterBar 和媒体库范围。
+- 复制影片信息：详情页更多菜单可将当前详情模型中的标题、番号、演员、厂商、系列、发行日期、评分、文件路径、媒体库和简介复制到系统剪贴板。
+
+### Product-Cancelled Parity
+
+- Image SetAs：不再迁移“设为海报 / 设为缩略图 / 设为横幅”。图片资源由 MetaTube 刮削、NFO 和元数据同步统一管理；保留图片查看、放大、人工裁切、刷新和重新下载图片。
 
 ### Fixed Development Order
 

@@ -2,6 +2,7 @@ import AccessTimeRoundedIcon from '@mui/icons-material/AccessTimeRounded'
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded'
 import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded'
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded'
+import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
 import ContentCutRoundedIcon from '@mui/icons-material/ContentCutRounded'
 import FavoriteRoundedIcon from '@mui/icons-material/FavoriteRounded'
 import FavoriteBorderRoundedIcon from '@mui/icons-material/FavoriteBorderRounded'
@@ -15,10 +16,11 @@ import VisibilityRoundedIcon from '@mui/icons-material/VisibilityRounded'
 import SyncRoundedIcon from '@mui/icons-material/SyncRounded'
 import LockRoundedIcon from '@mui/icons-material/LockRounded'
 import LockOpenRoundedIcon from '@mui/icons-material/LockOpenRounded'
+import MoreVertRoundedIcon from '@mui/icons-material/MoreVertRounded'
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
 import ZoomInRoundedIcon from '@mui/icons-material/ZoomInRounded'
 import ZoomOutRoundedIcon from '@mui/icons-material/ZoomOutRounded'
-import { Alert, Autocomplete, Box, Button, Card, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Divider, IconButton, Paper, Rating, Snackbar, Stack, TextField, Tooltip, Typography } from '@mui/material'
+import { Alert, Autocomplete, Box, Button, Card, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Divider, IconButton, ListItemIcon, Menu, MenuItem, Paper, Rating, Snackbar, Stack, TextField, Tooltip, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
@@ -28,6 +30,7 @@ import { SafeDeleteDialog } from '@/components/SafeDeleteDialog'
 import { SmartImage, clearImageMemoryCache } from '@/components/SmartImage'
 import { bridge } from '@/services/bridge'
 import type { ImageAsset, ImageCenterStatus, ImageDeletePreview, MovieDetail, NamedItem, NfoPreview, OrganizerPreview, SafeDeletePreview, SafeDeletePreviewCommand } from '@/types/media'
+import { copyMovieInformation } from '@/utils/movieCopyInfo'
 
 const formatDuration = (seconds: number) => {
   if (!seconds) return '时长未知'
@@ -78,6 +81,7 @@ export default function MovieDetailPage() {
   const [deleteCommand, setDeleteCommand] = useState<SafeDeletePreviewCommand>()
   const [nfoPreview, setNfoPreview] = useState<NfoPreview>(); const [nfoMode, setNfoMode] = useState<'import' | 'export'>('export')
   const [organizerOpen, setOrganizerOpen] = useState(false); const [organizerPreview, setOrganizerPreview] = useState<OrganizerPreview>(); const [organizerTemplate, setOrganizerTemplate] = useState('{Code}'); const [organizerDestination, setOrganizerDestination] = useState('')
+  const [moreAnchor, setMoreAnchor] = useState<HTMLElement | null>(null)
   const context = (location.state as { context?: { search?: string; sort?: string } } | null)?.context
   const loadMovie = (movieId: number) => Promise.all([bridge.movie(movieId).then(setMovie), bridge.movieImages(movieId).then(setImageAssets), bridge.movieImageStatus(movieId).then(setImageStatus)])
   useEffect(() => { const movieId = Number(id); if (!Number.isFinite(movieId)) { setError('无效影片编号'); return }
@@ -85,6 +89,11 @@ export default function MovieDetailPage() {
   useEffect(() => { if (!actorDialog) return; const timer = window.setTimeout(() => bridge.entities('actors', actorSearch, 'name', 48, 0).then((result) => setActorOptions([...selectedActors, ...result.items.filter((item) => !selectedActors.some((selected) => selected.id === item.id))])).catch((reason: Error) => setNotice(reason.message)), 200); return () => window.clearTimeout(timer) }, [actorDialog, actorSearch, selectedActors])
   const play = () => movie && bridge.play(movie.id).then(() => setNotice(`正在打开：${movie.code || movie.title}`)).catch((reason: Error) => setNotice(reason.message))
   const mutate = (action: Promise<unknown>) => { if (!movie) return; setBusy(true); action.then(() => loadMovie(movie.id)).then(() => setNotice('已保存')).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false)) }
+  const copyInfo = () => {
+    if (!movie) return
+    setMoreAnchor(null)
+    copyMovieInformation(movie, (value) => navigator.clipboard.writeText(value)).then(() => setNotice('已复制影片信息')).catch(() => setNotice('复制失败'))
+  }
   const openTags = () => { if (!movie) return; setSelectedTags(movie.tags ?? []); setTagSearch(''); setTagDialog(true); bridge.entities('tags', '', 'name', 96, 0).then((result) => setTagOptions(result.items)).catch((reason: Error) => setNotice(reason.message)) }
   const saveTags = () => { if (!movie) return; const current = new Set((movie.tags ?? []).map((item) => item.id)); const selected = new Set(selectedTags.map((item) => item.id)); mutate(bridge.updateMovieTags(movie.id, [...selected].filter((tag) => !current.has(tag)), [...current].filter((tag) => !selected.has(tag)))); setTagDialog(false) }
   const openActors = () => { if (!movie) return; setSelectedActors(movie.actors ?? []); setActorOptions(movie.actors ?? []); setActorDialog(true) }
@@ -157,7 +166,11 @@ export default function MovieDetailPage() {
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: 2 }}>
       <Tooltip title="返回"><IconButton onClick={() => navigate(-1)} sx={{ border: 1, borderColor: 'divider' }}><ArrowBackRoundedIcon/></IconButton></Tooltip>
       <Box><Typography variant="h5" sx={{ fontWeight: 850 }}>影片信息</Typography><Typography variant="body2" color="text.secondary">媒体、元数据与文件状态</Typography></Box>
+      <Box sx={{ ml: 'auto' }}><Tooltip title="更多"><span><IconButton disabled={!movie} onClick={(event) => setMoreAnchor(event.currentTarget)} sx={{ border: 1, borderColor: 'divider' }}><MoreVertRoundedIcon/></IconButton></span></Tooltip></Box>
     </Box>
+    <Menu anchorEl={moreAnchor} open={Boolean(moreAnchor)} onClose={() => setMoreAnchor(null)}>
+      <MenuItem disabled={!movie} onClick={copyInfo}><ListItemIcon><ContentCopyRoundedIcon fontSize="small"/></ListItemIcon>复制影片信息</MenuItem>
+    </Menu>
     {error && <Alert severity="error">{error}</Alert>}
     {!movie && !error ? <Box sx={{ minHeight: 420, display: 'grid', placeItems: 'center' }}><CircularProgress/></Box> : movie && <Stack spacing={2.25} sx={{ animation: 'detailIn .32s ease both', '@media (prefers-reduced-motion: reduce)': { animation: 'none' } }}>
       <Paper variant="outlined" sx={{ position: 'relative', overflow: 'hidden', borderRadius: 3.5, p: { xs: 2, md: 3 } }}>
