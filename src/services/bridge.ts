@@ -121,6 +121,7 @@ export const bridge = {
   pauseTask: (taskId: number) => request<TaskMutationResult>(`/api/tasks/${taskId}/pause`, { method: 'POST' }),
   resumeTask: (taskId: number) => request<TaskMutationResult>(`/api/tasks/${taskId}/resume`, { method: 'POST' }),
   cancelTask: (taskId: number) => request<TaskMutationResult>(`/api/tasks/${taskId}/cancel`, { method: 'POST' }),
+  cancelTasks: (taskIds: number[]) => request<{ count: number; message: string }>('/api/tasks/batch/cancel', { method: 'POST', body: JSON.stringify(taskIds) }),
   cancelSyncTasks: (taskIds: number[]) => request<{ count: number; message: string }>('/api/tasks/batch/cancel-sync', { method: 'POST', body: JSON.stringify(taskIds) }),
   retryTask: (taskId: number) => request<ScanLaunchResult>(`/api/tasks/${taskId}/retry`, { method: 'POST' }),
   deleteTask: (taskId: number) => request<TaskCleanupResult>(`/api/tasks/${taskId}`, { method: 'DELETE' }),

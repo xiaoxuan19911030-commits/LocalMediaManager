@@ -193,6 +193,18 @@ public static class ProductReader
             await using var libraryReader = await libraries.ExecuteReaderAsync();
             while (await libraryReader.ReadAsync()) libraryNames[libraryReader.GetInt64(0)] = libraryReader.GetString(1);
         }
+        var movieNames = new Dictionary<long, string>();
+        await using (var movies = connection.CreateCommand()) {
+            movies.CommandText = """
+                SELECT m.Id,
+                       COALESCE(NULLIF(trim(m.Code),''), NULLIF(trim(m.Title),''), NULLIF(trim(mf.FileName),''))
+                  FROM Movies m
+                  LEFT JOIN MediaFiles mf ON mf.MovieId=m.Id AND mf.IsPrimary=1 AND mf.MediaType='Video'
+                """;
+            await using var movieReader = await movies.ExecuteReaderAsync();
+            while (await movieReader.ReadAsync())
+                if (!movieReader.IsDBNull(1)) movieNames[movieReader.GetInt64(0)] = movieReader.GetString(1);
+        }
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT Id,TaskType,Status,Progress,TotalItems,CompletedItems,ErrorMessage,CreatedAt,StartedAt,CompletedAt,PayloadJson,Stage,Provider,RetryCount,CurrentMovieId,ResultSummary
@@ -211,9 +223,10 @@ public static class ProductReader
         while (await reader.ReadAsync()) {
             string type = reader.GetString(1);
             string? payload = Text(reader, 10);
-            tasks.Add(new(reader.GetInt64(0),type,reader.GetString(2),TaskName(type,payload,libraryNames),reader.GetDouble(3),
+            long? currentMovieId = reader.IsDBNull(14)?null:reader.GetInt64(14);
+            tasks.Add(new(reader.GetInt64(0),type,reader.GetString(2),TaskName(type,payload,libraryNames,movieNames,currentMovieId),reader.GetDouble(3),
                 reader.GetInt64(4),reader.GetInt64(5),Text(reader,6),reader.GetString(7),Text(reader,8),Text(reader,9),
-                Text(reader,11),Text(reader,12),reader.GetInt64(13),reader.IsDBNull(14)?null:reader.GetInt64(14),Text(reader,15)));
+                Text(reader,11),Text(reader,12),reader.GetInt64(13),currentMovieId,Text(reader,15)));
         }
         return tasks;
     }
@@ -234,15 +247,18 @@ public static class ProductReader
         return result;
     }
 
-    private static string TaskName(string type, string? payload, IReadOnlyDictionary<long, string> libraryNames)
+    private static string TaskName(string type, string? payload, IReadOnlyDictionary<long, string> libraryNames,
+        IReadOnlyDictionary<long, string> movieNames, long? currentMovieId)
     {
+        if (currentMovieId.HasValue && movieNames.TryGetValue(currentMovieId.Value, out string? currentMovie))
+            return currentMovie;
         if (!string.IsNullOrWhiteSpace(payload)) {
             try {
                 using var json = System.Text.Json.JsonDocument.Parse(payload);
                 if (json.RootElement.TryGetProperty("LibraryId", out var library) && library.TryGetInt64(out long libraryId))
-                    return libraryNames.GetValueOrDefault(libraryId, $"媒体库 #{libraryId}");
+                    return libraryNames.GetValueOrDefault(libraryId, "媒体库任务");
                 if (json.RootElement.TryGetProperty("MovieId", out var movie) && movie.TryGetInt64(out long movieId))
-                    return $"影片 #{movieId}";
+                    return movieNames.GetValueOrDefault(movieId, type);
             } catch (System.Text.Json.JsonException) { }
         }
         return type switch { "ActorRepair" => "演员关系修复", _ => type };

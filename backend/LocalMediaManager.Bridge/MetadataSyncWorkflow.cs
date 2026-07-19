@@ -254,7 +254,7 @@ public sealed class MetadataSyncExecutor(
         while (!stoppingToken.IsCancellationRequested) {
             try {
                 MetaTubeSettingsDto settings = await settingsService.ReadMetaTubeAsync();
-                long? taskId = settings.Enabled && settings.AutoExecute ? await ClaimAsync(stoppingToken) : null;
+                long? taskId = settings.Enabled ? await ClaimAsync(stoppingToken) : null;
                 if (taskId is null) { await Task.Delay(750, stoppingToken); continue; }
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 cancellations[taskId.Value] = linked;
@@ -434,7 +434,7 @@ public sealed class TaskCommandService(string databasePath, LibraryWorkflowServi
         string normalized = string.IsNullOrWhiteSpace(status) ? "terminal" : status.Trim();
         string[] statuses = normalized.ToLowerInvariant() switch {
             "terminal" => ["Completed", "CompletedWithErrors", "Failed", "Cancelled"],
-            "all-tasks" => [],
+            "all-tasks" => ["Completed", "CompletedWithErrors", "Failed", "Cancelled"],
             "completed" => ["Completed"],
             "failed" => ["Failed"],
             "cancelled" or "canceled" => ["Cancelled"],
@@ -442,20 +442,9 @@ public sealed class TaskCommandService(string databasePath, LibraryWorkflowServi
         };
         await using var connection = await OpenWriteAsync();
         await using var transaction = await connection.BeginTransactionAsync();
-        string condition;
-        (string, object?)[] parameters;
-        if (normalized.Equals("all-tasks", StringComparison.OrdinalIgnoreCase)) {
-            long active = await ScalarLongAsync(connection,
-                $"SELECT COUNT(*) FROM Tasks WHERE Status NOT IN ({string.Join(",", TerminalStatuses.Select((_, index) => $"$t{index}"))})",
-                transaction, TerminalStatuses.Select((value, index) => ($"$t{index}", (object?)value)).ToArray());
-            if (active > 0) throw new InvalidOperationException("仍有活动任务，不能清除全部任务。请先取消或等待任务结束。");
-            condition = "1=1";
-            parameters = [];
-        } else {
-            string placeholders = string.Join(",", statuses.Select((_, index) => $"$s{index}"));
-            condition = $"Status IN ({placeholders})";
-            parameters = statuses.Select((value, index) => ($"$s{index}", (object?)value)).ToArray();
-        }
+        string placeholders = string.Join(",", statuses.Select((_, index) => $"$s{index}"));
+        string condition = $"Status IN ({placeholders})";
+        (string, object?)[] parameters = statuses.Select((value, index) => ($"$s{index}", (object?)value)).ToArray();
         long count = await ScalarLongAsync(connection, $"SELECT COUNT(*) FROM Tasks WHERE {condition}", transaction, parameters);
         if (count > 0) {
             await ExecuteAsync(connection, $"DELETE FROM TaskLogs WHERE TaskId IN (SELECT Id FROM Tasks WHERE {condition})", transaction, parameters);
@@ -463,6 +452,18 @@ public sealed class TaskCommandService(string databasePath, LibraryWorkflowServi
         }
         await transaction.CommitAsync();
         return new(count, count == 0 ? "没有可清理的任务。" : $"已清理 {count} 个任务。");
+    }
+    public async Task<BatchTaskMutationResult> CancelBatchAsync(IReadOnlyList<long> ids) {
+        long[] values=ids.Distinct().Where(id=>id>0).ToArray();
+        if(values.Length is 0 or >500) throw new ArgumentException("请选择 1 到 500 个任务。");
+        int cancelled=0;
+        foreach(long id in values){
+            TaskSnapshot snapshot=await SnapshotAsync(id);
+            if(TerminalStatuses.Contains(snapshot.Status)) continue;
+            await CancelAsync(id);
+            cancelled++;
+        }
+        return new(cancelled,cancelled==0?"没有可取消的执行中任务。":$"已取消 {cancelled} 个任务。");
     }
     public async Task<BatchTaskMutationResult> CancelSyncBatchAsync(IReadOnlyList<long> ids) { long[] values=ids.Distinct().Where(id=>id>0).ToArray(); if(values.Length is 0 or >500) throw new ArgumentException("Select 1 to 500 sync tasks."); foreach(long id in values){if(await TypeAsync(id)!="Sync")throw new ArgumentException("Only sync tasks can be cancelled in batch."); await sync.CancelAsync(id);} return new(values.Length,$"Cancelled {values.Length} sync tasks."); }
     private async Task<string> TypeAsync(long id){await using var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=databasePath,Mode=SqliteOpenMode.ReadOnly}.ToString());await c.OpenAsync();await using var x=c.CreateCommand();x.CommandText="SELECT TaskType FROM Tasks WHERE Id=$id";x.Parameters.AddWithValue("$id",id);return(await x.ExecuteScalarAsync())?.ToString()??throw new KeyNotFoundException("任务不存在。");}

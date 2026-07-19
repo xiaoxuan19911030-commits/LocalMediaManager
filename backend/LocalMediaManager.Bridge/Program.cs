@@ -136,7 +136,7 @@ app.Use(async (context, next) => {
 app.MapGet("/health", () => Results.Ok(new {
     product = "Local Media Manager",
     abbreviation = "LMM",
-    version = "0.6.0",
+    version = "0.6.1",
     status = "ok",
     databaseAvailable = File.Exists(databasePath),
     databasePath,
@@ -219,6 +219,7 @@ app.MapPost("/api/tasks/{taskId:long}/cancel", async (long taskId, TaskCommandSe
 app.MapPost("/api/tasks/{taskId:long}/retry", async (long taskId, TaskCommandService service) => Results.Ok(await service.RetryAsync(taskId)));
 app.MapDelete("/api/tasks/{taskId:long}", async (long taskId, TaskCommandService service) => Results.Ok(await service.DeleteAsync(taskId)));
 app.MapPost("/api/tasks/cleanup", async (TaskCleanupCommand command, TaskCommandService service) => Results.Ok(await service.CleanupAsync(command.Status)));
+app.MapPost("/api/tasks/batch/cancel", async (IReadOnlyList<long> taskIds, TaskCommandService service) => Results.Ok(await service.CancelBatchAsync(taskIds)));
 app.MapPost("/api/tasks/batch/cancel-sync", async (IReadOnlyList<long> taskIds, TaskCommandService service) => Results.Ok(await service.CancelSyncBatchAsync(taskIds)));
 app.MapPost("/api/videos/{movieId:long}/sync", async (long movieId, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Manual")));
 app.MapPost("/api/videos/{movieId:long}/rescrape", async (long movieId, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Rescrape", overwrite: true)));

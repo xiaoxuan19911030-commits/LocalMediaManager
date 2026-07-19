@@ -42,7 +42,7 @@ public sealed class LegacyCompletionPart2Tests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CleanupAllTasksRequiresNoActiveTasks()
+    public async Task CleanupAllTasksDeletesOnlyTerminalTasks()
     {
         await using var connection = await Open();
         string at = DateTimeOffset.UtcNow.ToString("O");
@@ -50,13 +50,12 @@ public sealed class LegacyCompletionPart2Tests : IAsyncLifetime
         await Execute(connection, "INSERT INTO TaskLogs(TaskId,Level,Message,CreatedAt) VALUES(1,'Info','done',$at),(2,'Info','running',$at)", ("$at", at));
         var service = new TaskCommandService(Database, null!, null!, null!, null!, null!, null!);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CleanupAsync("all-tasks"));
-        await Execute(connection, "UPDATE Tasks SET Status='Cancelled' WHERE Id=2");
         TaskCleanupResult result = await service.CleanupAsync("all-tasks");
 
-        Assert.Equal(2, result.Count);
-        Assert.Equal(0, await Scalar(connection, "SELECT COUNT(*) FROM Tasks"));
-        Assert.Equal(0, await Scalar(connection, "SELECT COUNT(*) FROM TaskLogs"));
+        Assert.Equal(1, result.Count);
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM Tasks WHERE Status='Running'"));
+        Assert.Equal(0, await Scalar(connection, "SELECT COUNT(*) FROM TaskLogs WHERE TaskId=1"));
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM TaskLogs WHERE TaskId=2"));
     }
 
     [Fact]
@@ -73,6 +72,23 @@ public sealed class LegacyCompletionPart2Tests : IAsyncLifetime
         Assert.Equal(221, tasks.Count);
         Assert.Equal(221, tasks[0].Id);
         Assert.Equal("FetchingMetadata", tasks[0].Status);
+    }
+
+    [Fact]
+    public async Task TaskListUsesMovieCodeOrFileNameInsteadOfInternalIds()
+    {
+        await using var connection = await Open();
+        string at = DateTimeOffset.UtcNow.ToString("O");
+        await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt,ImportedAt) VALUES(1,'SONE-822','Some title',0,0,'pending','Test',$at,$at,$at),(2,'','',0,0,'pending','Test',$at,$at,$at)", ("$at", at));
+        await Execute(connection, "INSERT INTO MediaFiles(MovieId,FilePath,NormalizedPath,FileName,Extension,FileSize,MediaType,SourceType,IsPrimary,ExistsState,CreatedAt,UpdatedAt) VALUES(1,$path1,$path1,'SONE-822.mp4','.mp4',1,'Video','Test',1,'Present',$at,$at),(2,$path2,$path2,'START-497.mp4','.mp4',1,'Video','Test',1,'Present',$at,$at)", ("$path1", Path.Combine(root, "SONE-822.mp4")), ("$path2", Path.Combine(root, "START-497.mp4")), ("$at", at));
+        await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Stage,Provider,Progress,TotalItems,CompletedItems,PayloadJson,CreatedAt,UpdatedAt,CurrentMovieId) VALUES(1,'Sync','Pending','Pending','MetaTube',0,1,0,'{}',$at,$at,1),(2,'Sync','Pending','Pending','MetaTube',0,1,0,'{}',$at,$at,2),(3,'Sync','Pending','Pending','MetaTube',0,1,0,'{\"MovieId\":1}',$at,$at,NULL)", ("$at", at));
+
+        IReadOnlyList<TaskDto> tasks = await ProductReader.ReadTasksAsync(Database);
+
+        Assert.Contains(tasks, task => task.Id == 1 && task.Name == "SONE-822");
+        Assert.Contains(tasks, task => task.Id == 2 && task.Name == "START-497.mp4");
+        Assert.Contains(tasks, task => task.Id == 3 && task.Name == "SONE-822");
+        Assert.DoesNotContain(tasks, task => task.Name.Contains('#'));
     }
 
     [Fact]

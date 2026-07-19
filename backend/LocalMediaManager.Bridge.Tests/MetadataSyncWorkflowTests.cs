@@ -183,6 +183,55 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         Assert.Equal("Running", await Text(verify, "SELECT Status FROM Tasks WHERE Id=12"));
     }
 
+    [Fact]
+    public async Task BatchCancelCanCancelVisibleActiveTaskTypes()
+    {
+        await using (var connection = await Open()) {
+            await InsertMovie(connection, 1, "CANCEL-001");
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Stage,Provider,Progress,TotalItems,CompletedItems,CreatedAt,UpdatedAt,CurrentMovieId) VALUES(10,'Sync','Pending','Pending','MetaTube',0,1,0,$at,$at,1),(11,'Scan','Running','Running',NULL,20,1,0,$at,$at,NULL),(12,'Screenshot','Completed','Completed','FFmpeg',100,1,1,$at,$at,1)", ("$at", at));
+        }
+        var service = new TaskCommandService(Database, CreateLibraryService(), CreateExecutor(), null!, null!, CreateImageGenerationService(), null!);
+
+        BatchTaskMutationResult result = await service.CancelBatchAsync([10, 11, 12]);
+
+        Assert.Equal(2, result.Count);
+        await using SqliteConnection verify = await Open();
+        Assert.Equal(2, await Scalar(verify, "SELECT COUNT(*) FROM Tasks WHERE Status='Cancelled'"));
+        Assert.Equal("Completed", await Text(verify, "SELECT Status FROM Tasks WHERE Id=12"));
+    }
+
+    [Fact]
+    public async Task SyncWorkerClaimsPendingTasksEvenWhenLegacyAutoExecuteIsDisabled()
+    {
+        await using (var connection = await Open()) {
+            await InsertMovie(connection, 1, "AUTO-001");
+        }
+        MetadataProviderSettingsService settings = new(Database);
+        await settings.SaveMetaTubeAsync(new(true, "http://127.0.0.1:8080/", 30, false, false, false, true));
+        var factory = new FakeHttpClientFactory(request => {
+            string body = request.RequestUri!.AbsolutePath.Contains("search")
+                ? """{"data":[{"provider":"FANZA","id":"auto","number":"AUTO-001","title":"Auto"}]}"""
+                : """{"data":{"provider":"FANZA","id":"auto","number":"AUTO-001","title":"Auto title","summary":"Plot","runtime":60,"release_date":"2026-01-02","maker":"Maker","actors":[],"genres":[],"preview_images":[]}}""";
+            return new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+        });
+        var resolver = new MediaStoragePathResolver(Database, root);
+        var executor = new MetadataSyncExecutor(Database, resolver, settings, new MetaTubeProvider(factory),
+            new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database, resolver), new TaskLogService(Database));
+        MetadataSyncLaunchResult launch = await executor.EnqueueAsync(1, "Manual");
+
+        await executor.StartAsync(CancellationToken.None);
+        string? status = null;
+        for (int attempt = 0; attempt < 50 && status != "Completed"; attempt++) {
+            await Task.Delay(50);
+            await using SqliteConnection check = await Open();
+            status = await Text(check, $"SELECT Status FROM Tasks WHERE Id={launch.TaskId}");
+        }
+        await executor.StopAsync(CancellationToken.None);
+
+        Assert.Equal("Completed", status);
+    }
+
     public Task DisposeAsync() { try { Directory.Delete(root, true); } catch { } return Task.CompletedTask; }
     private MetadataSyncExecutor CreateExecutor()
     {
@@ -191,6 +240,12 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         var resolver = new MediaStoragePathResolver(Database, root);
         return new(Database, resolver, settings, new MetaTubeProvider(factory),
             new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database, resolver), new TaskLogService(Database));
+    }
+    private LibraryWorkflowService CreateLibraryService() => new(Database);
+    private ImageGenerationTaskService CreateImageGenerationService()
+    {
+        var resolver = new MediaStoragePathResolver(Database, root);
+        return new(Database, resolver, new ImageWorkflowService(Database, root, resolver), new TaskLogService(Database), new FfmpegLocator(Database, root));
     }
     private async Task<SqliteConnection> Open() { var c = new SqliteConnection($"Data Source={Database}"); await c.OpenAsync(); return c; }
     private static Task InsertMovie(SqliteConnection c, long id, string code)

@@ -2,10 +2,25 @@
 
 ## Current Release
 
-- **Version:** 0.6.0
-- **Release:** Release Polish V1
+- **Version:** 0.6.1
+- **Release:** Task Center Polish
 - **Branch policy:** Trunk-based development. `main` is the only long-lived development branch after this release.
 - **Restore policy:** Official version recovery uses immutable release tags, starting with `v0.6.0`; rollback branches are no longer long-term restore points.
+
+## 0.6.1 - Task Center Polish
+
+**Status:** Release candidate / verification in progress
+**Date:** 2026-07-20
+
+Scope:
+
+- Task Center only.
+- Status filter: 全部任务, 执行中, 已完成, 已失败, 已取消.
+- Type filter: 全部类型, 同步信息, 扫描影片, 生成截图, 生成 GIF, 重命名, 删除影片, with future task types surfaced automatically.
+- Single dynamic action button: 清除任务 by default, 取消任务 while viewing 执行中.
+- Clear tasks removes only terminal tasks and never removes running, queued, or paused work.
+- Task cards no longer expose database IDs, TaskID, MovieID, or full file paths; they show movie code first and file name as fallback.
+- Sync tasks are consumed automatically by the worker whenever MetaTube is enabled; the old AutoExecute value no longer blocks queued tasks.
 
 ## 0.6.0 — Release Polish V1
 
