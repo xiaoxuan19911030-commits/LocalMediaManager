@@ -35,7 +35,7 @@ export default function MediaPage() {
       directorId ? `导演：${params.get('directorName') || directorId}` :
       movieTagId ? `影片标签：${params.get('movieTagName') || movieTagId}` :
       customTagId ? `自定义标签：${params.get('customTagName') || customTagId}` :
-      genreId ? `类型：${params.get('genreName') || genreId}` :
+      genreId ? `标签：${params.get('genreName') || genreId}` :
       seriesId ? `系列：${params.get('seriesName') || seriesId}` :
       studioId ? `厂商：${params.get('studioName') || studioId}` :
       libraryId ? `媒体库：${params.get('libraryName') || libraryId}` : ''

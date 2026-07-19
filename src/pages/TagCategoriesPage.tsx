@@ -1,5 +1,6 @@
 import BusinessRoundedIcon from '@mui/icons-material/BusinessRounded'
 import CategoryRoundedIcon from '@mui/icons-material/CategoryRounded'
+import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded'
 import LocalOfferRoundedIcon from '@mui/icons-material/LocalOfferRounded'
 import MovieRoundedIcon from '@mui/icons-material/MovieRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
@@ -15,9 +16,9 @@ import type { EntityCard, MediaLibrary } from '@/types/media'
 const pageSize = 48
 const stateKey = 'lmm.tags.categoryPage'
 
-type CategoryKey = 'all' | 'genres' | 'series' | 'studios' | 'tags'
+type CategoryKey = 'all' | 'directors' | 'genres' | 'series' | 'studios' | 'tags'
 type SortKey = 'count' | 'count-asc' | 'name' | 'name-desc'
-type EntityType = 'genres' | 'series' | 'studios' | 'tags'
+type EntityType = 'directors' | 'genres' | 'series' | 'studios' | 'tags'
 
 interface CategoryMeta {
   label: string
@@ -40,8 +41,10 @@ interface SavedState {
 }
 
 const categories: Record<CategoryKey, CategoryMeta> = {
-  all: { label: '全部', apiType: 'genres', mediaParam: 'genreId', mediaNameParam: 'genreName', noun: '类型', icon: <CategoryRoundedIcon/> },
-  genres: { label: '类型', apiType: 'genres', mediaParam: 'genreId', mediaNameParam: 'genreName', noun: '类型', icon: <CategoryRoundedIcon/> },
+  // “全部”目前复用标签（Genre）数据，避免为异构实体新增复杂聚合 DTO。
+  all: { label: '全部', apiType: 'genres', mediaParam: 'genreId', mediaNameParam: 'genreName', noun: '标签', icon: <CategoryRoundedIcon/> },
+  directors: { label: '导演', apiType: 'directors', mediaParam: 'directorId', mediaNameParam: 'directorName', noun: '导演', icon: <GroupsRoundedIcon/> },
+  genres: { label: '标签', apiType: 'genres', mediaParam: 'genreId', mediaNameParam: 'genreName', noun: '标签', icon: <CategoryRoundedIcon/> },
   series: { label: '系列', apiType: 'series', mediaParam: 'seriesId', mediaNameParam: 'seriesName', noun: '系列', icon: <MovieRoundedIcon/> },
   studios: { label: '厂商', apiType: 'studios', mediaParam: 'studioId', mediaNameParam: 'studioName', noun: '厂商', icon: <BusinessRoundedIcon/> },
   tags: { label: '自定义', apiType: 'tags', mediaParam: 'customTagId', mediaNameParam: 'customTagName', noun: '自定义标签', icon: <LocalOfferRoundedIcon/> },
@@ -126,7 +129,7 @@ export default function TagCategoriesPage() {
     <StatusBadge tone={libraryId ? 'warning' : 'neutral'} label={libraries.find((library) => library.id === libraryId)?.name ?? '全部标准库'}/>
   </Stack>
 
-  return <WorkspacePage title="标签" description="按类型、系列、厂商和自定义标签浏览影片。" stats={stats}
+  return <WorkspacePage title="标签" description="按导演、标签、系列、厂商和自定义标签浏览影片。" stats={stats}
     filters={filters} activeFilterCount={dirty ? 1 : 0} onClearFilters={clearFilters} loading={loading} error={error}
     primaryActions={[refreshAction(load)]}>
     {items.length ? <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: 1 }}>

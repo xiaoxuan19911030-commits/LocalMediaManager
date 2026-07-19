@@ -163,6 +163,14 @@ Acceptance: 发布验证记录或独立验收文档
 
 - Scope: migrate legacy studio category browsing without adding studio editing or changing metadata ownership.
 - Data source: `Studios` and `MovieStudios`; migration imports legacy Studio and Publisher values as `RelationType`.
-- UI: `/tags` uses one toolbar page with range, category and sort controls; categories are 全部、类型、系列、厂商、自定义. “全部” currently reuses the 类型/Genre list to avoid a mixed entity DTO.
+- UI: `/tags` uses one toolbar page with range, category and sort controls; categories are 全部、导演、标签、系列、厂商、自定义. “全部” currently reuses the 标签/Genre list to avoid a mixed entity DTO.
 - MovieWall handoff: studio items navigate with `studioId` and optional `libraryId`, so default conditions are preserved and compose with Smart Search and FilterBar using AND.
 - Automated: Bridge tests cover studio list loading, distinct movie counts, media-library scoped stats, sorting, empty-name tolerance, and AND composition with Smart Search/FilterBar.
+
+## 2026-07-19 Tag Director Label Fix Evidence Note
+
+- Scope: correct `/tags` toolbar naming and restore director as a first-class category on the tag secondary page.
+- UI naming: user-visible Genre category is labeled “标签”; internal `genres` API and `genreId` parameter remain unchanged.
+- “全部” behavior: still reuses 标签/Genre data and keeps an independent button state; no mixed entity aggregation API was introduced.
+- Director handoff: director items use `directorId` and optional `libraryId`, then enter the shared MovieWall where defaults compose with Smart Search and FilterBar using AND.
+- Automated: Bridge tests cover director list loading, distinct movie counts, search, name sorting, library scoping, and AND composition.

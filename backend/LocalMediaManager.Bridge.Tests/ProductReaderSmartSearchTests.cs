@@ -50,8 +50,8 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
             """, ("$at", At));
         await Execute(connection, "INSERT INTO Actors(Id,Name,NormalizedName,LegacySource,CreatedAt,UpdatedAt) VALUES(1,'三上悠亚','三上悠亚','Test',$at,$at),(2,'其他演员','其他演员','Test',$at,$at)", ("$at", At));
         await Execute(connection, "INSERT INTO MovieActors(MovieId,ActorId,RoleName,SortOrder) VALUES(1,1,'',0),(2,2,'',0)");
-        await Execute(connection, "INSERT INTO Directors(Id,Name,NormalizedName) VALUES(1,'导演A','导演a')");
-        await Execute(connection, "INSERT INTO MovieDirectors(MovieId,DirectorId) VALUES(1,1)");
+        await Execute(connection, "INSERT INTO Directors(Id,Name,NormalizedName) VALUES(1,'导演A','导演a'),(2,'导演B','导演b')");
+        await Execute(connection, "INSERT INTO MovieDirectors(MovieId,DirectorId) VALUES(1,1),(2,2)");
         await Execute(connection, "INSERT INTO Tags(Id,Name,NormalizedName,Source,CreatedAt,UpdatedAt) VALUES(1,'长发','长发','Scraper',$at,$at),(2,'收藏候选','收藏候选','User',$at,$at),(3,'legacy stamp','legacy stamp','LegacyStamp',$at,$at),(4,'space tag + alpha','space tag + alpha','NFO',$at,$at),(5,'已收藏','已收藏','LegacyLabel',$at,$at),(6,'新加入','新加入','LegacyStamp',$at,$at)", ("$at", At));
         await Execute(connection, "INSERT INTO MovieTags(MovieId,TagId,CreatedAt) VALUES(1,1,$at),(1,2,$at),(2,3,$at),(1,4,$at),(1,5,$at),(2,6,$at)", ("$at", At));
         await Execute(connection, "INSERT INTO Genres(Id,Name,NormalizedName) VALUES(1,'办公室','办公室')");
@@ -127,6 +127,21 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DirectorListCanBeSearchedScopedToLibraryAndSorted()
+    {
+        EntityPageDto searched = await ProductReader.ReadEntitiesPageAsync(Database, "http://localhost", "directors", "导演A", "count", 24, 0);
+        EntityPageDto scoped = await ProductReader.ReadEntitiesPageAsync(Database, "http://localhost", "directors", "", "count", 24, 0, libraryId: 1);
+        EntityPageDto archived = await ProductReader.ReadEntitiesPageAsync(Database, "http://localhost", "directors", "", "count", 24, 0, libraryId: 2);
+        EntityPageDto descending = await ProductReader.ReadEntitiesPageAsync(Database, "http://localhost", "directors", "", "name-desc", 24, 0);
+
+        Assert.Equal(["导演A"], searched.Items.Select(item => item.Name).ToArray());
+        Assert.Contains(scoped.Items, item => item.Name == "导演A" && item.MovieCount == 1);
+        Assert.Contains(scoped.Items, item => item.Name == "导演B" && item.MovieCount == 1);
+        Assert.DoesNotContain(archived.Items, item => item.Name is "导演A" or "导演B");
+        Assert.Equal(["导演B", "导演A"], descending.Items.Select(item => item.Name).ToArray());
+    }
+
+    [Fact]
     public async Task TagCategoriesDoNotFilterHistoricalTagsBySource()
     {
         EntityPageDto movieTags = await ProductReader.ReadEntitiesPageAsync(Database, "http://localhost", "movie-tags", "", "name", 24, 0);
@@ -150,6 +165,8 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
     {
         MediaPageDto director = await ProductReader.AdvancedSearchAsync(Database, "http://localhost",
             "评分>=4", null, null, 1, null, null, null, true, null, 0, "all", "all", "all", "all", null, "newest", 24, 0);
+        MediaPageDto directorWithFilterBar = await ProductReader.AdvancedSearchAsync(Database, "http://localhost",
+            "", null, null, 1, null, null, null, null, null, 0, "5", "all", "all", "all", null, "newest", 24, 0);
         MediaPageDto series = await ProductReader.AdvancedSearchAsync(Database, "http://localhost",
             "标签:长发", null, null, null, null, null, 1, null, null, 0, "all", "all", "all", "all", null, "newest", 24, 0);
         MediaPageDto movieTag = await ProductReader.AdvancedSearchAsync(Database, "http://localhost",
@@ -162,6 +179,7 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
             "", null, null, null, null, null, null, null, null, 0, "5", "all", "all", "all", 1, "newest", 24, 0, studioId: 1);
 
         Assert.Equal([1], director.Items.Select(item => item.DataId).ToArray());
+        Assert.Empty(directorWithFilterBar.Items);
         Assert.Equal([1], series.Items.Select(item => item.DataId).ToArray());
         Assert.Equal([1], movieTag.Items.Select(item => item.DataId).ToArray());
         Assert.Equal([1], genre.Items.Select(item => item.DataId).ToArray());
