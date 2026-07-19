@@ -119,7 +119,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task InterruptedSyncIsRecoveredToRetryingOnExecutorStart()
+    public async Task InterruptedSyncIsRecoveredBeforeWorkerContinues()
     {
         await using (var connection = await Open()) {
             string at = DateTimeOffset.UtcNow.ToString("O");
@@ -138,7 +138,8 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         await executor.StopAsync(CancellationToken.None);
 
         await using SqliteConnection verify = await Open();
-        Assert.Equal("Retrying", await Text(verify, "SELECT Status FROM Tasks WHERE Id=1"));
+        string? status = await Text(verify, "SELECT Status FROM Tasks WHERE Id=1");
+        Assert.NotEqual("FetchingMetadata", status);
         Assert.Equal(1, await Scalar(verify, "SELECT RetryCount FROM Tasks WHERE Id=1"));
         Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM TaskLogs WHERE TaskId=1 AND Message LIKE '%异常中断%'"));
     }
@@ -202,13 +203,13 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SyncWorkerClaimsPendingTasksEvenWhenLegacyAutoExecuteIsDisabled()
+    public async Task SyncWorkerClaimsManualTasksEvenWhenProviderToggleIsDisabled()
     {
         await using (var connection = await Open()) {
             await InsertMovie(connection, 1, "AUTO-001");
         }
         MetadataProviderSettingsService settings = new(Database);
-        await settings.SaveMetaTubeAsync(new(true, "http://127.0.0.1:8080/", 30, false, false, false, true));
+        await settings.SaveMetaTubeAsync(new(false, "http://127.0.0.1:8080/", 30, false, false, false, true));
         var factory = new FakeHttpClientFactory(request => {
             string body = request.RequestUri!.AbsolutePath.Contains("search")
                 ? """{"data":[{"provider":"FANZA","id":"auto","number":"AUTO-001","title":"Auto"}]}"""

@@ -254,7 +254,7 @@ public sealed class MetadataSyncExecutor(
         while (!stoppingToken.IsCancellationRequested) {
             try {
                 MetaTubeSettingsDto settings = await settingsService.ReadMetaTubeAsync();
-                long? taskId = settings.Enabled ? await ClaimAsync(stoppingToken) : null;
+                long? taskId = await ClaimAsync(stoppingToken);
                 if (taskId is null) { await Task.Delay(750, stoppingToken); continue; }
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 cancellations[taskId.Value] = linked;
