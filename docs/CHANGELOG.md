@@ -11,12 +11,16 @@
 - Product-cancelled Image SetAs: LMM will not migrate manual "set as poster / thumbnail / banner" actions because image resources are managed by MetaTube scraping, NFO, and metadata sync.
 - Duplicate Management & Batch Organizer (DEC-015): duplicate review and batch organizer now share one Organizer Tools entry instead of separate product tracks.
 - Final System Features and Feature Freeze (DEC-016): retained Feature Parity is complete by current product scope; the next phase is Legacy Cleanup.
+- Settings Migration Completion (DEC-017): legacy configuration fields are no longer exposed as user settings. Compatibility reading remains backend-only for one-time migration and diagnostics.
+- Product-cancelled legacy settings: detail-window full-database browsing, delete-info-after-file-delete, and scan-number-recognition toggles are not retained because current MovieWall context, Safe Delete, and scan filename recognition define the product behavior.
 - Retained user-data scope: rating, favorite, custom tags, actor display ordering, poster/image adjustment, manual crop, playback history, and future Human-approved notes.
 - Development order is now fixed: retained Feature Parity first, Legacy Cleanup second, Human-experience-driven optimization/new features third.
 
 ### Added
 
 - Final System Features Migration: Settings now includes language selection (`system` / `zh-CN`), tray and close behavior, start minimized to tray, global shortcut enablement, log retention and cleanup, and GitHub Release update checks.
+- Settings now includes a formal scan minimum file size setting (`scan.minFileSizeMb`) shown as “最小影片文件大小（MB）”; library scans ignore videos smaller than this threshold.
+- Legacy settings migration now imports known old values once when the new value is still at its default seed, and never overwrites non-default new settings.
 - Log cleanup now uses a preview + confirmation-token flow, supports 7/14/30/90 days and permanent retention, keeps active logs, and never deletes databases, settings, task records, or user media.
 - Tauri tray support now provides show, hide, and quit actions. Quit checks running tasks from the frontend before closing; close-to-tray keeps Bridge running.
 - Shortcut management now exposes the retained shortcut set and a global enable switch. MovieWall paging shortcuts and Ctrl+G honor the switch and protect input/modal focus; Ctrl+F focuses global search.
@@ -34,6 +38,7 @@
 ### Changed
 
 - Retained Feature Parity is now complete by the current product scope and enters Feature Freeze. The next phase is Legacy Cleanup, not product optimization or new feature development.
+- Settings no longer shows the legacy compatibility field list or internal keys such as `WindowConfig.*` and `ScanConfig.*` to ordinary users.
 - Organizer execution now routes duplicate deletion through the existing Safe Delete workflow and routes batch move/rename through the existing File Organizer workflow. Ordinary MovieWall batch delete remains disabled; destructive delete is only exposed from duplicate groups after explicit keep selection and preview confirmation.
 
 - 左侧工具区将“查重结果”合并为“整理工具”；旧 `/duplicates` 路由仅作为兼容重定向保留。

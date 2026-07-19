@@ -109,6 +109,7 @@
 | 49 | 托盘与关闭行为 | P2 | 必须保留 | 已完整迁移 | Tauri tray；AppShell close lifecycle；Settings UI；Tasks read API | 低风险写入 | 无（保留范围内完成） | 0.5.0 | 支持关闭时退出或最小化到托盘、启动后最小化到托盘、托盘显示/隐藏/退出；退出前检查运行中任务，最小化不停止 Bridge | Tauri: tray menu + `hide_main_window`/`show_main_window`/`close_local_media_manager`；Automated: Web build + cargo check；Migration: N/A |
 | 50 | 快捷键管理 | P2 | 必须保留 | 已完整迁移 | Unified Settings；MovieWall keyboard handlers；AppShell global search focus | 低风险写入 | 无（保留范围内完成） | 0.5.0 | 设置页提供快捷键说明、总开关和恢复默认；Ctrl+F 聚焦全局搜索；MovieWall 左右翻页和 Ctrl+G 受总开关控制，并保护输入框/弹窗焦点 | Bridge: `system.globalShortcutsEnabled`；Automated: Web build type coverage；Migration: N/A |
 | 51 | 检查更新 | P2 | 必须保留 | 已完整迁移 | Settings About；GitHub Releases API；AppSettings last check storage | 低风险写入 | 无（保留范围内完成） | 0.5.0 | 仅检查 GitHub Release、显示最新版本/说明并打开发布页；不自动下载、不自动安装，网络失败不影响应用启动 | Bridge: `POST /api/system/update/check`；Automated: `UpdateVersionComparisonHandlesCurrentNewerAndAvailable`；Migration: N/A |
+| 52 | 旧设置迁移收口 | P1 | 必须保留 | 已完整迁移 | DEC-017；Unified Settings；SettingsSaveCoordinator；LibraryWorkflowService | 低风险写入 | 无（保留范围内完成） | 0.5.0 | 设置页不再显示 `WindowConfig.*` / `ScanConfig.*` 等内部兼容字段；`ScanConfig.MinFileSize` 迁移为正式 `scan.minFileSizeMb`，扫描真实按阈值跳过小文件；详情全库浏览、删除危险开关、扫描番号识别开关按产品决策取消或替代 | Bridge: `GET/PUT /api/settings/all` + Library Scan；Migration: N/A（复用 AppSettings）；Automated: `LegacySettingsMigrateOnceWithoutOverwritingNewValues`、`LegacySettingsMigrationToleratesBrokenConfig`、`ScanUsesConfiguredMinimumMovieFileSize`；Decision: DEC-017 |
 
 ## 证据记录格式
 
@@ -220,3 +221,12 @@ Acceptance: 发布验证记录或独立验收文档
 - Remaining second phase: duplicate keep/delete decision workflow, ignore/merge handling, safe batch delete from duplicate candidates, and batch actions from current filtered result scope.
 - UI completion: duplicate mode now exposes poster, title, code, file name, file size, resolution, rating, favorite, media library, file path, true duplicate reason, expand/collapse, select/cancel, and non-binding keep suggestions.
 - Execution completion: duplicate mode requires one explicit keep item per selected group, previews Safe Delete plus user-data merge effects, revalidates before execute, and delegates real deletion to `SafeDeleteWorkflowService`. Batch mode enables move and rename through `FileOrganizerService` dry-run/preview/execute/tasks for the current MovieWall selection set. Ordinary batch delete remains disabled outside duplicate Safe Delete.
+
+## 2026-07-19 Settings Migration Completion Evidence Note
+
+- Decision: DEC-017 completes legacy settings migration cleanup during Feature Freeze.
+- UI: Settings no longer renders the “已读取的兼容设置” list, and ordinary users no longer see internal keys such as `WindowConfig.*`, `ScanConfig.*`, namespaces, config paths, or raw JSON fields.
+- Migrated field: `ScanConfig.MinFileSize` becomes `scan.minFileSizeMb` and appears as “最小影片文件大小（MB）” under “扫描与导入”.
+- Runtime behavior: `LibraryWorkflowService` reads `scan.minFileSizeMb` and ignores candidate videos smaller than the configured MB threshold; files equal to or above the threshold remain eligible.
+- Migration priority: non-default Next settings are kept; legacy values only fill missing/default-seeded values once, then `legacySettings.migration.completedAt` prevents repeat overwrite.
+- Product-cancelled/replaced fields: `WindowConfig.Main.DetailWindowShowAllMovie`, `WindowConfig.Settings.DelInfoAfterDelFile`, and `ScanConfig.FetchVID`.

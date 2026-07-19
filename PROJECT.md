@@ -862,7 +862,7 @@ SchemaMigrations（版本与 checksum）
 
 `AppSettings` 表：`Key` · `ValueJson` · `ValueType` · `UpdatedAt`
 
-Settings 键前缀：`metadata.metatube.*` · `nfo.*` · `playback.*` · `ratingHistory.*` · `appearance.*` · `mediaStorage.*` · `movieWall.*` · `system.*` · `updates.*`
+Settings 键前缀：`metadata.metatube.*` · `nfo.*` · `playback.*` · `ratingHistory.*` · `appearance.*` · `mediaStorage.*` · `movieWall.*` · `scan.*` · `system.*` · `updates.*`
 
 **唯一写入口：** `SettingsSaveCoordinator`（§10）
 
@@ -972,7 +972,7 @@ React 更新 original + draft（两者同步为 saved 状态）
 
 ### 10.2 UnifiedSettings 结构
 
-`UnifiedSettingsDto` 包含八个域，**一次 Save 全部提交**：
+`UnifiedSettingsDto` 包含九个域，**一次 Save 全部提交**：
 
 | 域 | DTO | AppSettings 键前缀 | 说明 |
 |----|-----|-------------------|------|
@@ -983,9 +983,10 @@ React 更新 original + draft（两者同步为 saved 状态）
 | **Appearance** | `AppearanceSettingsDto` | `appearance.*` | 主题模式 `dark` / `light` |
 | **MediaStorage** | `MediaStorageSettingsDto` | `mediaStorage.*` | 根目录、资源子目录、路径模板 |
 | **MovieWallDisplay** | `MovieWallDisplaySettingsDto` | `movieWall.*` | 影片墙卡片海报方向与大小 |
+| **Scan** | `ScanSettingsDto` | `scan.*` | 扫描阈值，当前包括最小影片文件大小（MB） |
 | **System** | `SystemSettingsDto` | `system.*` / `updates.*` | 语言、关闭/托盘行为、日志保留、快捷键总开关、更新检查 |
 
-`NonDestructive`（MetaTube 不覆盖手工数据）和 `ImportFillEmptyOnly`（NFO 导入只补空）在 Coordinator 层**强制为 true**，UI 不能关闭。
+`NonDestructive`（MetaTube 不覆盖手工数据）和 `ImportFillEmptyOnly`（NFO 导入只补空）在 Coordinator 层**强制为 true**，UI 不能关闭。旧兼容设置只作为一次性迁移输入；设置页不得展示 `WindowConfig.*`、`ScanConfig.*`、内部 Key、命名空间或原始 JSON 字段。
 
 ### 10.3 Draft / Original / HasUnsavedChanges
 
@@ -1852,6 +1853,7 @@ Bridge **不内嵌播放器**；只负责路径解析和进程启动。无法返
 见 **§10 Settings 系统**。路由 `/settings`，页面 `SettingsPage.tsx`。
 
 Settings 分区：常规 · 媒体库 · 扫描与导入 · 元数据与同步 · 图片与缓存 · 媒体存储 · 播放器 · 搜索与筛选 · 快捷键 · 外观 · 数据与备份 · 日志与诊断 · 关于。影片墙显示偏好位于「外观」分区；语言、关闭/托盘行为、快捷键总开关、日志保留/清理和检查更新属于 `UnifiedSettings.system` 与系统辅助 API。检查更新只检查 GitHub Release 并打开发布页，不执行自动下载或安装。
+「扫描与导入」分区提供正式的最小影片文件大小（MB）设置，保存到 `scan.minFileSizeMb`，扫描服务在枚举候选文件时真实应用该阈值。旧版“扫描时识别番号”开关不再保留；Next 扫描固定从文件名识别番号。
 
 ### 16.13 扩展模块（Placeholder）
 

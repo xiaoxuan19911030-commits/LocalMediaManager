@@ -49,6 +49,7 @@ builder.Services.AddSingleton(serviceProvider => new NfoService(
 builder.Services.AddSingleton(serviceProvider => new SettingsSaveCoordinator(
     databasePath,
     installRoot,
+    configDatabasePath,
     serviceProvider.GetRequiredService<MetadataProviderSettingsService>(),
     serviceProvider.GetRequiredService<NfoService>(),
     serviceProvider.GetRequiredService<PlaybackSettingsService>(),
@@ -205,7 +206,7 @@ app.MapPost("/api/libraries/{libraryId:long}/scan", async (long libraryId, ScanL
     Results.Ok(await service.StartScanAsync(libraryId, command)));
 
 app.MapGet("/api/tasks", async (int? limit) => File.Exists(databasePath)
-    ? Results.Ok(await ProductReader.ReadTasksAsync(databasePath, Math.Clamp(limit ?? 50, 1, 200)))
+    ? Results.Ok(await ProductReader.ReadTasksAsync(databasePath, limit is > 0 ? limit : null))
     : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
 app.MapGet("/api/tasks/{taskId:long}/logs", async (long taskId, int? limit) => File.Exists(databasePath)
     ? Results.Ok(await ProductReader.ReadTaskLogsAsync(databasePath, taskId, Math.Clamp(limit ?? 200, 1, 1000)))
@@ -218,6 +219,7 @@ app.MapDelete("/api/tasks/{taskId:long}", async (long taskId, TaskCommandService
 app.MapPost("/api/tasks/cleanup", async (TaskCleanupCommand command, TaskCommandService service) => Results.Ok(await service.CleanupAsync(command.Status)));
 app.MapPost("/api/tasks/batch/cancel-sync", async (IReadOnlyList<long> taskIds, TaskCommandService service) => Results.Ok(await service.CancelSyncBatchAsync(taskIds)));
 app.MapPost("/api/videos/{movieId:long}/sync", async (long movieId, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Manual")));
+app.MapPost("/api/videos/{movieId:long}/rescrape", async (long movieId, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Rescrape", overwrite: true)));
 app.MapPost("/api/videos/batch/sync", async (IReadOnlyList<long> movieIds, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueBatchAsync(movieIds)));
 app.MapPost("/api/delete/preview", async (SafeDeletePreviewCommand command, SafeDeleteWorkflowService service, CancellationToken token) =>
     Results.Ok(await service.PreviewAsync(command, token)));

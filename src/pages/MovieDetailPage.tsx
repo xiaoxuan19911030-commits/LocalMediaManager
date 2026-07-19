@@ -112,6 +112,7 @@ export default function MovieDetailPage() {
     window.setTimeout(() => setNotice(`${result.message} 可在任务中心查看结果。`), 0)
   }
   const syncMetadata = () => movie && bridge.syncMovie(movie.id).then(result => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message))
+  const rescrapeMetadata = () => movie && bridge.rescrapeMovie(movie.id).then(result => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message))
   const refreshImages = () => { clearImageMemoryCache(); if (movie) loadMovie(movie.id).then(() => setNotice('图片状态已刷新')).catch((reason: Error) => setNotice(reason.message)) }
   const rebuildCache = () => bridge.rebuildImageCache().then(result => setNotice(`${result.message}（${result.totalItems} 部影片）`)).catch((reason: Error) => setNotice(reason.message))
   const refreshStatus = () => movie && loadMovie(movie.id).then(() => setNotice('状态已刷新')).catch((reason: Error) => setNotice(reason.message))
@@ -207,7 +208,7 @@ export default function MovieDetailPage() {
           <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
             <Chip color={movie.metadataStatus?.state === 'complete' ? 'success' : movie.metadataStatus?.state === 'unscraped' ? 'error' : 'warning'} label={`${movie.metadataStatus?.icon ?? '✕'} ${movie.metadataStatus?.label ?? '未刮削'}`}/>
             <Button size="small" startIcon={<SyncRoundedIcon/>} onClick={syncMetadata}>同步信息</Button>
-            <Button size="small" startIcon={<SyncRoundedIcon/>} onClick={syncMetadata}>重新刮削</Button>
+            <Button size="small" startIcon={<SyncRoundedIcon/>} onClick={rescrapeMetadata}>重新刮削</Button>
             <Button size="small" startIcon={<FolderRoundedIcon/>} onClick={openMovieFolder}>打开影片目录</Button>
             <Button size="small" onClick={refreshStatus}>刷新状态</Button>
           </Stack>
@@ -233,7 +234,6 @@ export default function MovieDetailPage() {
               <Button size="small" startIcon={<RefreshRoundedIcon/>} onClick={refreshImages}>刷新图片</Button>
               <Button size="small" onClick={rebuildCache}>重新生成缓存</Button>
               <Button size="small" startIcon={<FolderRoundedIcon/>} onClick={openImageFolder}>打开图片目录</Button>
-              <Button size="small" startIcon={<SyncRoundedIcon/>} onClick={syncMetadata}>重新下载图片</Button>
             </Stack>
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(1,minmax(0,1fr))', sm: 'repeat(2,minmax(0,1fr))', xl: 'repeat(3,minmax(0,1fr))' }, gap: 1.5 }}>
               {imageResources.map(asset => { const status = imageStatus?.assets.find(item => item.id === asset.id || item.type === asset.type); const available = asset.id > 0 && Boolean(asset.url); return <Card key={`${asset.type}-${asset.id}`} variant="outlined" sx={{ overflow: 'hidden' }}>

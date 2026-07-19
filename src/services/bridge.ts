@@ -106,6 +106,7 @@ export const bridge = {
   executeDuplicateDelete: (groups: DuplicateDeleteGroupCommand[], mode: 'metadata' | 'media', deleteDatabaseInfo: boolean, confirmationToken: string, confirmOriginalMedia = false, confirmCount?: number) =>
     request<SafeDeleteLaunchResult>('/api/organizer/duplicates/execute-delete', { method: 'POST', body: JSON.stringify({ groups, mode, deleteDatabaseInfo, confirmationToken, confirmOriginalMedia, confirmCount }) }),
   syncMovie: (id: number) => request<ScanLaunchResult>(`/api/videos/${id}/sync`, { method: 'POST' }),
+  rescrapeMovie: (id: number) => request<ScanLaunchResult>(`/api/videos/${id}/rescrape`, { method: 'POST' }),
   neighbors: (id: number, search = '', sort = 'newest') => request<NeighborResult>(`/api/videos/${id}/neighbors?${new URLSearchParams({ search, sort })}`),
   search: (query: string, limit = 12) => request<GlobalSearchResult>(`/api/search?${new URLSearchParams({ q: query, limit: String(limit) })}`),
   libraries: () => request<MediaLibrary[]>('/api/libraries'),
@@ -114,7 +115,7 @@ export const bridge = {
   previewDeleteLibrary: (libraryId: number) => request<LibraryDeletePreview>(`/api/libraries/${libraryId}/delete-preview`),
   deleteLibrary: (libraryId: number, confirmationToken: string) => request<LibraryMutationResult>(`/api/libraries/${libraryId}/delete`, { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
   scanLibrary: (libraryId: number, fullScan = false, autoSync = true) => request<ScanLaunchResult>(`/api/libraries/${libraryId}/scan`, { method: 'POST', body: JSON.stringify({ fullScan, autoSync }) }),
-  tasks: (limit = 100) => request<TaskItem[]>(`/api/tasks?limit=${limit}`),
+  tasks: (limit?: number) => request<TaskItem[]>(limit && limit > 0 ? `/api/tasks?limit=${limit}` : '/api/tasks'),
   taskLogs: (taskId: number, limit = 200) => request<TaskLogItem[]>(`/api/tasks/${taskId}/logs?limit=${limit}`),
   pauseTask: (taskId: number) => request<TaskMutationResult>(`/api/tasks/${taskId}/pause`, { method: 'POST' }),
   resumeTask: (taskId: number) => request<TaskMutationResult>(`/api/tasks/${taskId}/resume`, { method: 'POST' }),
@@ -122,7 +123,7 @@ export const bridge = {
   cancelSyncTasks: (taskIds: number[]) => request<{ count: number; message: string }>('/api/tasks/batch/cancel-sync', { method: 'POST', body: JSON.stringify(taskIds) }),
   retryTask: (taskId: number) => request<ScanLaunchResult>(`/api/tasks/${taskId}/retry`, { method: 'POST' }),
   deleteTask: (taskId: number) => request<TaskCleanupResult>(`/api/tasks/${taskId}`, { method: 'DELETE' }),
-  cleanupTasks: (status: 'completed' | 'failed' | 'cancelled' | 'terminal') => request<TaskCleanupResult>('/api/tasks/cleanup', { method: 'POST', body: JSON.stringify({ status }) }),
+  cleanupTasks: (status: 'completed' | 'failed' | 'cancelled' | 'terminal' | 'all-tasks') => request<TaskCleanupResult>('/api/tasks/cleanup', { method: 'POST', body: JSON.stringify({ status }) }),
   openDirectory: (path: string) => request<PlatformOpenResult>('/api/platform/open-directory', { method: 'POST', body: JSON.stringify({ path }) }),
   revealFile: (path: string) => request<PlatformOpenResult>('/api/platform/reveal-file', { method: 'POST', body: JSON.stringify({ path }) }),
   entities: (type: 'actors' | 'directors' | 'series' | 'studios' | 'genres' | 'tags' | 'custom-tags' | 'movie-tags', search = '', sort = 'count', limit = 48, offset = 0, libraryId?: number) => {

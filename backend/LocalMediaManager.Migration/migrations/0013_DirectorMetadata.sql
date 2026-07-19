@@ -1,0 +1,17 @@
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS Directors (
+    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    Name TEXT NOT NULL,
+    NormalizedName TEXT NOT NULL COLLATE NOCASE UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS MovieDirectors (
+    MovieId INTEGER NOT NULL REFERENCES Movies(Id) ON DELETE CASCADE,
+    DirectorId INTEGER NOT NULL REFERENCES Directors(Id) ON DELETE CASCADE,
+    PRIMARY KEY(MovieId, DirectorId)
+);
+
+INSERT INTO DatabaseMetadata(Key, Value)
+VALUES('SchemaVersion', '13')
+ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;

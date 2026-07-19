@@ -139,6 +139,8 @@ Retained user-data features remain in scope: scoring, favorite, custom tags, act
 ### Completed Retained Parity
 
 - Final System Features Migration: Settings now includes app language (`system` / `zh-CN`), tray and close behavior, start minimized to tray, global shortcut enablement, log retention and cleanup preview/execute, and GitHub release update checks. Close exit checks active tasks before quitting, and minimize-to-tray does not stop Bridge.
+- Settings Migration Completion: Settings no longer exposes legacy compatibility keys to ordinary users. `ScanConfig.MinFileSize` is migrated into the formal `scan.minFileSizeMb` setting, and library scans use it to skip video files smaller than the configured MB threshold.
+- Legacy settings product cancellations: `WindowConfig.Main.DetailWindowShowAllMovie`, `WindowConfig.Settings.DelInfoAfterDelFile`, and `ScanConfig.FetchVID` are not retained as user-facing switches; detail navigation follows MovieWall context, deletion follows Safe Delete, and scan filename recognition is fixed behavior.
 
 - Duplicate Management & Batch Organizer Execution Completion: `/organizer` now supports duplicate-group Safe Delete execution and batch move/rename execution. Duplicate deletion requires one explicit keep item per selected group, previews user-data merge effects, revalidates before execute, and delegates real deletion to Safe Delete. Batch move and batch rename reuse the existing File Organizer dry-run, preview, execute, and Tasks workflow for the current MovieWall selection set.
 

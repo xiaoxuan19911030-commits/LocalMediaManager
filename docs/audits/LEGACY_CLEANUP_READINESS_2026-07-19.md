@@ -69,6 +69,9 @@ These should no longer be treated as "unmigrated" in future parity summaries:
 | 打开应用目录 | Legacy startup/about menu | 不再保留 / 产品决策取消 | Do not add a replacement just for parity. No runtime code found for this old action. |
 | 旧多数据库 UI | `WindowStartUp`, `Window_DataBase` | 不再保留 / 产品决策取消 | Next uses one writable runtime DB plus media libraries. Migration compatibility remains. |
 | 端口监听配置 | `ServerConfig`, `ServerManager` | 不再保留 / 产品决策取消 | Bridge fixed loopback/session model remains; do not expose old server port UI. |
+| 详情窗口左右浏览数据库全部影片 | `WindowConfig.Main.DetailWindowShowAllMovie` | 不再保留 / 产品决策取消 | Detail previous/next follows the current MovieWall query context, filters, sorting, and library scope. |
+| 删除文件时同时删除影片信息 | `WindowConfig.Settings.DelInfoAfterDelFile` | 不再保留 / 产品决策取消 | Delete behavior is governed only by current Safe Delete / preview / confirm / data-protection workflow. |
+| 扫描时识别番号开关 | `ScanConfig.FetchVID` | 不再保留 / 产品决策取消 | Next scan always derives the movie code from the file name. |
 
 Additional product decisions confirmed on 2026-07-19 by DEC-013:
 
@@ -127,6 +130,7 @@ Legend:
 | `backend/LocalMediaManager.Bridge/Program.cs` `LMM_LEGACY_ROOT`, `LMM_CONFIG_DATABASE_PATH`, `LMM_IMAGE_ROOT` | A | Runtime fallback for legacy config/image compatibility. | Keep until a formally accepted end-of-compat decision. |
 | `PlaybackSettingsService` legacy player fallback | A | Reads legacy config when Next playback path is empty. | Keep; user config compatibility. |
 | `SettingsReader` + `CrawlerServerDto` | A / E | Reads compatible legacy settings/servers; plugin/provider UI still uses read-only compatibility. | Keep; cannot delete until provider/settings replacement complete. |
+| Legacy settings one-time migration in `SettingsSaveCoordinator` | A | Migrates selected old values into `UnifiedSettings` without exposing internal fields in Settings UI. | Keep until a formal end-of-compat decision and upgrade evidence exist. |
 | `ImageAssetService.ImportLegacyActorAssetsAsync` | A | Cache rebuild imports legacy actor portraits into Images. | Keep; user image compatibility. |
 | `/api/covers/{code}` and `FindCover` legacy `CardCovers` / `SmallPic` lookup | A | Runtime cover fallback for legacy image roots. | Keep until legacy image import is fully migrated and smoke-tested. |
 | `ProductWriter.SyncLegacyFavoriteTagAsync` | A | Keeps legacy favorite tag compatibility while writing `UserMovieState`. | Keep; user data compatibility. |
@@ -179,6 +183,7 @@ These are not cleanup candidates:
 - Legacy source/provenance fields and mapping tables.
 - Migration warnings and field mapping evidence.
 - Playback settings fallback from old config.
+- Legacy settings one-time migration remains in Bridge; the user Settings page no longer displays internal compatibility keys.
 - `Tags.Source` historical values (`LegacyLabel`, `LegacyStamp`) used only with status-badge exclusion, not as reliable custom/movie-tag split.
 
 ## 8. Cleanup Readiness
@@ -205,7 +210,7 @@ Reason: no candidate satisfies all required proof conditions plus Web/Bridge/Tau
 | `ImageAssetService.ImportLegacyActorAssetsAsync` | Actor image import parity and smoke complete | Actor portraits may disappear on rebuild. |
 | Playback legacy config fallback | Playback settings migration and installed player smoke complete | Users lose old player path. |
 | `SyncLegacyFavoriteTagAsync` | Favorite compatibility no longer needed and old tag path is fully retired | Legacy favorite state may desync. |
-| SettingsReader compatible server/config reader | Provider/settings replacement is complete | Plugin/provider read-only evidence breaks. |
+| SettingsReader compatible server/config reader and one-time settings migration | Provider/settings replacement and installed upgrade compatibility are complete | Legacy settings values stop migrating for existing users; plugin/provider read-only evidence breaks. |
 | `FfmpegLocator.LegacyFallback` | Packaged ffmpeg or user-configured ffmpeg path is verified | Image/GIF generation may fail on systems relying on old tools path. |
 
 ### 8.4 Permanently keep

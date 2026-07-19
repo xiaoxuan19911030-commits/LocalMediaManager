@@ -340,6 +340,7 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
 
             IReadOnlyList<ScanFolder> folders = await ReadScanFoldersAsync(connection, libraryId);
             if (folders.Count == 0) throw new InvalidOperationException("媒体库没有启用的来源文件夹。");
+            long minimumFileSizeBytes = await ReadMinimumFileSizeBytesAsync(connection);
 
             var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var folderErrors = new List<string>();
@@ -361,6 +362,7 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
                     };
                     foreach (string file in Directory.EnumerateFiles(folder.Path, "*", options)) {
                         if (!VideoExtensions.Contains(Path.GetExtension(file))) continue;
+                        if (new FileInfo(file).Length < minimumFileSizeBytes) continue;
                         if (IsExcluded(folder.Path, file, folder.ExcludePatterns)) continue;
                         candidates.Add(Path.GetFullPath(file));
                     }
@@ -453,8 +455,8 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
             "SELECT COALESCE(MAX(MovieId),0) FROM MediaFiles WHERE NormalizedPath=$path", ("$path", normalized));
         if (existing > 0) {
             await ExecuteAsync(connection, transaction,
-                "UPDATE MediaFiles SET ExistsState='Present',LastSeenAt=$at,UpdatedAt=$at WHERE NormalizedPath=$path",
-                ("$at", Now()), ("$path", normalized));
+                "UPDATE MediaFiles SET LibraryId=$library,ExistsState='Present',LastSeenAt=$at,UpdatedAt=$at WHERE NormalizedPath=$path",
+                ("$library", libraryId), ("$at", Now()), ("$path", normalized));
             await transaction.CommitAsync();
             return new(false, false);
         }
@@ -528,6 +530,19 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
         return result;
     }
 
+    private static async Task<long> ReadMinimumFileSizeBytesAsync(SqliteConnection connection)
+    {
+        string? raw = await ScalarTextAsync(connection, null, "SELECT ValueJson FROM AppSettings WHERE Key='scan.minFileSizeMb'");
+        double mb = 0;
+        if (!string.IsNullOrWhiteSpace(raw)) {
+            try { mb = JsonSerializer.Deserialize<double>(raw); }
+            catch (JsonException) { mb = 0; }
+        }
+        if (double.IsNaN(mb) || double.IsInfinity(mb) || mb < 0) mb = 0;
+        mb = Math.Min(mb, 1024 * 1024);
+        return (long)Math.Round(mb * 1024d * 1024d, MidpointRounding.AwayFromZero);
+    }
+
     private static bool IsExcluded(string root, string path, IReadOnlyList<string> patterns)
     {
         string relative = Path.GetRelativePath(root, path).Replace('\\', '/');
@@ -551,7 +566,8 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
         var folders = new List<LibraryFolderCommand>();
         foreach (LibraryFolderCommand folder in input.Folders) {
             string path = folder.Path?.Trim() ?? string.Empty;
-            if (path.Length == 0 || !Path.IsPathFullyQualified(path)) throw new ArgumentException($"来源文件夹必须是绝对路径：{path}");
+            if (path.Length == 0) continue;
+            if (!Path.IsPathFullyQualified(path)) throw new ArgumentException($"来源文件夹必须是绝对路径：{path}");
             string full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             if (!normalized.Add(NormalizePath(full))) throw new ArgumentException($"来源文件夹重复：{full}");
             string scanMode = folder.ScanMode?.Trim().ToLowerInvariant() ?? "normal";
@@ -559,6 +575,7 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
             string[] exclusions = (folder.ExcludePatterns ?? []).Select(value => value.Trim()).Where(value => value.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).Take(100).ToArray();
             folders.Add(new(full, folder.IncludeSubfolders, folder.Enabled, scanMode, exclusions));
         }
+        if (folders.Count == 0) throw new ArgumentException("媒体库至少需要一个来源文件夹。");
         return new(name, input.Description?.Trim(), input.Enabled, folders);
     }
 

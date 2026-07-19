@@ -42,6 +42,40 @@ public sealed class LegacyCompletionPart2Tests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CleanupAllTasksRequiresNoActiveTasks()
+    {
+        await using var connection = await Open();
+        string at = DateTimeOffset.UtcNow.ToString("O");
+        await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Progress,TotalItems,CompletedItems,CreatedAt,UpdatedAt) VALUES(1,'Sync','Completed',100,1,1,$at,$at),(2,'Scan','Running',50,1,0,$at,$at)", ("$at", at));
+        await Execute(connection, "INSERT INTO TaskLogs(TaskId,Level,Message,CreatedAt) VALUES(1,'Info','done',$at),(2,'Info','running',$at)", ("$at", at));
+        var service = new TaskCommandService(Database, null!, null!, null!, null!, null!, null!);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CleanupAsync("all-tasks"));
+        await Execute(connection, "UPDATE Tasks SET Status='Cancelled' WHERE Id=2");
+        TaskCleanupResult result = await service.CleanupAsync("all-tasks");
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal(0, await Scalar(connection, "SELECT COUNT(*) FROM Tasks"));
+        Assert.Equal(0, await Scalar(connection, "SELECT COUNT(*) FROM TaskLogs"));
+    }
+
+    [Fact]
+    public async Task TaskListReturnsAllTasksAndPrioritizesActiveWork()
+    {
+        await using var connection = await Open();
+        string at = DateTimeOffset.UtcNow.ToString("O");
+        for (int id = 1; id <= 220; id++)
+            await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Stage,Progress,TotalItems,CompletedItems,CreatedAt,UpdatedAt) VALUES($id,'Sync','Pending','Pending',0,1,0,$at,$at)", ("$id", id), ("$at", at));
+        await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Stage,Progress,TotalItems,CompletedItems,CreatedAt,UpdatedAt) VALUES(221,'Sync','FetchingMetadata','FetchingMetadata',22,1,0,$at,$at)", ("$at", at));
+
+        IReadOnlyList<TaskDto> tasks = await ProductReader.ReadTasksAsync(Database);
+
+        Assert.Equal(221, tasks.Count);
+        Assert.Equal(221, tasks[0].Id);
+        Assert.Equal("FetchingMetadata", tasks[0].Status);
+    }
+
+    [Fact]
     public async Task AdvancedSearchSupportsUnratedAndExactStarBuckets()
     {
         await using var connection = await Open();
@@ -63,6 +97,60 @@ public sealed class LegacyCompletionPart2Tests : IAsyncLifetime
         MediaPageDto unrated = await ProductReader.AdvancedSearchAsync(Database, "http://127.0.0.1:47831", "", null, null, null, null, null, null, null, null, 0, "unrated", "all", "all", "all", null, "newest", 24, 0);
         Assert.Single(unrated.Items);
         Assert.Equal("RATE-004", unrated.Items[0].Code);
+    }
+
+    [Fact]
+    public async Task DashboardAndMovieWallDefaultCountsOnlyAvailablePrimaryVideos()
+    {
+        await using var connection = await Open();
+        string at = DateTimeOffset.UtcNow.ToString("O");
+        for (int id = 1; id <= 2; id++) {
+            await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt,ImportedAt) VALUES($id,$code,$code,0,0,'pending','Test',$at,$at,$at)", ("$id", id), ("$code", $"FILE-{id:000}"), ("$at", at));
+            await Execute(connection, "INSERT INTO MediaFiles(MovieId,FilePath,NormalizedPath,FileName,Extension,FileSize,MediaType,SourceType,IsPrimary,ExistsState,CreatedAt,UpdatedAt) VALUES($id,$path,$path,$file,'.mp4',1,'Video','Test',1,$state,$at,$at)", ("$id", id), ("$path", Path.Combine(root, $"file-{id}.mp4")), ("$file", $"file-{id}.mp4"), ("$state", id == 1 ? "Present" : "Missing"), ("$at", at));
+        }
+
+        DashboardDto dashboard = await ProductReader.ReadDashboardAsync(Database, "http://127.0.0.1:47831");
+        MediaPageDto defaultPage = await ProductReader.AdvancedSearchAsync(Database, "http://127.0.0.1:47831", "", null, null, null, null, null, null, null, null, 0, "all", "all", "all", "all", null, "newest", 24, 0);
+        MediaPageDto missingPage = await ProductReader.AdvancedSearchAsync(Database, "http://127.0.0.1:47831", "", null, null, null, null, null, null, null, null, 0, "all", "all", "missing", "all", null, "newest", 24, 0);
+
+        Assert.Equal(1, dashboard.MovieCount);
+        Assert.Equal(1, defaultPage.Total);
+        Assert.Equal("FILE-001", defaultPage.Items[0].Code);
+        Assert.Equal(1, missingPage.Total);
+        Assert.Equal("FILE-002", missingPage.Items[0].Code);
+    }
+
+    [Fact]
+    public async Task MovieMetadataStatusUsesGenresForScrapedTags()
+    {
+        await using var connection = await Open();
+        string at = DateTimeOffset.UtcNow.ToString("O");
+        await Execute(connection, "INSERT INTO Movies(Id,Code,Title,Description,DurationSeconds,IsScraped,ScrapeStatus,NfoPath,LegacySource,CreatedAt,UpdatedAt,ImportedAt) VALUES(1,'META-001','Meta title','Plot',3600,1,'complete',$nfo,'Test',$at,$at,$at)", ("$nfo", Path.Combine(root, "META-001.nfo")), ("$at", at));
+        await Execute(connection, "INSERT INTO MediaFiles(MovieId,FilePath,NormalizedPath,FileName,Extension,FileSize,MediaType,SourceType,IsPrimary,ExistsState,CreatedAt,UpdatedAt) VALUES(1,$path,$path,'META-001.mp4','.mp4',1,'Video','Test',1,'Present',$at,$at)", ("$path", Path.Combine(root, "META-001.mp4")), ("$at", at));
+        await Execute(connection, "INSERT INTO Images(MovieId,ImageType,FilePath,IsPrimary,ValidationStatus,CreatedAt,UpdatedAt) VALUES(1,'Poster',$poster,1,'Valid',$at,$at),(1,'Fanart',$fanart,0,'Valid',$at,$at),(1,'Preview',$preview,0,'Valid',$at,$at)", ("$poster", Path.Combine(root, "poster.jpg")), ("$fanart", Path.Combine(root, "fanart.jpg")), ("$preview", Path.Combine(root, "preview.jpg")), ("$at", at));
+        await Execute(connection, "INSERT INTO Actors(Id,Name,NormalizedName,LegacySource,CreatedAt,UpdatedAt) VALUES(1,'Actor A','ACTOR A','Test',$at,$at); INSERT INTO MovieActors(MovieId,ActorId,SortOrder) VALUES(1,1,0)", ("$at", at));
+        await Execute(connection, "INSERT INTO Genres(Id,Name,NormalizedName) VALUES(1,'Genre A','GENRE A'); INSERT INTO MovieGenres(MovieId,GenreId) VALUES(1,1)");
+
+        MovieDetailDto? movie = await ProductReader.ReadMovieAsync(Database, "http://127.0.0.1:47831", 1);
+
+        Assert.NotNull(movie);
+        Assert.True(movie.MetadataStatus.Checks.Single(item => item.Key == "tags").Complete);
+        Assert.DoesNotContain("标签", movie.MetadataStatus.MissingItems);
+    }
+
+    [Fact]
+    public async Task DirectorMigrationIsIdempotentAndReaderCompatible()
+    {
+        await using var connection = await Open();
+        string migration = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", "0013_DirectorMetadata.sql"));
+
+        await Execute(connection, migration);
+        await Execute(connection, migration);
+        EntityPageDto directors = await ProductReader.ReadEntitiesPageAsync(Database, "http://127.0.0.1:47831", "directors", "", "count", 24, 0);
+
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='Directors'"));
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MovieDirectors'"));
+        Assert.Empty(directors.Items);
     }
 
     public Task DisposeAsync()

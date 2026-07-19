@@ -49,6 +49,7 @@ docs/               → 证据、Release 验收、字段映射、矩阵
 | [DEC-014](#dec-014-image-setas-product-cancelled) | Image SetAs 产品取消 | Images / Feature Parity | Feature Parity | `docs(product)` |
 | [DEC-015](#dec-015-duplicate-management-and-batch-organizer-convergence) | 查重与批量整理统一入口 | Organizer / Feature Parity | Feature Parity | `refactor(organizer)` |
 | [DEC-016](#dec-016-final-system-features-and-feature-freeze) | 最终系统功能迁移与 Feature Freeze | Settings / System / Feature Parity | Feature Parity | `feat(system)` |
+| [DEC-017](#dec-017-legacy-settings-migration-completion) | 旧设置迁移收口与兼容字段隐藏 | Settings / Feature Freeze | Feature Freeze | `fix(settings)` |
 
 ---
 
@@ -1338,6 +1339,42 @@ Feature Freeze 期间不得新增 UI 优化、新产品功能或旧版范围外�
 
 ---
 
+### DEC-017: Legacy Settings Migration Completion
+
+| 字段 | 值 |
+|------|-----|
+| **Decision ID** | DEC-017 |
+| **模块** | Settings / Feature Freeze |
+| **Sprint** | Settings Migration Completion |
+| **日期** | 2026-07-19 |
+| **状态** | Accepted |
+
+#### 背景
+
+旧配置读取能力已经存在，但设置页仍把 `WindowConfig.*`、`ScanConfig.*` 等内部 Key 作为“已读取的兼容设置”展示给用户。这会把兼容层误认为正式设置，并让危险旧开关绕开当前 Safe Delete、MovieWall 状态恢复和统一 Settings 规则。
+
+#### 最终方案
+
+- 普通设置页不再展示“已读取的兼容设置”分组，不显示内部 Key、命名空间、配置路径或原始 JSON 字段。
+- 旧配置读取逻辑继续保留在 Bridge 后端，只作为一次性迁移输入、插件/Provider 兼容证据和诊断资料。
+- `ScanConfig.MinFileSize` 迁移为正式 `UnifiedSettings.scan.minFileSizeMb`，设置页显示为“最小影片文件大小（MB）”，扫描服务真实使用该阈值过滤候选视频。
+- 一次性迁移遵循优先级：新版用户设置 > 已迁移值 > 旧版兼容值 > 安全默认值。迁移只在 marker 不存在时执行；非默认的新值不会被旧值覆盖。
+- 旧配置损坏或缺失时使用安全默认值，记录错误但不阻止启动。
+
+#### Product Cancelled / Replaced
+
+- `WindowConfig.Main.DetailWindowShowAllMovie`：取消旧开关。详情页上一部/下一部按当前 MovieWall 查询上下文、筛选、排序和媒体库范围浏览，不提供“全库浏览”破坏上下文的选项。
+- `WindowConfig.Settings.DelInfoAfterDelFile`：取消旧危险开关。删除行为统一服从当前 Safe Delete / 删除预览 / 确认 / 数据保护流程，不允许通过旧设置绕过安全链。
+- `ScanConfig.FetchVID`：取消旧开关。Next 扫描固定识别文件名番号，不提供关闭项。
+
+#### 以后必须遵守
+
+- 新设置必须进入 `UnifiedSettingsDto` 和 `SettingsSaveCoordinator`，经 `PUT /api/settings/all` 单事务保存。
+- 兼容字段不得作为普通设置项展示；确需展示未迁移项目时必须使用用户可理解名称，不显示内部 Key。
+- 不得把旧危险开关直接迁移成新版危险开关；必须以当前产品安全工作流为准。
+
+---
+
 ## PROJECT §21 Sprint History（摘要）
 
 | Sprint | 摘要 | 决策 |
@@ -1351,6 +1388,7 @@ Feature Freeze 期间不得新增 UI 优化、新产品功能或旧版范围外�
 | Feature Parity | Image SetAs 产品取消：图片资源由刮削、NFO 和 MetaTube 统一管理 | DEC-014 |
 | Feature Parity | 查重与批量整理合并为整理工具统一入口，并完成重复 Safe Delete、批量移动、批量重命名执行流 | DEC-015 |
 | Feature Parity | 日志清理、语言、托盘/关闭、快捷键管理和检查更新完成保留范围迁移，进入 Feature Freeze | DEC-016 |
+| Feature Freeze | 旧设置迁移收口：兼容字段隐藏，最小扫描文件大小成为正式设置，危险旧开关取消 | DEC-017 |
 
 ---
 

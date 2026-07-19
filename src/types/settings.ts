@@ -34,6 +34,7 @@ export interface PlaybackSettings { playerPath: string; useSystemDefault: boolea
 export interface RatingRetentionSettings { enabled: boolean }
 export interface AppearanceSettings { themeMode: 'light' | 'dark' }
 export interface MovieWallDisplaySettings { posterOrientation: 'portrait' | 'landscape'; posterSize: 'small' | 'medium' | 'large' }
+export interface ScanSettings { minFileSizeMb: number }
 export interface SystemSettings {
   language: 'system' | 'zh-CN'
   closeBehavior: 'exit' | 'minimizeToTray'
@@ -65,6 +66,7 @@ export interface UnifiedSettings {
   appearance: AppearanceSettings
   mediaStorage: MediaStorageSettings
   movieWallDisplay: MovieWallDisplaySettings
+  scan: ScanSettings
   system: SystemSettings
 }
 export interface UnifiedSettingsSaveResult { settings: UnifiedSettings; changedFields: string[]; message: string }

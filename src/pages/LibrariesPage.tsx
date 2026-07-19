@@ -48,7 +48,11 @@ export default function LibrariesPage() {
   const save = async () => {
     if (!editor) return
     setBusy(true); setError(''); setNotice('')
-    try { const result = editor.id ? await bridge.updateLibrary(editor.id, editor.value) : await bridge.createLibrary(editor.value); setNotice(result.message); setEditor(undefined); await load() }
+    try {
+      const clean = normalizeLibraryInput(editor.value)
+      const result = editor.id ? await bridge.updateLibrary(editor.id, clean) : await bridge.createLibrary(clean)
+      setNotice(result.message); setEditor(undefined); await load()
+    }
     catch (reason) { setError((reason as Error).message) }
     finally { setBusy(false) }
   }
@@ -104,6 +108,26 @@ export default function LibrariesPage() {
       <DialogActions><Button onClick={() => setDeleting(undefined)} disabled={busy}>取消</Button><Button color="error" variant="contained" onClick={() => void confirmDelete()} disabled={busy}>{busy ? '删除中…' : '删除媒体库定义'}</Button></DialogActions>
     </Dialog>
   </WorkspacePage>
+}
+
+function normalizeLibraryInput(input: LibraryInput): LibraryInput {
+  const name = input.name.trim()
+  if (!name) throw new Error('媒体库名称不能为空。')
+  const folders = input.folders
+    .map(folder => ({
+      ...folder,
+      path: folder.path.trim(),
+      excludePatterns: (folder.excludePatterns || []).map(pattern => pattern.trim()).filter(Boolean),
+    }))
+    .filter(folder => folder.path.length > 0)
+  if (folders.length === 0) throw new Error('媒体库至少需要一个来源文件夹。')
+  const seen = new Set<string>()
+  for (const folder of folders) {
+    const key = folder.path.replace(/[\\/]+$/g, '').toLocaleLowerCase()
+    if (seen.has(key)) throw new Error(`来源文件夹重复：${folder.path}`)
+    seen.add(key)
+  }
+  return { ...input, name, description: input.description?.trim(), folders }
 }
 
 function LibraryEditor({ editor, busy, setEditor, updateEditor, updateFolder, save }: { editor?: { id?: number; value: LibraryInput }; busy: boolean; setEditor: (value?: { id?: number; value: LibraryInput }) => void; updateEditor: (value: Partial<LibraryInput>) => void; updateFolder: (index: number, value: Partial<LibraryFolderInput>) => void; save: () => void }) {

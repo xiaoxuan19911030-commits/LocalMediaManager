@@ -9,7 +9,7 @@ import UploadFileRoundedIcon from '@mui/icons-material/UploadFileRounded'
 import { Alert, Box, Button, ButtonBase, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, FormControlLabel, List, ListItemButton, ListItemText, MenuItem, Paper, Snackbar, Stack, Switch, TextField, Typography } from '@mui/material'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { FormEvent, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useBlocker, useNavigate } from 'react-router'
 import { BrandMark } from '@/components/BrandMark'
 import { HealthMeter, SurfaceSection } from '@/components/ProductComponents'
@@ -21,7 +21,7 @@ import { defaultMovieWallDisplay, normalizeMovieWallDisplay } from '@/components
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
 import type { BridgeHealth, TaskItem } from '@/types/media'
-import type { BackupValidation, DataSafetyOverview, DiagnosticCheck, LogCleanupPreview, LogCleanupResult, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, NfoSettings, PlaybackSettings, RatingRetentionSettings, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult } from '@/types/settings'
+import type { BackupValidation, DataSafetyOverview, DiagnosticCheck, LogCleanupPreview, LogCleanupResult, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, NfoSettings, PlaybackSettings, RatingRetentionSettings, ScanSettings, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 
 const categories = [
@@ -160,15 +160,6 @@ export default function SettingsPage() {
   }, [])
 
   const currentTitle = categories.find(([key]) => key === category)?.[1] ?? '设置'
-  const legacyFields = useMemo(() => snapshot?.fields.filter(field => {
-    if (category === 'scan') return field.category === 'library' && field.section.includes('Scan')
-    if (category === 'search') return false
-    if (category === 'images') return field.category === 'metadata' && (field.section.includes('缓存') || field.section.includes('图片'))
-    if (category === 'data') return field.category === 'library' && field.section.includes('数据')
-    if (category === 'logs') return field.category === 'advanced' && field.section.includes('日志')
-    return field.category === category
-  }) ?? [], [snapshot, category])
-
   const updateDraft = <K extends keyof UnifiedSettings>(key: K, value: UnifiedSettings[K]) => {
     setDraft(current => current ? { ...current, [key]: value } : current)
     if (key === 'appearance') setMode((value as UnifiedSettings['appearance']).themeMode)
@@ -295,12 +286,12 @@ export default function SettingsPage() {
         </Paper>
         {category === 'general' && <GeneralSection snapshot={snapshot} system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
         {category === 'library' && <LibrarySection onOpen={() => navigate('/libraries')}/>}
-        {category === 'scan' && <PlannedSection labels={['自动读取 NFO', '自动读取本地图片', '忽略隐藏文件', '视频扩展名白名单']} fields={legacyFields}/>}
+        {category === 'scan' && <ScanSection scan={draft.scan} setScan={(value) => updateDraft('scan', value)}/>}
         {category === 'metadata' && <MetadataSection metaTube={draft.metaTube} setMetaTube={(value) => updateDraft('metaTube', value)} nfo={draft.nfo} setNfo={(value) => updateDraft('nfo', value)} busy={busy} testMetaTube={testMetaTube}/>}
         {category === 'images' && <ImagesSection cachePreview={cachePreview} setCachePreview={setCachePreview} onClean={() => setConfirm('cache')} onThumbs={() => setConfirm('thumbs')}/>}
         {category === 'mediaStorage' && <MediaStorageSection mediaStorage={draft.mediaStorage} defaults={defaults.mediaStorage} setMediaStorage={(value) => updateDraft('mediaStorage', value)} setNotice={setNotice}/>}
         {category === 'playback' && <PlaybackSection playback={draft.playback} setPlayback={(value) => updateDraft('playback', value)}/>}
-        {category === 'search' && <PlannedSection labels={['默认搜索范围', '默认排序', '默认卡片/列表模式', '保存页面筛选状态']} fields={legacyFields}/>}
+        {category === 'search' && <PlannedSection labels={['默认搜索范围', '默认排序', '默认卡片/列表模式', '保存页面筛选状态']}/>}
         {category === 'shortcuts' && <ShortcutSection system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
         {category === 'appearance' && <Stack spacing={2}>
           <AppearanceSection mode={draft.appearance.themeMode} setMode={(value) => updateDraft('appearance', { themeMode: value })}/>
@@ -309,7 +300,6 @@ export default function SettingsPage() {
         {category === 'data' && <DataSection overview={overview} ratingRetention={draft.ratingRetention} setRatingRetention={(value) => updateDraft('ratingRetention', value)} backupPath={backupPath} setBackupPath={setBackupPath} restoreMode={restoreMode} setRestoreMode={setRestoreMode} validation={backupValidation} setValidation={setBackupValidation} importJson={importJson} setImportJson={setImportJson} importPreview={importPreview} previewImport={previewImport} onBackup={() => setConfirm('backup')} onRestore={() => setConfirm('restore')}/>}
         {category === 'logs' && <LogsSection system={draft.system} setSystem={(value) => updateDraft('system', value)} diagnostics={diagnostics} logPreview={logPreview} includeAll={logIncludeAll} setIncludeAll={setLogIncludeAll} runDiagnostics={() => bridge.settingsDiagnostics().then(setDiagnostics).catch((reason: Error) => setError(reason.message))} previewLogs={() => void previewLogs()}/>}
         {category === 'about' && <AboutSection overview={overview} health={health} system={draft.system} setSystem={(value) => updateDraft('system', value)} updateResult={updateResult} checkUpdates={checkUpdates}/>}
-        {legacyFields.length > 0 && category !== 'metadata' && category !== 'playback' && category !== 'images' && <LegacyFields fields={legacyFields}/>}
       </Stack>
     </Box>
     <Paper elevation={4} sx={{ position: 'sticky', bottom: 0, zIndex: 2, mt: 2, mx: { xs: -2, md: -3 }, mb: { xs: -2, md: -3 }, px: { xs: 2, md: 3 }, py: 1.5, borderTop: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
@@ -511,8 +501,28 @@ function PreviewRail({ children }: { children: ReactNode }) {
 function PreviewPoster({ width, height }: { width: number; height: number }) {
   return <Box sx={{ width, height, borderRadius: 1, bgcolor: 'primary.light' }}/>
 }
-function PlannedSection({ labels, fields }: { labels: string[]; fields: unknown[] }) {
-  return <SurfaceSection title="计划与兼容设置" description="可读取的旧配置会显示在下方；暂无后端能力的选项只标记计划支持。"><Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>{labels.map(label => <Chip key={label} label={label} variant="outlined"/>)}<StatusBadge tone={fields.length ? 'info' : 'neutral'} label={`${fields.length} 个兼容字段`}/></Stack></SurfaceSection>
+function ScanSection({ scan, setScan }: { scan: ScanSettings; setScan: (value: ScanSettings) => void }) {
+  const updateMinimumSize = (value: string) => {
+    const parsed = Number(value)
+    setScan({ ...scan, minFileSizeMb: Number.isFinite(parsed) ? parsed : 0 })
+  }
+  return <SurfaceSection title="扫描设置" description="控制媒体库扫描时如何识别影片文件。设置保存后，下次扫描开始生效。">
+    <Stack spacing={1.5}>
+      <TextField
+        type="number"
+        size="small"
+        label="最小影片文件大小"
+        value={scan.minFileSizeMb}
+        onChange={event => updateMinimumSize(event.target.value)}
+        slotProps={{ htmlInput: { min: 0, max: 1048576, step: 1 } }}
+        helperText="单位 MB。扫描时会忽略小于此大小的视频文件；0 表示不按大小跳过。"
+      />
+      <Alert severity="info">番号识别为扫描固定行为，不再提供旧版开关。</Alert>
+    </Stack>
+  </SurfaceSection>
+}
+function PlannedSection({ labels }: { labels: string[] }) {
+  return <SurfaceSection title="规划项" description="这些偏好暂未形成正式设置；不会显示旧版内部配置字段。"><Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>{labels.map(label => <Chip key={label} label={label} variant="outlined"/>)}<StatusBadge tone="neutral" label="未启用"/></Stack></SurfaceSection>
 }
 function ShortcutSection({ system, setSystem }: { system: SystemSettings; setSystem: (value: SystemSettings) => void }) {
   const keys = [
@@ -598,9 +608,6 @@ function AboutSection({ overview, health, system, setSystem, updateResult, check
       </Stack>
     </SurfaceSection>
   </Stack>
-}
-function LegacyFields({ fields }: { fields: { key: string; label: string; value: unknown; readStatus: string; requiresRestart: boolean; safeToWrite: boolean }[] }) {
-  return <SurfaceSection title="已读取的兼容设置" description="这些字段来自现有配置体系；不可安全写入的字段仅展示。"><Stack spacing={1}>{fields.slice(0, 24).map(field => <Card key={field.key} variant="outlined"><CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}><Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ justifyContent: 'space-between' }}><Box><Typography sx={{ fontWeight: 750 }}>{field.label}</Typography><Typography variant="caption" color="text.secondary">{field.key}</Typography></Box><Stack direction="row" spacing={1}><StatusBadge tone={field.readStatus === 'ok' ? 'success' : 'warning'} label={field.readStatus}/>{field.requiresRestart && <StatusBadge tone="warning" label="需重启"/>}<Typography variant="body2">{String(field.value ?? '')}</Typography></Stack></Stack></CardContent></Card>)}</Stack></SurfaceSection>
 }
 function confirmDescription(value?: string) {
   if (value === 'backup') return '将创建数据库和配置备份，默认不包含原始影片与原始图片。'

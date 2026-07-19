@@ -1,5 +1,6 @@
 using LocalMediaManager.Bridge;
 using Microsoft.Data.Sqlite;
+using System.Text.Json;
 using Xunit;
 
 namespace LocalMediaManager.Bridge.Tests;
@@ -28,6 +29,7 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
         Directory.CreateDirectory(DocumentsRoot);
         coordinator = new SettingsSaveCoordinator(Database,
             InstallRoot,
+            LegacyDatabase,
             new MetadataProviderSettingsService(Database),
             new NfoService(Database, new MediaStoragePathResolver(Database, InstallRoot)),
             new PlaybackSettingsService(Database, LegacyDatabase),
@@ -47,6 +49,7 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
         Assert.Equal(defaults.Appearance, loaded.Appearance);
         Assert.Equal(defaults.MediaStorage, loaded.MediaStorage);
         Assert.Equal(defaults.MovieWallDisplay, loaded.MovieWallDisplay);
+        Assert.Equal(defaults.Scan, loaded.Scan);
     }
 
     [Fact]
@@ -63,6 +66,7 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
             Appearance = new("light"),
             MediaStorage = current.MediaStorage with { PostersDirectory = "Covers" },
             MovieWallDisplay = new("landscape", "large"),
+            Scan = new(128),
         };
 
         UnifiedSettingsSaveResult result = await coordinator.SaveAsync(draft);
@@ -74,6 +78,7 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
         Assert.Contains("appearance", result.ChangedFields);
         Assert.Contains("mediaStorage", result.ChangedFields);
         Assert.Contains("movieWallDisplay", result.ChangedFields);
+        Assert.Contains("scan", result.ChangedFields);
         Assert.False(saved.MetaTube.Enabled);
         Assert.Equal(180, saved.MetaTube.TimeoutSeconds);
         Assert.Equal(Path.GetFullPath(nfoDir), saved.Nfo.OutputDirectory);
@@ -83,6 +88,53 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
         Assert.Equal("Covers", saved.MediaStorage.PostersDirectory);
         Assert.Equal("landscape", saved.MovieWallDisplay.PosterOrientation);
         Assert.Equal("large", saved.MovieWallDisplay.PosterSize);
+        Assert.Equal(128, saved.Scan.MinFileSizeMb);
+    }
+
+    [Fact]
+    public async Task LegacySettingsMigrateOnceWithoutOverwritingNewValues()
+    {
+        await CreateLegacySettingsAsync("""
+            {
+              "ScanConfig": { "MinFileSize": 321 },
+              "WindowConfig.Settings": { "CloseToTaskBar": true, "CurrentLanguage": "zh-CN", "SaveInfoToNFO": true },
+              "DownloadConfig": { "AutoDownloadAfterScan": false },
+              "ProxyConfig": { "HttpTimeout": 60 }
+            }
+            """);
+        UnifiedSettingsDto first = await coordinator.ReadAsync();
+
+        Assert.Equal(321, first.Scan.MinFileSizeMb);
+        Assert.Equal("minimizeToTray", first.System.CloseBehavior);
+        Assert.Equal("zh-CN", first.System.Language);
+        Assert.True(first.MetaTube.WriteNfo);
+        Assert.False(first.MetaTube.AutoExecute);
+        Assert.Equal(60, first.MetaTube.TimeoutSeconds);
+
+        UnifiedSettingsDto changed = first with { Scan = new(12), System = first.System with { CloseBehavior = "exit" } };
+        await coordinator.SaveAsync(changed);
+        UnifiedSettingsDto second = await coordinator.ReadAsync();
+        UnifiedSettingsDto third = await coordinator.ReadAsync();
+
+        Assert.Equal(12, second.Scan.MinFileSizeMb);
+        Assert.Equal("exit", second.System.CloseBehavior);
+        Assert.Equal(second, third);
+    }
+
+    [Fact]
+    public async Task LegacySettingsMigrationToleratesBrokenConfig()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(LegacyDatabase)!);
+        await using (var legacy = new SqliteConnection($"Data Source={LegacyDatabase}")) {
+            await legacy.OpenAsync();
+            await using var create = legacy.CreateCommand();
+            create.CommandText = "CREATE TABLE app_configs(ConfigName TEXT PRIMARY KEY, ConfigValue TEXT); INSERT INTO app_configs(ConfigName,ConfigValue) VALUES('ScanConfig','{bad json')";
+            await create.ExecuteNonQueryAsync();
+        }
+
+        UnifiedSettingsDto loaded = await coordinator.ReadAsync();
+
+        Assert.Equal(0, loaded.Scan.MinFileSizeMb);
     }
 
     [Theory]
@@ -355,6 +407,7 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
         Directory.CreateDirectory(movedInstallRoot);
         var movedCoordinator = new SettingsSaveCoordinator(Database,
             movedInstallRoot,
+            LegacyDatabase,
             new MetadataProviderSettingsService(Database),
             new NfoService(Database, new MediaStoragePathResolver(Database, movedInstallRoot)),
             new PlaybackSettingsService(Database, LegacyDatabase),
@@ -408,5 +461,24 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
     {
         try { Directory.Delete(root, true); } catch { }
         return Task.CompletedTask;
+    }
+
+    private async Task CreateLegacySettingsAsync(string json)
+    {
+        using JsonDocument document = JsonDocument.Parse(json);
+        Directory.CreateDirectory(Path.GetDirectoryName(LegacyDatabase)!);
+        await using var legacy = new SqliteConnection($"Data Source={LegacyDatabase}");
+        await legacy.OpenAsync();
+        await using (var create = legacy.CreateCommand()) {
+            create.CommandText = "CREATE TABLE app_configs(ConfigName TEXT PRIMARY KEY, ConfigValue TEXT)";
+            await create.ExecuteNonQueryAsync();
+        }
+        foreach (JsonProperty config in document.RootElement.EnumerateObject()) {
+            await using var insert = legacy.CreateCommand();
+            insert.CommandText = "INSERT INTO app_configs(ConfigName,ConfigValue) VALUES($name,$value)";
+            insert.Parameters.AddWithValue("$name", config.Name);
+            insert.Parameters.AddWithValue("$value", config.Value.GetRawText());
+            await insert.ExecuteNonQueryAsync();
+        }
     }
 }

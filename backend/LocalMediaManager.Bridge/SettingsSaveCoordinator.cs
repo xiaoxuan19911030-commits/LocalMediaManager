@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 
@@ -6,6 +7,7 @@ namespace LocalMediaManager.Bridge;
 
 public sealed record AppearanceSettingsDto(string ThemeMode);
 public sealed record MovieWallDisplaySettingsDto(string PosterOrientation, string PosterSize);
+public sealed record ScanSettingsDto(double MinFileSizeMb);
 public sealed record SystemSettingsDto(string Language, string CloseBehavior, bool StartMinimizedToTray, int LogRetentionDays,
     bool GlobalShortcutsEnabled, bool AutoCheckUpdates, string? LastUpdateCheckAt = null);
 
@@ -31,6 +33,7 @@ public sealed record UnifiedSettingsDto(
     AppearanceSettingsDto Appearance,
     MediaStorageSettingsDto MediaStorage,
     MovieWallDisplaySettingsDto MovieWallDisplay,
+    ScanSettingsDto Scan,
     SystemSettingsDto System);
 
 public sealed record UnifiedSettingsSaveResult(UnifiedSettingsDto Settings, IReadOnlyList<string> ChangedFields, string Message);
@@ -38,6 +41,7 @@ public sealed record UnifiedSettingsSaveResult(UnifiedSettingsDto Settings, IRea
 public sealed class SettingsSaveCoordinator(
     string databasePath,
     string installRoot,
+    string legacyConfigDatabasePath,
     MetadataProviderSettingsService metadata,
     NfoService nfo,
     PlaybackSettingsService playback,
@@ -47,9 +51,11 @@ public sealed class SettingsSaveCoordinator(
 
     public async Task<UnifiedSettingsDto> ReadAsync(CancellationToken token = default)
     {
+        await MigrateLegacySettingsOnceAsync(token);
         AppearanceSettingsDto appearance = await ReadAppearanceAsync(token);
         MovieWallDisplaySettingsDto movieWallDisplay = await ReadMovieWallDisplayAsync(token);
         MediaStorageSettingsDto mediaStorage = await ReadMediaStorageAsync(token);
+        ScanSettingsDto scan = await ReadScanAsync(token);
         SystemSettingsDto system = await ReadSystemAsync(token);
         return new(
             await metadata.ReadMetaTubeAsync(),
@@ -59,6 +65,7 @@ public sealed class SettingsSaveCoordinator(
             appearance,
             mediaStorage,
             movieWallDisplay,
+            scan,
             system);
     }
 
@@ -90,6 +97,7 @@ public sealed class SettingsSaveCoordinator(
         await StoreAsync(connection, transaction, "appearance.themeMode", clean.Appearance.ThemeMode, "string", token);
         await StoreAsync(connection, transaction, "movieWall.posterOrientation", clean.MovieWallDisplay.PosterOrientation, "string", token);
         await StoreAsync(connection, transaction, "movieWall.posterSize", clean.MovieWallDisplay.PosterSize, "string", token);
+        await StoreAsync(connection, transaction, "scan.minFileSizeMb", clean.Scan.MinFileSizeMb, "number", token);
         await StoreAsync(connection, transaction, "system.language", clean.System.Language, "string", token);
         await StoreAsync(connection, transaction, "system.closeBehavior", clean.System.CloseBehavior, "string", token);
         await StoreAsync(connection, transaction, "system.startMinimizedToTray", clean.System.StartMinimizedToTray, "boolean", token);
@@ -143,6 +151,7 @@ public sealed class SettingsSaveCoordinator(
             new(theme),
             mediaStorage,
             new(posterOrientation, posterSize),
+            NormalizeScan(input.Scan),
             NormalizeSystem(input.System));
     }
 
@@ -189,6 +198,18 @@ public sealed class SettingsSaveCoordinator(
         orientation = string.Equals(orientation, "landscape", StringComparison.OrdinalIgnoreCase) ? "landscape" : "portrait";
         size = size.ToLowerInvariant() is "small" or "large" ? size.ToLowerInvariant() : "medium";
         return new(orientation, size);
+    }
+
+    private async Task<ScanSettingsDto> ReadScanAsync(CancellationToken token)
+    {
+        await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadOnly, token);
+        double fallback = SettingsDefaults.Unified.Scan.MinFileSizeMb;
+        string? raw = await ScalarTextAsync(connection, "SELECT ValueJson FROM AppSettings WHERE Key='scan.minFileSizeMb'", token);
+        if (!string.IsNullOrWhiteSpace(raw)) {
+            try { return NormalizeScan(new(JsonSerializer.Deserialize<double>(raw))); }
+            catch (JsonException) { }
+        }
+        return new(fallback);
     }
 
     private async Task<MediaStorageSettingsDto> ReadMediaStorageAsync(CancellationToken token)
@@ -377,6 +398,15 @@ public sealed class SettingsSaveCoordinator(
         return (await command.ExecuteScalarAsync(token))?.ToString();
     }
 
+    private static async Task<string?> ScalarTextAsync(SqliteConnection connection, SqliteTransaction transaction, string sql, CancellationToken token, params (string Name, object? Value)[] values)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        foreach ((string name, object? value) in values) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        return (await command.ExecuteScalarAsync(token))?.ToString();
+    }
+
     private static IReadOnlyList<string> ChangedFields(UnifiedSettingsDto before, UnifiedSettingsDto after)
     {
         var changed = new List<string>();
@@ -387,8 +417,142 @@ public sealed class SettingsSaveCoordinator(
         if (before.Appearance != after.Appearance) changed.Add("appearance");
         if (before.MediaStorage != after.MediaStorage) changed.Add("mediaStorage");
         if (before.MovieWallDisplay != after.MovieWallDisplay) changed.Add("movieWallDisplay");
+        if (before.Scan != after.Scan) changed.Add("scan");
         if (before.System != after.System) changed.Add("system");
         return changed;
+    }
+
+    private async Task MigrateLegacySettingsOnceAsync(CancellationToken token)
+    {
+        await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, token);
+        string? migrated = await ScalarTextAsync(connection, "SELECT ValueJson FROM AppSettings WHERE Key='legacySettings.migration.completedAt'", token);
+        if (!string.IsNullOrWhiteSpace(migrated)) return;
+
+        var migratedKeys = new List<string>();
+        try {
+            Dictionary<string, JsonObject> legacy = await ReadLegacyConfigObjectsAsync(token);
+            await using SqliteTransaction transaction = (SqliteTransaction)await connection.BeginTransactionAsync(token);
+            await StoreIfMissingOrDefaultAsync(connection, transaction, "scan.minFileSizeMb", ReadLegacyDouble(legacy, "ScanConfig", "MinFileSize", SettingsDefaults.Unified.Scan.MinFileSizeMb), SettingsDefaults.Unified.Scan.MinFileSizeMb, "number", migratedKeys, token);
+            await StoreIfMissingOrDefaultAsync(connection, transaction, "system.language", ReadLegacyLanguage(legacy), SettingsDefaults.Unified.System.Language, "string", migratedKeys, token);
+            await StoreIfMissingOrDefaultAsync(connection, transaction, "system.closeBehavior", ReadLegacyBool(legacy, "WindowConfig.Settings", "CloseToTaskBar", false) ? "minimizeToTray" : "exit", SettingsDefaults.Unified.System.CloseBehavior, "string", migratedKeys, token);
+            await StoreIfMissingOrDefaultAsync(connection, transaction, "metadata.metatube.timeoutSeconds", Math.Clamp((int)Math.Round(ReadLegacyDouble(legacy, "ProxyConfig", "HttpTimeout", SettingsDefaults.Unified.MetaTube.TimeoutSeconds)), 15, 180), SettingsDefaults.Unified.MetaTube.TimeoutSeconds, "integer", migratedKeys, token);
+            await StoreIfMissingOrDefaultAsync(connection, transaction, "metadata.metatube.writeNfo", ReadLegacyBool(legacy, "WindowConfig.Settings", "SaveInfoToNFO", SettingsDefaults.Unified.MetaTube.WriteNfo), SettingsDefaults.Unified.MetaTube.WriteNfo, "boolean", migratedKeys, token);
+            await StoreIfMissingOrDefaultAsync(connection, transaction, "metadata.metatube.autoExecute", ReadLegacyBool(legacy, "DownloadConfig", "AutoDownloadAfterScan", SettingsDefaults.Unified.MetaTube.AutoExecute), SettingsDefaults.Unified.MetaTube.AutoExecute, "boolean", migratedKeys, token);
+            string legacyPlayer = ReadLegacyText(legacy, "WindowConfig.Settings", "VideoPlayerPath", "");
+            if (!string.IsNullOrWhiteSpace(legacyPlayer) && File.Exists(legacyPlayer))
+                await StoreIfMissingOrDefaultAsync(connection, transaction, "playback.playerPath", Path.GetFullPath(legacyPlayer), "", "string", migratedKeys, token);
+            await StoreAsync(connection, transaction, "legacySettings.migration.completedAt", DateTimeOffset.UtcNow.ToString("O"), "string", token);
+            await StoreAsync(connection, transaction, "legacySettings.migration.keys", migratedKeys.ToArray(), "json", token);
+            await transaction.CommitAsync(token);
+        } catch (Exception error) {
+            Console.Error.WriteLine($"Legacy settings migration skipped: {error.Message}");
+            await using SqliteTransaction transaction = (SqliteTransaction)await connection.BeginTransactionAsync(token);
+            await StoreAsync(connection, transaction, "legacySettings.migration.completedAt", DateTimeOffset.UtcNow.ToString("O"), "string", token);
+            await StoreAsync(connection, transaction, "legacySettings.migration.error", error.Message, "string", token);
+            await transaction.CommitAsync(token);
+        }
+    }
+
+    private async Task<Dictionary<string, JsonObject>> ReadLegacyConfigObjectsAsync(CancellationToken token)
+    {
+        var result = new Dictionary<string, JsonObject>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(legacyConfigDatabasePath) || !File.Exists(legacyConfigDatabasePath)) return result;
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder {
+            DataSource = legacyConfigDatabasePath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Cache = SqliteCacheMode.Shared,
+        }.ToString());
+        await connection.OpenAsync(token);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT ConfigName, ConfigValue FROM app_configs";
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token)) {
+            string name = reader.GetString(0);
+            string json = reader.IsDBNull(1) ? "" : reader.GetString(1);
+            if (string.IsNullOrWhiteSpace(json)) continue;
+            try {
+                if (JsonNode.Parse(json) is JsonObject obj) result[name] = obj;
+            } catch (JsonException error) {
+                Console.Error.WriteLine($"Legacy settings migration ignored invalid config {name}: {error.Message}");
+            }
+        }
+        return result;
+    }
+
+    private static async Task StoreIfMissingOrDefaultAsync(SqliteConnection connection, SqliteTransaction transaction, string key, object value, object defaultValue, string type, List<string> migratedKeys, CancellationToken token)
+    {
+        string? existing = await ScalarTextAsync(connection, transaction, "SELECT ValueJson FROM AppSettings WHERE Key=$key", token, ("$key", key));
+        if (!string.IsNullOrWhiteSpace(existing) && !JsonEquivalent(existing, JsonSerializer.Serialize(defaultValue))) return;
+        await StoreAsync(connection, transaction, key, value, type, token);
+        migratedKeys.Add(key);
+    }
+
+    private static bool JsonEquivalent(string left, string right)
+    {
+        try {
+            using JsonDocument leftDoc = JsonDocument.Parse(left);
+            using JsonDocument rightDoc = JsonDocument.Parse(right);
+            return JsonElementEquality(leftDoc.RootElement, rightDoc.RootElement);
+        } catch (JsonException) {
+            return string.Equals(left, right, StringComparison.Ordinal);
+        }
+    }
+
+    private static bool JsonElementEquality(JsonElement left, JsonElement right)
+    {
+        if (left.ValueKind != right.ValueKind) return false;
+        return left.ValueKind switch {
+            JsonValueKind.String => left.GetString() == right.GetString(),
+            JsonValueKind.Number => left.GetDouble().Equals(right.GetDouble()),
+            JsonValueKind.True or JsonValueKind.False => left.GetBoolean() == right.GetBoolean(),
+            JsonValueKind.Null => true,
+            _ => left.GetRawText() == right.GetRawText(),
+        };
+    }
+
+    private static bool ReadLegacyBool(IReadOnlyDictionary<string, JsonObject> values, string config, string property, bool fallback) =>
+        values.TryGetValue(config, out JsonObject? obj) && TryGetLegacyProperty(obj, property, out JsonNode? node) && bool.TryParse(node?.ToString(), out bool value) ? value : fallback;
+
+    private static double ReadLegacyDouble(IReadOnlyDictionary<string, JsonObject> values, string config, string property, double fallback) =>
+        values.TryGetValue(config, out JsonObject? obj) && TryGetLegacyProperty(obj, property, out JsonNode? node) && double.TryParse(node?.ToString(), out double value) ? value : fallback;
+
+    private static string ReadLegacyText(IReadOnlyDictionary<string, JsonObject> values, string config, string property, string fallback) =>
+        values.TryGetValue(config, out JsonObject? obj) && TryGetLegacyProperty(obj, property, out JsonNode? node) ? node?.ToString() ?? fallback : fallback;
+
+    private static string ReadLegacyLanguage(IReadOnlyDictionary<string, JsonObject> values)
+    {
+        string language = ReadLegacyText(values, "WindowConfig.Settings", "CurrentLanguage", "");
+        return language.Contains("zh", StringComparison.OrdinalIgnoreCase) || language.Contains("中文", StringComparison.OrdinalIgnoreCase)
+            ? "zh-CN"
+            : SettingsDefaults.Unified.System.Language;
+    }
+
+    private static bool TryGetLegacyProperty(JsonObject source, string name, out JsonNode? value)
+    {
+        foreach ((string key, JsonNode? node) in source) {
+            if (key.Equals(name, StringComparison.OrdinalIgnoreCase)) {
+                value = node;
+                return true;
+            }
+        }
+        value = null;
+        return false;
+    }
+
+    private static ScanSettingsDto NormalizeScan(ScanSettingsDto? input)
+    {
+        double value = input?.MinFileSizeMb ?? SettingsDefaults.Unified.Scan.MinFileSizeMb;
+        if (double.IsNaN(value) || double.IsInfinity(value)) value = SettingsDefaults.Unified.Scan.MinFileSizeMb;
+        return new(Math.Clamp(value, 0, 1024 * 1024));
+    }
+
+    private static async Task<long> ScalarLongAsync(SqliteConnection connection, SqliteTransaction transaction, string sql, CancellationToken token, params (string Name, object? Value)[] values)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        foreach ((string name, object? value) in values) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        return Convert.ToInt64(await command.ExecuteScalarAsync(token) ?? 0L);
     }
 
     private static string TextSetting(IReadOnlyDictionary<string, string> values, string key, string fallback)
@@ -456,6 +620,7 @@ public static class SettingsDefaults
         new("dark"),
         MediaStorageForEnvironment(installRoot, databasePath),
         new("portrait", "medium"),
+        new(0),
         new("system", "exit", false, 30, true, false, null));
 
     public static MediaStorageSettingsDto MediaStorageForEnvironment(

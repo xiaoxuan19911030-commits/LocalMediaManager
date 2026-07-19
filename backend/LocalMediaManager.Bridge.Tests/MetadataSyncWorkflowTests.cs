@@ -16,7 +16,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         Directory.CreateDirectory(root);
         await using var connection = new SqliteConnection($"Data Source={Database}");
         await connection.OpenAsync();
-        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0012_MediaStorageSettings.sql" }) {
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0012_MediaStorageSettings.sql", "0013_DirectorMetadata.sql" }) {
             await using var command = connection.CreateCommand();
             command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
             await command.ExecuteNonQueryAsync();
@@ -29,7 +29,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         var factory = new FakeHttpClientFactory(request => {
             string body = request.RequestUri!.AbsolutePath.Contains("search")
                 ? """{"data":[{"provider":"AVBASE","id":"a","number":"ABP-001","title":"A"},{"provider":"FANZA","id":"f","number":"ABP-001","title":"F"}]}"""
-                : """{"data":{"provider":"FANZA","id":"f","number":"ABP-001","title":"Remote title","summary":"Plot","runtime":120,"release_date":"2026-01-02","maker":"Maker","actors":["Actor A"],"genres":["Genre A"],"preview_images":["https://img.example/1.jpg"]}}""";
+                : """{"data":{"provider":"FANZA","id":"f","number":"ABP-001","title":"Remote title","summary":"Plot","runtime":120,"release_date":"2026-01-02","maker":"Maker","backdrop_url":"https://img.example/backdrop.jpg","actors":["Actor A"],"genres":["Genre A"],"preview_images":["https://img.example/1.jpg"]}}""";
             return new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
         });
         var provider = new MetaTubeProvider(factory);
@@ -41,6 +41,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         Assert.Equal("ABP-001", metadata.Code);
         Assert.Equal(7200, metadata.DurationSeconds);
         Assert.Contains(metadata.Images, image => image.Type == "Poster" && image.Url.Contains("/v1/images/primary/FANZA/f"));
+        Assert.Contains(metadata.Images, image => image.Type == "Fanart");
     }
 
     [Fact]
@@ -71,12 +72,37 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         var movie = new SyncMovie(1, "ABP-001", "Manual title", null, null, 0, null, null);
         var metadata = new ProviderMetadata("FANZA", "remote-1", "ABP-001", "Remote title", "Remote plot", null,
             "Remote maker", null, "Remote series", 7200, "2026-01-02", null, ["Remote genre"], ["Remote actor"], []);
-        await new MetadataWriteService(Database).ApplyAsync(1, movie, metadata, new([], null, []), CancellationToken.None);
+        await new MetadataWriteService(Database).ApplyAsync(1, movie, metadata, new([], null, []), false, CancellationToken.None);
         Assert.Equal("Manual title", await Text(connection, "SELECT Title FROM Movies WHERE Id=1"));
         Assert.Equal("Remote plot", await Text(connection, "SELECT Description FROM Movies WHERE Id=1"));
         Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieTags WHERE MovieId=1"));
         Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieActors WHERE MovieId=1"));
         Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MetadataSyncSnapshots WHERE TaskId=1 AND AppliedAt IS NOT NULL"));
+    }
+
+    [Fact]
+    public async Task MetadataOverwriteRefreshesScrapedFieldsAndDirectorRelations()
+    {
+        await using var connection = await Open();
+        string at = DateTimeOffset.UtcNow.ToString("O");
+        await Execute(connection, "INSERT INTO Movies(Id,Code,Title,Description,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES(1,'OLD-001','Old title','Old plot',60,1,'complete','Test',$at,$at)", ("$at", at));
+        await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Progress,TotalItems,CompletedItems,CreatedAt,CurrentMovieId) VALUES(1,'Sync','WritingMetadata',80,1,0,$at,1)", ("$at", at));
+        await Execute(connection, "INSERT INTO Genres(Id,Name,NormalizedName) VALUES(1,'Old genre','OLD GENRE'); INSERT INTO MovieGenres(MovieId,GenreId) VALUES(1,1)");
+        await Execute(connection, "INSERT INTO Series(Id,Name,NormalizedName) VALUES(1,'Old series','OLD SERIES'); INSERT INTO MovieSeries(MovieId,SeriesId,SortOrder) VALUES(1,1,0)");
+        await Execute(connection, "INSERT INTO Tags(Id,Name,NormalizedName,Source,CreatedAt,UpdatedAt) VALUES(1,'User tag','USER TAG','User',$at,$at); INSERT INTO MovieTags(MovieId,TagId,CreatedAt) VALUES(1,1,$at)", ("$at", at));
+        var movie = new SyncMovie(1, "OLD-001", "Old title", "Old plot", null, 60, null, null);
+        var metadata = new ProviderMetadata("FANZA", "remote-2", "NEW-001", "New title", "New plot", "Director A",
+            "Studio A", null, "Series A", 7200, "2026-01-02", null, ["New genre"], ["Actor A"], []);
+
+        await new MetadataWriteService(Database).ApplyAsync(1, movie, metadata, new([], "Z:\\Media\\NFO\\NEW-001\\NEW-001.nfo", []), true, CancellationToken.None);
+
+        Assert.Equal("NEW-001", await Text(connection, "SELECT Code FROM Movies WHERE Id=1"));
+        Assert.Equal("New title", await Text(connection, "SELECT Title FROM Movies WHERE Id=1"));
+        Assert.Equal("New plot", await Text(connection, "SELECT Description FROM Movies WHERE Id=1"));
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieGenres mg JOIN Genres g ON g.Id=mg.GenreId WHERE mg.MovieId=1 AND g.Name='New genre'"));
+        Assert.Equal(0, await Scalar(connection, "SELECT COUNT(*) FROM MovieGenres mg JOIN Genres g ON g.Id=mg.GenreId WHERE mg.MovieId=1 AND g.Name='Old genre'"));
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieDirectors md JOIN Directors d ON d.Id=md.DirectorId WHERE md.MovieId=1 AND d.Name='Director A'"));
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieTags WHERE MovieId=1"));
     }
 
     [Fact]

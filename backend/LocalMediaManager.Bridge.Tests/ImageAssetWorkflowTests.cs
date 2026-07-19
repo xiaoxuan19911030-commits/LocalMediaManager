@@ -48,8 +48,8 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
         await using (SqliteConnection connection = await Open())
             await InsertMovie(connection, 1, "TEST-001", "Test Title");
 
-        IReadOnlyList<SavedImage> first = await service.DownloadAsync(Resolver(), new(1, "TEST-001", "Test Title"), [new("Poster", "https://img.example/poster")], 10, CancellationToken.None);
-        IReadOnlyList<SavedImage> second = await service.DownloadAsync(Resolver(), new(1, "TEST-001", "Test Title"), [new("Poster", "https://img.example/poster")], 10, CancellationToken.None);
+        IReadOnlyList<SavedImage> first = await service.DownloadAsync(Resolver(), new(1, "TEST-001", "Test Title"), [new("Poster", "https://img.example/poster")], 10, false, CancellationToken.None);
+        IReadOnlyList<SavedImage> second = await service.DownloadAsync(Resolver(), new(1, "TEST-001", "Test Title"), [new("Poster", "https://img.example/poster")], 10, false, CancellationToken.None);
 
         Assert.Single(first); Assert.True(first[0].Created); Assert.Equal(48, first[0].Width); Assert.Equal(72, first[0].Height);
         Assert.EndsWith(Path.Combine("MediaStorage", "Posters", "TEST-001", "TEST-001.png"), first[0].Path, StringComparison.OrdinalIgnoreCase);
@@ -58,6 +58,28 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
         Assert.Empty(Directory.Exists(Path.Combine(mediaRoot, ".lmm-temp"))
             ? Directory.EnumerateFiles(Path.Combine(mediaRoot, ".lmm-temp"), "*", SearchOption.AllDirectories)
             : []);
+    }
+
+    [Fact]
+    public async Task DownloadCanOverwriteExistingProviderImageForRescrape()
+    {
+        await using (SqliteConnection connection = await Open())
+            await InsertMovie(connection, 9, "TEST-009", "Test Title");
+        var firstService = new ImageDownloadService(new FakeHttpClientFactory(_ => new(HttpStatusCode.OK) {
+            Content = new ByteArrayContent(CreatePng(48, 72, SKColors.CornflowerBlue)) { Headers = { ContentType = new("image/png") } }
+        }));
+        var secondService = new ImageDownloadService(new FakeHttpClientFactory(_ => new(HttpStatusCode.OK) {
+            Content = new ByteArrayContent(CreatePng(64, 80, SKColors.IndianRed)) { Headers = { ContentType = new("image/png") } }
+        }));
+
+        IReadOnlyList<SavedImage> first = await firstService.DownloadAsync(Resolver(), new(9, "TEST-009", "Test Title"), [new("Poster", "https://img.example/old")], 10, false, CancellationToken.None);
+        IReadOnlyList<SavedImage> second = await secondService.DownloadAsync(Resolver(), new(9, "TEST-009", "Test Title"), [new("Poster", "https://img.example/new")], 10, true, CancellationToken.None);
+
+        Assert.True(first[0].Created);
+        Assert.True(second[0].Created);
+        Assert.Equal(first[0].Path, second[0].Path);
+        Assert.Equal(64, second[0].Width);
+        Assert.Equal(80, second[0].Height);
     }
 
     [Fact]
@@ -72,7 +94,7 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
         await using (SqliteConnection connection = await Open())
             await InsertMovie(connection, 2, "TEST-002", "Test Title");
 
-        await Assert.ThrowsAsync<InvalidDataException>(() => service.DownloadAsync(Resolver(), new(2, "TEST-002", "Test Title"), [new("Poster", "https://img.example/error")], 10, CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.DownloadAsync(Resolver(), new(2, "TEST-002", "Test Title"), [new("Poster", "https://img.example/error")], 10, false, CancellationToken.None));
 
         Assert.True(File.Exists(protectedFile));
         Assert.Empty(Directory.Exists(Path.Combine(ImageRoot, ".lmm-temp"))

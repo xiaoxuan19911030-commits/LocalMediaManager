@@ -124,6 +124,105 @@ public sealed class LibraryWorkflowServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task LibraryUpdateCanSwapMultipleSourceFoldersInOneSave()
+    {
+        string secondRoot = Path.Combine(root, "second-media");
+        Directory.CreateDirectory(secondRoot);
+        LibraryMutationResult library = await service.CreateLibraryAsync(new(
+            "Swap sources", "Initial", true,
+            [
+                new(MediaRoot, IncludeSubfolders: true, Enabled: true, ScanMode: "normal", ExcludePatterns: []),
+                new(secondRoot, IncludeSubfolders: true, Enabled: true, ScanMode: "normal", ExcludePatterns: []),
+            ]));
+
+        await service.UpdateLibraryAsync(library.Id, new(
+            "Swap sources", "Updated", true,
+            [
+                new(secondRoot, IncludeSubfolders: false, Enabled: true, ScanMode: "manual", ExcludePatterns: []),
+                new(MediaRoot, IncludeSubfolders: true, Enabled: true, ScanMode: "watch", ExcludePatterns: ["skip-*"]),
+            ]));
+
+        await using var verify = await Open();
+        Assert.Equal(2, await Scalar(verify, "SELECT COUNT(*) FROM LibraryFolders WHERE LibraryId=" + library.Id));
+        Assert.Equal("manual", await TextScalar(verify, "SELECT ScanMode FROM LibraryFolders WHERE LibraryId=$library AND FolderPath=$path", ("$library", library.Id), ("$path", secondRoot)));
+        Assert.Equal("watch", await TextScalar(verify, "SELECT ScanMode FROM LibraryFolders WHERE LibraryId=$library AND FolderPath=$path", ("$library", library.Id), ("$path", MediaRoot)));
+    }
+
+    [Fact]
+    public async Task LibraryUpdateIgnoresBlankSourceRowsWhenSavingMultipleFolders()
+    {
+        string secondRoot = Path.Combine(root, "second-media");
+        Directory.CreateDirectory(secondRoot);
+        LibraryMutationResult library = await service.CreateLibraryAsync(new(
+            "Blank rows", "Initial", true,
+            [new(MediaRoot, IncludeSubfolders: true, Enabled: true, ScanMode: "normal", ExcludePatterns: [])]));
+
+        await service.UpdateLibraryAsync(library.Id, new(
+            "Blank rows", "Updated", true,
+            [
+                new(MediaRoot, IncludeSubfolders: true, Enabled: true, ScanMode: "normal", ExcludePatterns: []),
+                new("   ", IncludeSubfolders: true, Enabled: true, ScanMode: "normal", ExcludePatterns: []),
+                new(secondRoot, IncludeSubfolders: false, Enabled: true, ScanMode: "manual", ExcludePatterns: []),
+                new("", IncludeSubfolders: true, Enabled: true, ScanMode: "normal", ExcludePatterns: []),
+            ]));
+
+        await using var verify = await Open();
+        Assert.Equal(2, await Scalar(verify, "SELECT COUNT(*) FROM LibraryFolders WHERE LibraryId=" + library.Id));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM LibraryFolders WHERE LibraryId=$library AND FolderPath=$path", ("$library", library.Id), ("$path", secondRoot)));
+    }
+
+    [Fact]
+    public async Task ScanReattachesExistingFilesToCurrentLibrary()
+    {
+        string moviePath = Path.Combine(MediaRoot, "ORPHAN-001.mp4");
+        await File.WriteAllBytesAsync(moviePath, [1, 2, 3]);
+        string normalized = moviePath.ToLowerInvariant();
+        await using (var seed = await Open()) {
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(seed, """
+                INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt,ImportedAt)
+                VALUES(100,'ORPHAN-001','ORPHAN-001',0,0,'pending','Test',$at,$at,$at)
+                """, ("$at", at));
+            await Execute(seed, """
+                INSERT INTO MediaFiles(MovieId,LibraryId,FilePath,NormalizedPath,FileName,Extension,FileSize,MediaType,SourceType,IsPrimary,ExistsState,CreatedAt,UpdatedAt)
+                VALUES(100,NULL,$path,$normalized,'ORPHAN-001.mp4','.mp4',3,'Video','Test',1,'Missing',$at,$at)
+                """, ("$path", moviePath), ("$normalized", normalized), ("$at", at));
+        }
+        LibraryMutationResult library = await service.CreateLibraryAsync(new(
+            "Attach sources", "Existing files", true,
+            [new(MediaRoot, IncludeSubfolders: true, Enabled: true, ScanMode: "normal", ExcludePatterns: [])]));
+
+        ScanLaunchResult scan = await service.StartScanAsync(library.Id, new(FullScan: true, AutoSync: false));
+        await service.RunQueuedScanForTestsAsync(scan.TaskId);
+
+        await using var verify = await Open();
+        Assert.Equal(library.Id, await Scalar(verify, "SELECT LibraryId FROM MediaFiles WHERE MovieId=100"));
+        Assert.Equal("Present", await TextScalar(verify, "SELECT ExistsState FROM MediaFiles WHERE MovieId=100"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Movies WHERE Code='ORPHAN-001'"));
+    }
+
+    [Fact]
+    public async Task ScanUsesConfiguredMinimumMovieFileSize()
+    {
+        await File.WriteAllBytesAsync(Path.Combine(MediaRoot, "TOO-SMALL-001.mp4"), new byte[1024 * 1024 - 1]);
+        await File.WriteAllBytesAsync(Path.Combine(MediaRoot, "EQUAL-001.mp4"), new byte[1024 * 1024]);
+        await File.WriteAllBytesAsync(Path.Combine(MediaRoot, "LARGE-001.mp4"), new byte[1024 * 1024 + 1]);
+        await using (var seed = await Open())
+            await Execute(seed, "INSERT INTO AppSettings(Key,ValueJson,ValueType,UpdatedAt) VALUES('scan.minFileSizeMb','1','number',$at)", ("$at", DateTimeOffset.UtcNow.ToString("O")));
+        LibraryMutationResult library = await service.CreateLibraryAsync(new(
+            "Minimum size", "Scan setting", true, [new(MediaRoot)]));
+
+        ScanLaunchResult scan = await service.StartScanAsync(library.Id, new(FullScan: true, AutoSync: false));
+        await service.RunQueuedScanForTestsAsync(scan.TaskId);
+
+        await using var verify = await Open();
+        Assert.Equal(2, await Scalar(verify, "SELECT COUNT(*) FROM Movies"));
+        Assert.Equal(0, await Scalar(verify, "SELECT COUNT(*) FROM Movies WHERE Code='TOO-SMALL-001'"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Movies WHERE Code='EQUAL-001'"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Movies WHERE Code='LARGE-001'"));
+    }
+
+    [Fact]
     public async Task ScanTaskLifecycleIsPersistentRecoverableAndIdempotent()
     {
         await File.WriteAllBytesAsync(Path.Combine(MediaRoot, "LIFE-001.mp4"), [1]);
@@ -201,17 +300,27 @@ public sealed class LibraryWorkflowServiceTests : IAsyncLifetime
         return connection;
     }
 
-    private static async Task<long> Scalar(SqliteConnection connection, string sql)
+    private static async Task<long> Scalar(SqliteConnection connection, string sql, params (string Name, object? Value)[] parameters)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
+        foreach ((string name, object? value) in parameters) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
         return Convert.ToInt64(await command.ExecuteScalarAsync());
     }
 
-    private static async Task Execute(SqliteConnection connection, string sql)
+    private static async Task<string?> TextScalar(SqliteConnection connection, string sql, params (string Name, object? Value)[] parameters)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
+        foreach ((string name, object? value) in parameters) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        return Convert.ToString(await command.ExecuteScalarAsync());
+    }
+
+    private static async Task Execute(SqliteConnection connection, string sql, params (string Name, object? Value)[] parameters)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        foreach ((string name, object? value) in parameters) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
         await command.ExecuteNonQueryAsync();
     }
 
