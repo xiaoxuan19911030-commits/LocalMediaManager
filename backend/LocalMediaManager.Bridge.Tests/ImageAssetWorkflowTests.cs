@@ -100,6 +100,36 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CropCardCreatesGeneratedCardWithoutChangingSource()
+    {
+        string source = Path.Combine(root, "source-poster.png");
+        await File.WriteAllBytesAsync(source, CreatePng(100, 100, SKColors.SteelBlue));
+        await using (SqliteConnection connection = await Open()) {
+            await InsertMovie(connection, 4, "CROP-001", "Crop");
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, "INSERT INTO Images(Id,MovieId,ImageType,FilePath,IsPrimary,CreatedAt,UpdatedAt,Ownership,IsLocked,IsDerived,ValidationStatus) VALUES(44,4,'Poster',$path,1,$at,$at,'Legacy',0,0,'Unknown')", ("$path", source), ("$at", at));
+        }
+        var workflow = new ImageWorkflowService(Database, ImageRoot, Resolver());
+
+        ImageMutationResult result = await workflow.CropCardAsync(4, new(44, 16.0 / 9.0, "center"));
+
+        Assert.True(result.Changed);
+        Assert.True(File.Exists(source));
+        await using SqliteConnection verify = await Open();
+        string? savedPath = await Text(verify, "SELECT FilePath FROM Images WHERE MovieId=4 AND ImageType='GeneratedCard' ORDER BY Id DESC LIMIT 1");
+        Assert.NotNull(savedPath);
+        Assert.Contains(Path.Combine("MediaStorage", "WallCrops", "CROP-001"), savedPath!, StringComparison.OrdinalIgnoreCase);
+        ImageValidationResult validation = await ImageFileValidator.ValidateAsync(savedPath!);
+        Assert.True(validation.Valid);
+        Assert.Equal(100, validation.Width);
+        Assert.Equal(56, validation.Height);
+
+        var assets = new ImageAssetService(Database, ImageRoot);
+        Assert.NotNull(await assets.ResolveMovieAsync(4, "thumbnail"));
+        Assert.Contains(savedPath!, await Text(verify, "SELECT SourceImagePath FROM ImageCacheEntries WHERE MovieId=4 AND CacheKind='CardThumbnail' ORDER BY Id DESC LIMIT 1"));
+    }
+
+    [Fact]
     public async Task LockPersistsAndCacheCleanupNeverDeletesSource()
     {
         string source = Path.Combine(ImageRoot, "BigPic", "LOCK-001.png");

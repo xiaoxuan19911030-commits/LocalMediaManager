@@ -339,6 +339,7 @@ export interface ImageCenterStatus {
   assets: ImageAssetStatus[]
 }
 export interface ImageMutationResult { changed: boolean; message: string }
+export interface ImageCropCommand { sourceImageId?: number; aspectRatio: number; anchor?: 'left' | 'center' | 'right' }
 export interface ImageDeletePreview { imageId: number; type: string; fileName: string; path?: string; fileWillBeDeleted: boolean; confirmationToken: string; warnings: string[] }
 export interface ImageTaskLaunchResult { taskId: number; status: string; type: string; message: string }
 export interface ImageCachePreview {

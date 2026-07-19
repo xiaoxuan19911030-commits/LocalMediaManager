@@ -2,6 +2,7 @@ import AccessTimeRoundedIcon from '@mui/icons-material/AccessTimeRounded'
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded'
 import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded'
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded'
+import ContentCutRoundedIcon from '@mui/icons-material/ContentCutRounded'
 import FavoriteRoundedIcon from '@mui/icons-material/FavoriteRounded'
 import FavoriteBorderRoundedIcon from '@mui/icons-material/FavoriteBorderRounded'
 import NavigateBeforeRoundedIcon from '@mui/icons-material/NavigateBeforeRounded'
@@ -36,9 +37,10 @@ const formatDuration = (seconds: number) => {
 const formatSize = (bytes: number) => bytes ? `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB` : '大小未知'
 const formatImageSize = (bytes: number) => bytes ? bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB` : '大小待校验'
 const date = (value?: string) => value?.slice(0, 10) || '未知'
-const imageTypes = ['Poster', 'Thumbnail', 'Fanart', 'Preview', 'Screenshot', 'GIF']
-const imageLabel = (type: string) => ({ Poster: '封面', Thumbnail: '缩略图', Fanart: '背景图', Preview: '预览图', Screenshot: '截图', GIF: 'GIF' }[type] ?? type)
+const imageTypes = ['Poster', 'GeneratedCard', 'Thumbnail', 'Fanart', 'Preview', 'Screenshot', 'GIF']
+const imageLabel = (type: string) => ({ Poster: '封面', GeneratedCard: '卡图裁切', Thumbnail: '缩略图', Fanart: '背景图', Preview: '预览图', Screenshot: '截图', GIF: 'GIF' }[type] ?? type)
 const imageStatusLabel = (status?: string) => status === 'Normal' ? '图片正常' : status === 'Failed' ? '读取失败' : '暂无图片'
+const canGenerateImage = (type: string) => ['Poster', 'Preview', 'Screenshot', 'GIF'].includes(type)
 
 function Fact({ icon, label }: { icon: ReactNode; label: string }) {
   return <Box sx={{ display: 'flex', alignItems: 'center', gap: .75, color: 'text.secondary' }}><Box sx={{ display: 'flex', color: 'primary.main' }}>{icon}</Box><Typography variant="body2">{label}</Typography></Box>
@@ -69,6 +71,7 @@ export default function MovieDetailPage() {
   const [imageAssets, setImageAssets] = useState<ImageAsset[]>([]); const [posterFailed, setPosterFailed] = useState(false)
   const [imageStatus, setImageStatus] = useState<ImageCenterStatus>(); const [viewer, setViewer] = useState<ImageAsset>(); const [zoom, setZoom] = useState(1)
   const [replaceTarget, setReplaceTarget] = useState<ImageAsset>(); const [replacePath, setReplacePath] = useState('')
+  const [cropTarget, setCropTarget] = useState<ImageAsset>(); const [cropAnchor, setCropAnchor] = useState<'left' | 'center' | 'right'>('center'); const [cropAspect, setCropAspect] = useState<'landscape' | 'portrait'>('landscape')
   const [imageDeletePreview, setImageDeletePreview] = useState<ImageDeletePreview>()
   const [neighbors, setNeighbors] = useState<{ previousId?: number; nextId?: number }>({})
   const [deletePreview, setDeletePreview] = useState<SafeDeletePreview>()
@@ -124,6 +127,14 @@ export default function MovieDetailPage() {
     bridge.replaceMovieImage(movie.id, replaceTarget.type, replacePath).then((result) => { setNotice(result.message); setReplaceTarget(undefined); clearImageMemoryCache(); return loadMovie(movie.id) }).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false))
   }
   const previewDeleteImage = (asset: ImageAsset) => asset.id > 0 ? bridge.previewDeleteImage(asset.id).then(setImageDeletePreview).catch((reason: Error) => setNotice(reason.message)) : setNotice('暂无图片可删除')
+  const openCrop = (asset: ImageAsset) => { setCropTarget(asset); setCropAnchor('center'); setCropAspect('landscape') }
+  const confirmCrop = () => {
+    if (!movie || !cropTarget) return
+    setBusy(true)
+    bridge.cropMovieCard(movie.id, { sourceImageId: cropTarget.id, aspectRatio: cropAspect === 'landscape' ? 16 / 9 : 2 / 3, anchor: cropAnchor }).then((result) => {
+      setNotice(result.message); setCropTarget(undefined); clearImageMemoryCache(); return loadMovie(movie.id)
+    }).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false))
+  }
   const confirmDeleteImage = () => {
     if (!movie || !imageDeletePreview) return
     setBusy(true)
@@ -137,6 +148,10 @@ export default function MovieDetailPage() {
     id: 0, type, ownership: 'Missing', locked: false, derived: false, primary: false, validationStatus: 'Missing',
     width: 0, height: 0, fileSize: 0,
   } satisfies ImageAsset)
+  const heroPosterUrl = imageAssets.find(asset => asset.type === 'Poster' && asset.primary && asset.url)?.url
+    ?? imageAssets.find(asset => asset.type === 'Poster' && asset.url)?.url
+    ?? movie?.coverUrl
+  useEffect(() => { setPosterFailed(false) }, [heroPosterUrl])
 
   return <Box sx={{ '@keyframes detailIn': { from: { opacity: 0, transform: 'translateY(10px)' }, to: { opacity: 1, transform: 'translateY(0)' } } }}>
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: 2 }}>
@@ -147,10 +162,10 @@ export default function MovieDetailPage() {
     {!movie && !error ? <Box sx={{ minHeight: 420, display: 'grid', placeItems: 'center' }}><CircularProgress/></Box> : movie && <Stack spacing={2.25} sx={{ animation: 'detailIn .32s ease both', '@media (prefers-reduced-motion: reduce)': { animation: 'none' } }}>
       <Paper variant="outlined" sx={{ position: 'relative', overflow: 'hidden', borderRadius: 3.5, p: { xs: 2, md: 3 } }}>
         <Box sx={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: (theme) => `radial-gradient(circle at 82% 10%, ${alpha(theme.palette.primary.main, .18)}, transparent 42%), linear-gradient(135deg, ${alpha(theme.palette.background.paper, .7)}, ${theme.palette.background.paper})` }}/>
-        <Box sx={{ position: 'relative', display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '230px minmax(0,1fr)', lg: '290px minmax(0,1fr)' }, gap: { xs: 2, md: 3 } }}>
-          <Card sx={{ overflow: 'hidden', width: '100%', maxWidth: { xs: 260, sm: 'none' }, mx: { xs: 'auto', sm: 0 }, alignSelf: 'start', boxShadow: (theme) => `0 18px 42px ${alpha(theme.palette.common.black, theme.palette.mode === 'dark' ? .36 : .18)}` }}>
+        <Box sx={{ position: 'relative', display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(340px, 42%) minmax(0,1fr)', xl: 'minmax(440px, 520px) minmax(0,1fr)' }, gap: { xs: 2, md: 3 } }}>
+          <Card sx={{ overflow: 'hidden', width: '100%', maxWidth: { xs: 420, md: 'none' }, mx: { xs: 'auto', md: 0 }, alignSelf: 'start', boxShadow: (theme) => `0 18px 42px ${alpha(theme.palette.common.black, theme.palette.mode === 'dark' ? .36 : .18)}` }}>
             <Box sx={{ aspectRatio: '2/3', bgcolor: 'action.hover', display: 'grid', placeItems: 'center' }}>
-              {movie.coverUrl && !posterFailed ? <SmartImage src={movie.coverUrl} alt={movie.code || movie.title || ''} eager onError={() => setPosterFailed(true)}/> : <Typography color="text.disabled" sx={{ px: 2, textAlign: 'center' }}>{posterFailed ? '图片损坏或不可用' : '暂无海报'}</Typography>}
+              {heroPosterUrl && !posterFailed ? <SmartImage src={heroPosterUrl} alt={movie.code || movie.title || ''} eager onError={() => setPosterFailed(true)}/> : <Typography color="text.disabled" sx={{ px: 2, textAlign: 'center' }}>{posterFailed ? '图片损坏或不可用' : '暂无海报'}</Typography>}
             </Box>
           </Card>
           <Box sx={{ minWidth: 0, display: 'flex', flexDirection: 'column', py: { sm: 1 } }}>
@@ -198,7 +213,7 @@ export default function MovieDetailPage() {
             </Box>
             {movie.description && <><Divider sx={{ my: 2.25 }}/><Typography variant="subtitle2" sx={{ fontWeight: 800, mb: .75 }}>内容简介</Typography><Typography color="text.secondary" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.85 }}>{movie.description}</Typography></>}
           </SurfaceSection>
-          <SurfaceSection title="图片资源" description="封面、缩略图、背景图、预览图、截图和 GIF 使用同一套查看、生成、替换、删除与缓存刷新工作流">
+          <SurfaceSection title="图片资源" description="封面、卡图裁切、缩略图、背景图、预览图、截图和 GIF 使用同一套查看、生成、替换、删除与缓存刷新工作流">
             <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', mb: 1.5 }}>
               <Chip size="small" color={imageStatus?.missingImages || imageStatus?.failedImages ? 'warning' : 'success'} label={`正常 ${imageStatus?.normalImages ?? 0} / ${imageStatus?.totalImages ?? 0}`}/>
               {Boolean(imageStatus?.invalidCacheEntries) && <Chip size="small" color="warning" label={`缓存失效 ${imageStatus?.invalidCacheEntries}`}/>}
@@ -219,8 +234,9 @@ export default function MovieDetailPage() {
                     <Button size="small" disabled={!available} onClick={() => { setViewer(asset); setZoom(1) }}>查看</Button>
                     <Button size="small" disabled={asset.id <= 0} onClick={() => openAssetDirectory(asset)}>目录</Button>
                     <Button size="small" disabled={asset.id <= 0} onClick={() => revealAsset(asset)}>文件</Button>
-                    <Button size="small" onClick={() => generateImage(asset.type)}>重新生成</Button>
+                    <Button size="small" disabled={!canGenerateImage(asset.type)} onClick={() => generateImage(asset.type)}>重新生成</Button>
                     <Button size="small" onClick={() => openReplace(asset)}>替换</Button>
+                    <Button size="small" disabled={!available || asset.type === 'GIF'} startIcon={<ContentCutRoundedIcon/>} onClick={() => openCrop(asset)}>裁切</Button>
                     <Button size="small" disabled={asset.id <= 0} color={asset.locked ? 'warning' : 'inherit'} startIcon={asset.locked ? <LockOpenRoundedIcon/> : <LockRoundedIcon/>} onClick={() => void setImageLock(asset)}>{asset.locked ? '解锁' : '锁定'}</Button>
                     <Button size="small" disabled={asset.id <= 0} color="error" onClick={() => previewDeleteImage(asset)}>删除</Button>
                   </Stack>
@@ -269,6 +285,27 @@ export default function MovieDetailPage() {
         <TextField autoFocus fullWidth margin="normal" label="本地图片路径" value={replacePath} onChange={(event) => setReplacePath(event.target.value)} placeholder="D:\Images\cover.jpg"/>
       </DialogContent>
       <DialogActions><Button onClick={() => setReplaceTarget(undefined)} disabled={busy}>取消</Button><Button variant="contained" disabled={busy || !replacePath.trim()} onClick={confirmReplace}>确认替换</Button></DialogActions>
+    </Dialog>
+    <Dialog open={Boolean(cropTarget)} onClose={() => !busy && setCropTarget(undefined)} maxWidth="md" fullWidth>
+      <DialogTitle>裁切卡图</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2}>
+          <Typography variant="body2" color="text.secondary">从当前图片裁切一张影片墙卡图，保存到 WallCrops，不覆盖源图。</Typography>
+          <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+            <Button variant={cropAspect === 'landscape' ? 'contained' : 'outlined'} onClick={() => setCropAspect('landscape')}>横版 16:9</Button>
+            <Button variant={cropAspect === 'portrait' ? 'contained' : 'outlined'} onClick={() => setCropAspect('portrait')}>竖版 2:3</Button>
+          </Stack>
+          <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+            <Button variant={cropAnchor === 'left' ? 'contained' : 'outlined'} onClick={() => setCropAnchor('left')}>左侧</Button>
+            <Button variant={cropAnchor === 'center' ? 'contained' : 'outlined'} onClick={() => setCropAnchor('center')}>居中</Button>
+            <Button variant={cropAnchor === 'right' ? 'contained' : 'outlined'} onClick={() => setCropAnchor('right')}>右侧</Button>
+          </Stack>
+          <Paper variant="outlined" sx={{ overflow: 'hidden', bgcolor: 'action.hover', maxHeight: 560, display: 'grid', placeItems: 'center' }}>
+            {cropTarget?.url && <Box component="img" src={cropTarget.url} alt={cropTarget.type} sx={{ width: '100%', aspectRatio: cropAspect === 'landscape' ? '16/9' : '2/3', objectFit: 'cover', objectPosition: cropAnchor, display: 'block' }}/>}
+          </Paper>
+        </Stack>
+      </DialogContent>
+      <DialogActions><Button onClick={() => setCropTarget(undefined)} disabled={busy}>取消</Button><Button variant="contained" disabled={busy || !cropTarget?.url} startIcon={<ContentCutRoundedIcon/>} onClick={confirmCrop}>保存裁切</Button></DialogActions>
     </Dialog>
     <Dialog open={Boolean(imageDeletePreview)} onClose={() => !busy && setImageDeletePreview(undefined)} maxWidth="sm" fullWidth>
       <DialogTitle>删除{imageDeletePreview ? imageLabel(imageDeletePreview.type) : '图片'}？</DialogTitle>

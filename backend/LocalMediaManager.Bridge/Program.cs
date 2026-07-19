@@ -367,6 +367,9 @@ app.MapGet("/api/image-assets/{imageId:long}/content", async (long imageId, Imag
 app.MapPut("/api/image-assets/{imageId:long}/lock", async (long imageId, ImageLockCommand command, ImageAssetService images, CancellationToken token) =>
     Results.Ok(await images.SetLockAsync(imageId, command.Locked, token)));
 
+app.MapPost("/api/videos/{movieId:long}/images/crop-card", async (long movieId, ImageCropCommand command, ImageWorkflowService images, CancellationToken token) =>
+    Results.Ok(await images.CropCardAsync(movieId, command, token)));
+
 app.MapGet("/api/images/cache/cleanup-preview", async (ImageAssetService images, CancellationToken token) =>
     Results.Ok(await images.PreviewCacheCleanupAsync(token)));
 

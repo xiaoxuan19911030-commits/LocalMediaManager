@@ -5,10 +5,12 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Hosting;
+using SkiaSharp;
 
 namespace LocalMediaManager.Bridge;
 
 public sealed record ImageReplaceCommand(string Path);
+public sealed record ImageCropCommand(long? SourceImageId, double AspectRatio, string? Anchor);
 public sealed record ImageDeletePreview(long ImageId, string Type, string FileName, string? Path, bool FileWillBeDeleted,
     string ConfirmationToken, IReadOnlyList<string> Warnings);
 public sealed record ImageDeleteCommand(string ConfirmationToken);
@@ -46,6 +48,56 @@ public sealed class ImageWorkflowService(string databasePath, string imageRoot, 
             normalized is "Poster" or "Thumbnail" or "Fanart" or "Preview" or "GeneratedCard", "LocalReplace", cancellationToken);
         await InvalidateMovieCacheAsync(connection, movieId, cancellationToken);
         return new(true, $"{Label(normalized)} 已替换并锁定，缓存已刷新。");
+    }
+
+    public async Task<ImageMutationResult> CropCardAsync(long movieId, ImageCropCommand command,
+        CancellationToken cancellationToken = default)
+    {
+        double aspectRatio = command.AspectRatio is >= 0.55 and <= 2.4 ? command.AspectRatio : 16.0 / 9.0;
+        string anchor = NormalizeAnchor(command.Anchor);
+
+        await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, cancellationToken);
+        if (await ScalarLongAsync(connection, "SELECT COUNT(*) FROM Movies WHERE Id=$movie", cancellationToken, ("$movie", movieId)) == 0)
+            throw new KeyNotFoundException("影片不存在。");
+
+        ImageRow source = await ReadCropSourceAsync(connection, movieId, command.SourceImageId, cancellationToken);
+        if (string.IsNullOrWhiteSpace(source.Path) || !File.Exists(source.Path))
+            throw new KeyNotFoundException("没有可裁切的图片文件。");
+
+        ImageValidationResult sourceValidation = await ImageFileValidator.ValidateAsync(source.Path, null, cancellationToken);
+        if (!sourceValidation.Valid) throw new InvalidDataException(sourceValidation.Error ?? "源图片不可用。");
+
+        using SKBitmap? bitmap = SKBitmap.Decode(source.Path);
+        if (bitmap is null || bitmap.Width <= 0 || bitmap.Height <= 0) throw new InvalidDataException("源图片无法解码。");
+
+        SKRectI rect = CropRect(bitmap.Width, bitmap.Height, aspectRatio, anchor);
+        using var cropped = new SKBitmap(rect.Width, rect.Height, SKColorType.Rgba8888, SKAlphaType.Premul);
+        using (var canvas = new SKCanvas(cropped)) {
+            canvas.Clear(SKColors.Transparent);
+            canvas.DrawBitmap(bitmap, rect, new SKRect(0, 0, rect.Width, rect.Height), new SKSamplingOptions(SKFilterMode.Linear));
+        }
+
+        string suffix = $"crop-{anchor}-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}";
+        string target = (await pathResolver.ResolveForMovieAsync(movieId, "GeneratedCard", ".jpg", null, suffix, cancellationToken)).FullPath;
+        pathResolver.EnsureDirectoryForWrite(target);
+        string temporary = target + $".{Guid.NewGuid():N}.part";
+        try {
+            using SKImage image = SKImage.FromBitmap(cropped);
+            using SKData data = image.Encode(SKEncodedImageFormat.Jpeg, 92);
+            await using (FileStream output = new(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) {
+                data.SaveTo(output);
+                await output.FlushAsync(cancellationToken);
+            }
+            ImageValidationResult validation = await ImageFileValidator.ValidateAsync(temporary, "image/jpeg", cancellationToken);
+            if (!validation.Valid) throw new InvalidDataException(validation.Error ?? "裁切图片校验失败。");
+            File.Move(temporary, target, false);
+            await RegisterImageAsync(connection, movieId, "GeneratedCard", target, validation, "Generated", true, true, "ManualCrop", cancellationToken);
+            await InvalidateMovieCacheAsync(connection, movieId, cancellationToken);
+            return new(true, "卡图已裁切并保存到 WallCrops，缓存已刷新。");
+        } catch {
+            try { if (File.Exists(temporary)) File.Delete(temporary); } catch { }
+            throw;
+        }
     }
 
     public async Task<ImageDeletePreview> PreviewDeleteAsync(long imageId, CancellationToken cancellationToken = default)
@@ -155,6 +207,56 @@ public sealed class ImageWorkflowService(string databasePath, string imageRoot, 
             reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetInt64(4) == 1, reader.GetString(5), reader.GetInt64(6));
     }
 
+    private async Task<ImageRow> ReadCropSourceAsync(SqliteConnection connection, long movieId, long? sourceImageId,
+        CancellationToken cancellationToken)
+    {
+        if (sourceImageId is > 0) {
+            ImageRow row = await ReadImageRowAsync(connection, sourceImageId.Value, cancellationToken);
+            if (row.MovieId != movieId) throw new ArgumentException("裁切源图片不属于当前影片。");
+            return row;
+        }
+
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id,MovieId,ImageType,FilePath,IsLocked,COALESCE(UpdatedAt,''),COALESCE(FileSize,0)
+              FROM Images
+             WHERE MovieId=$movie AND FilePath IS NOT NULL AND IsDerived=0
+             ORDER BY IsLocked DESC,IsPrimary DESC,
+               CASE ImageType WHEN 'Fanart' THEN 0 WHEN 'Poster' THEN 1 WHEN 'Thumbnail' THEN 2 WHEN 'Preview' THEN 3 ELSE 9 END,
+               Id
+             LIMIT 1
+            """;
+        command.Parameters.AddWithValue("$movie", movieId);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken)) throw new KeyNotFoundException("没有可裁切的图片。");
+        return new(reader.GetInt64(0), reader.GetInt64(1), NormalizeType(reader.GetString(2)),
+            reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetInt64(4) == 1, reader.GetString(5), reader.GetInt64(6));
+    }
+
+    private static SKRectI CropRect(int width, int height, double aspectRatio, string anchor)
+    {
+        double current = width / (double)height;
+        if (current > aspectRatio) {
+            int cropWidth = Math.Max(1, (int)Math.Round(height * aspectRatio));
+            int left = anchor switch {
+                "left" => 0,
+                "right" => width - cropWidth,
+                _ => (width - cropWidth) / 2,
+            };
+            return new(Math.Clamp(left, 0, width - cropWidth), 0, Math.Clamp(left, 0, width - cropWidth) + cropWidth, height);
+        }
+
+        int cropHeight = Math.Max(1, (int)Math.Round(width / aspectRatio));
+        int top = (height - cropHeight) / 2;
+        return new(0, Math.Clamp(top, 0, height - cropHeight), width, Math.Clamp(top, 0, height - cropHeight) + cropHeight);
+    }
+
+    private static string NormalizeAnchor(string? anchor) => anchor?.Trim().ToLowerInvariant() switch {
+        "left" => "left",
+        "right" => "right",
+        _ => "center",
+    };
+
     private async Task<bool> IsInsideControlledImageRootAsync(string path, CancellationToken cancellationToken)
     {
         string full = Path.GetFullPath(path);
@@ -204,7 +306,7 @@ public sealed class ImageWorkflowService(string databasePath, string imageRoot, 
 
     private async Task<SqliteConnection> OpenAsync(SqliteOpenMode mode, CancellationToken token)
     {
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = mode, Cache = SqliteCacheMode.Shared }.ToString());
+        var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = mode, Cache = SqliteCacheMode.Private }.ToString());
         await connection.OpenAsync(token);
         await ExecuteAsync(connection, "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;", token);
         return connection;

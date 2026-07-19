@@ -337,7 +337,8 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
             SELECT Id,FilePath,ContentType FROM Images
-             WHERE MovieId=$movie AND FilePath IS NOT NULL AND IsDerived=0
+             WHERE MovieId=$movie AND FilePath IS NOT NULL
+               AND (IsDerived=0 OR ($variant='thumbnail' AND ImageType='GeneratedCard'))
              ORDER BY IsLocked DESC,IsPrimary DESC,
                CASE WHEN $variant='thumbnail' THEN
                  CASE ImageType WHEN 'Thumbnail' THEN 0 WHEN 'GeneratedCard' THEN 1 WHEN 'Poster' THEN 2 WHEN 'Fanart' THEN 3 ELSE 9 END

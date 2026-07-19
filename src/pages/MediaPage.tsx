@@ -64,6 +64,7 @@ export default function MediaPage() {
   const createBatchSync = () => bridge.createBatchSync(selected).then((result) => { setNotice(result.message); setSelected([]) }).catch((reason: Error) => setNotice(reason.message))
   const syncContextMovie = () => { const item = contextMenu?.item; closeContextMenu(); if (item) bridge.syncMovie(item.dataId).then((result) => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message)) }
   const generateContextImage = (type: string) => { const item = contextMenu?.item; closeContextMenu(); if (item) bridge.generateMovieImage(item.dataId, type).then((result) => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message)) }
+  const cropContextImage = () => { const item = contextMenu?.item; closeContextMenu(); if (item) bridge.cropMovieCard(item.dataId, { aspectRatio: 16 / 9, anchor: 'center' }).then((result) => { setNotice(result.message); refresh() }).catch((reason: Error) => setNotice(reason.message)) }
   const createBatchImageTasks = (type: string) => Promise.all(selected.map((id) => bridge.generateMovieImage(id, type))).then((results) => { setNotice(`已创建 ${results.length} 个${type === 'GIF' ? ' GIF' : '截图'}任务，可在任务中心查看进度。`); setSelected([]) }).catch((reason: Error) => setNotice(reason.message))
   const openContextLocation = () => { const item = contextMenu?.item; closeContextMenu(); if (item?.path) bridge.revealFile(item.path).then((result) => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message)); else setNotice('没有可定位的影片文件') }
   const openSafeDelete = (movieIds: number[], mode: 'metadata' | 'media') => {
@@ -119,7 +120,7 @@ export default function MediaPage() {
     </Menu>
     <Menu open={Boolean(subMenu)} anchorEl={subMenu?.anchor} onClose={() => setSubMenu(undefined)} anchorOrigin={{ vertical: 'top', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'left' }}>
       {subMenu?.kind === 'edit' && [<MenuItem key="info" onClick={() => { const item = contextMenu?.item; closeContextMenu(); if (item) window.location.hash = `/movies/${item.dataId}` }}>编辑信息</MenuItem>]}
-      {subMenu?.kind === 'image' && [<MenuItem key="poster" onClick={() => generateContextImage('Poster')}>生成封面</MenuItem>, <MenuItem key="preview" onClick={() => generateContextImage('Preview')}>生成预览图</MenuItem>, <MenuItem key="screenshot" onClick={() => generateContextImage('Screenshot')}>生成截图</MenuItem>, <MenuItem key="gif" onClick={() => generateContextImage('GIF')}>生成 GIF</MenuItem>]}
+      {subMenu?.kind === 'image' && [<MenuItem key="crop" onClick={cropContextImage}>裁切卡图</MenuItem>, <Divider key="image-divider"/>, <MenuItem key="poster" onClick={() => generateContextImage('Poster')}>生成封面</MenuItem>, <MenuItem key="preview" onClick={() => generateContextImage('Preview')}>生成预览图</MenuItem>, <MenuItem key="screenshot" onClick={() => generateContextImage('Screenshot')}>生成截图</MenuItem>, <MenuItem key="gif" onClick={() => generateContextImage('GIF')}>生成 GIF</MenuItem>]}
       {subMenu?.kind === 'open' && [<MenuItem key="movie" disabled={!contextMenu?.item.path} onClick={openContextLocation}>影片{contextMenu?.item.path ? '' : '（无文件路径）'}</MenuItem>]}
     </Menu>
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>
