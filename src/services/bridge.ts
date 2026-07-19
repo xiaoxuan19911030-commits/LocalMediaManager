@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateResults, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageCropCommand, ImageDeletePreview, ImageMutationResult, ImageTaskLaunchResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, PlatformOpenResult, SafeDeleteLaunchResult, SafeDeletePreview, SafeDeletePreviewCommand, ScanLaunchResult, TaskCleanupResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
+import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateResults, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageCropCommand, ImageDeletePreview, ImageMutationResult, ImageTaskLaunchResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, PlatformOpenResult, RandomMovieResult, SafeDeleteLaunchResult, SafeDeletePreview, SafeDeletePreviewCommand, ScanLaunchResult, TaskCleanupResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
 import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, MetaTubeSettings, ProviderConnectionResult, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings, UnifiedSettingsSaveResult } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
@@ -45,6 +45,16 @@ async function request<T>(path: string, init?: RequestInit, retrySession = true)
     throw new Error(error.message)
   }
   return response.json() as Promise<T>
+}
+
+function searchParams(filters: AdvancedSearchFilters, includePaging = true) {
+  const query = new URLSearchParams({ q: filters.query, sort: filters.sort ?? 'newest', metadata: filters.metadata ?? 'all', fileStatus: filters.fileStatus ?? 'all', metadataStatus: filters.metadataStatus ?? 'all', ratingMin: String(filters.ratingMin ?? 0), ratingFilter: filters.ratingFilter ?? 'all' })
+  if (includePaging) {
+    query.set('limit', String(filters.limit ?? 48))
+    query.set('offset', String(filters.offset ?? 0))
+  }
+  if (filters.actorId) query.set('actorId', String(filters.actorId)); if (filters.tagId) query.set('tagId', String(filters.tagId)); if (filters.directorId) query.set('directorId', String(filters.directorId)); if (filters.movieTagId) query.set('movieTagId', String(filters.movieTagId)); if (filters.customTagId) query.set('customTagId', String(filters.customTagId)); if (filters.genreId) query.set('genreId', String(filters.genreId)); if (filters.seriesId) query.set('seriesId', String(filters.seriesId)); if (filters.studioId) query.set('studioId', String(filters.studioId)); if (filters.favorite !== undefined) query.set('favorite', String(filters.favorite)); if (filters.watched !== undefined) query.set('watched', String(filters.watched)); if (filters.libraryId) query.set('libraryId', String(filters.libraryId))
+  return query
 }
 
 export const bridge = {
@@ -117,10 +127,9 @@ export const bridge = {
   entityMovies: (type: 'actors' | 'directors' | 'series' | 'studios' | 'genres' | 'tags' | 'custom-tags' | 'movie-tags', id: number, limit = 48, offset = 0) => request<MediaPageResult>(`/api/entities/${type}/${id}/movies?${new URLSearchParams({ limit: String(limit), offset: String(offset) })}`),
   collection: (kind: 'favorites' | 'history', limit = 48, offset = 0) => request<MediaPageResult>(`/api/collections/${kind}?${new URLSearchParams({ limit: String(limit), offset: String(offset) })}`),
   advancedSearch: (filters: AdvancedSearchFilters) => {
-    const query = new URLSearchParams({ q: filters.query, limit: String(filters.limit ?? 48), offset: String(filters.offset ?? 0), sort: filters.sort ?? 'newest', metadata: filters.metadata ?? 'all', fileStatus: filters.fileStatus ?? 'all', metadataStatus: filters.metadataStatus ?? 'all', ratingMin: String(filters.ratingMin ?? 0), ratingFilter: filters.ratingFilter ?? 'all' })
-    if (filters.actorId) query.set('actorId', String(filters.actorId)); if (filters.tagId) query.set('tagId', String(filters.tagId)); if (filters.directorId) query.set('directorId', String(filters.directorId)); if (filters.movieTagId) query.set('movieTagId', String(filters.movieTagId)); if (filters.customTagId) query.set('customTagId', String(filters.customTagId)); if (filters.genreId) query.set('genreId', String(filters.genreId)); if (filters.seriesId) query.set('seriesId', String(filters.seriesId)); if (filters.studioId) query.set('studioId', String(filters.studioId)); if (filters.favorite !== undefined) query.set('favorite', String(filters.favorite)); if (filters.watched !== undefined) query.set('watched', String(filters.watched)); if (filters.libraryId) query.set('libraryId', String(filters.libraryId))
-    return request<MediaPageResult>(`/api/search/advanced?${query}`)
+    return request<MediaPageResult>(`/api/search/advanced?${searchParams(filters)}`)
   },
+  randomMovie: (filters: AdvancedSearchFilters) => request<RandomMovieResult>(`/api/search/random?${searchParams(filters, false)}`),
   metadataOverview: () => request<MetadataOverview>('/api/metadata/overview'),
   diagnostics: () => request<DiagnosticsResult>('/api/diagnostics'),
   duplicates: (rule: 'all' | 'code' | 'path' | 'hash' = 'all', limit = 100) => request<DuplicateResults>(`/api/duplicates?${new URLSearchParams({ rule, limit: String(limit) })}`),

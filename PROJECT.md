@@ -1719,6 +1719,8 @@ Local Media Manager
 
 **MovieWall：** 所有本质属于影片列表的页面复用 `MovieWall`：全部影片、收藏、最近播放、搜索结果、导演/标签/系列/厂商/自定义标签/媒体库进入后的结果页。`MovieWall` 统一 Smart Search、FilterBar、排序、分页、卡片/列表视图和详情返回滚动恢复。影片墙卡片显示偏好通过 `UnifiedSettings.movieWallDisplay` 持久化并在所有 MovieWall 页面共享：竖版海报比例 `2:3`，横版海报比例 `16:9`，尺寸为 `small` / `medium` / `large`。卡片模式使用响应式 CSS Grid 自动计算列数；列表模式不受海报方向与大小影响。
 
+**MovieWall 随机：** 所有 MovieWall 页面工具栏提供“随机”操作。Bridge `GET /api/search/random` 复用 Advanced Search 的同一条件构建，先按当前默认条件、媒体库范围、Smart Search 与 FilterBar 统计总数，再生成随机 offset 读取一条影片。随机不是当前分页内随机，也不会忽略页面默认条件。空结果时 UI 提示“当前条件下没有可随机的影片”；进入随机详情前复用 MovieWall 详情返回状态保存。
+
 **MovieWall 分页：** 分页由 `MovieWall` 统一管理为右下角半透明悬浮控件，显示上一页、当前页/总页数、下一页。点击当前页数字进入页码输入，`Enter` 跳转，`Esc` 取消，跳页后滚动回影片墙顶部并保留搜索、FilterBar、排序和视图状态。MovieWall 页面支持左/右方向键翻页和 `Ctrl+G` 聚焦页码输入；输入框、表单、下拉框或弹窗获得焦点时不抢占按键，详情页不使用这组快捷键。
 
 **列表返回状态：** `MovieWall` 进入详情前记录当前列表状态签名与 scrollY；从详情返回且默认条件、搜索、FilterBar、排序、页码、视图未变时恢复滚动。用户改变查询条件后不复用旧滚动。

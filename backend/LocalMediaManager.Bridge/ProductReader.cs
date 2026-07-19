@@ -43,6 +43,8 @@ public sealed record MovieDetailDto(long Id, string? Code, string? Title, string
 public sealed record EntityCardDto(long Id, string Name, long MovieCount, string? ImageUrl);
 public sealed record ActorDetailDto(long Id, string Name, string? Alias, int? Gender, string? BirthDate, string? Description);
 public sealed record EntityPageDto(IReadOnlyList<EntityCardDto> Items, long Total, int Limit, int Offset);
+public sealed record RandomMovieDto(MediaCardDto? Item, long Total);
+internal sealed record AdvancedSearchPlan(string Condition, IReadOnlyList<(string Name, object Value)> Parameters, string OrderBy);
 internal sealed record EntityConfig(string Table, string Relation, string Key, string EntityCondition, Func<long, string?> ImageUrl)
 {
     public static EntityConfig? For(string type, string bridgeUrl) => type.ToLowerInvariant() switch {
@@ -320,6 +322,28 @@ public static class ProductReader
         string query, long? actorId, long? tagId, long? directorId, long? movieTagId, long? customTagId, long? seriesId, bool? favorite, bool? watched, double ratingMin, string ratingFilter, string metadata,
         string fileStatus, string metadataStatus, long? libraryId, string sort, int limit, int offset, long? genreId = null, long? studioId = null)
     {
+        AdvancedSearchPlan plan = await BuildAdvancedSearchPlanAsync(databasePath, query, actorId, tagId, directorId, movieTagId, customTagId, seriesId, favorite, watched,
+            ratingMin, ratingFilter, metadata, fileStatus, metadataStatus, libraryId, sort, genreId, studioId);
+        return await ReadFilteredCardsAsync(databasePath, bridgeUrl, plan.Condition, plan.Parameters, plan.OrderBy, limit, offset);
+    }
+
+    public static async Task<RandomMovieDto> ReadRandomMovieAsync(string databasePath, string bridgeUrl,
+        string query, long? actorId, long? tagId, long? directorId, long? movieTagId, long? customTagId, long? seriesId, bool? favorite, bool? watched, double ratingMin, string ratingFilter, string metadata,
+        string fileStatus, string metadataStatus, long? libraryId, string sort, long? genreId = null, long? studioId = null)
+    {
+        AdvancedSearchPlan plan = await BuildAdvancedSearchPlanAsync(databasePath, query, actorId, tagId, directorId, movieTagId, customTagId, seriesId, favorite, watched,
+            ratingMin, ratingFilter, metadata, fileStatus, metadataStatus, libraryId, sort, genreId, studioId);
+        long total = await CountFilteredMoviesAsync(databasePath, plan.Condition, plan.Parameters);
+        if (total <= 0) return new(null, 0);
+        int offset = checked((int)Random.Shared.NextInt64(total));
+        MediaPageDto page = await ReadFilteredCardsAsync(databasePath, bridgeUrl, plan.Condition, plan.Parameters, plan.OrderBy, 1, offset);
+        return new(page.Items.FirstOrDefault(), total);
+    }
+
+    private static async Task<AdvancedSearchPlan> BuildAdvancedSearchPlanAsync(string databasePath,
+        string query, long? actorId, long? tagId, long? directorId, long? movieTagId, long? customTagId, long? seriesId, bool? favorite, bool? watched, double ratingMin, string ratingFilter, string metadata,
+        string fileStatus, string metadataStatus, long? libraryId, string sort, long? genreId = null, long? studioId = null)
+    {
         var conditions = new List<string>(); var parameters = new List<(string,object)>();
         var parsed = SearchQueryParser.Parse(query);
         favorite ??= parsed.Favorite;
@@ -363,7 +387,7 @@ public static class ProductReader
         if (fileStatus == "missing") conditions.Add("f.ExistsState='Missing'"); else if (fileStatus == "available") conditions.Add("f.ExistsState<>'Missing'");
         if (libraryId.HasValue) { conditions.Add("f.LibraryId=$library"); parameters.Add(("$library", libraryId.Value)); }
         string order = sort switch { "code" => "m.Code COLLATE NOCASE,m.Id", "rating" => "s.UserRating DESC,m.Id DESC", "release" => "m.ReleaseDate DESC,m.Id DESC", _ => "m.ImportedAt DESC,m.Id DESC" };
-        return await ReadFilteredCardsAsync(databasePath, bridgeUrl, conditions.Count == 0 ? "1=1" : string.Join(" AND ", conditions), parameters, order, limit, offset);
+        return new(conditions.Count == 0 ? "1=1" : string.Join(" AND ", conditions), parameters, order);
     }
 
     private static void AddKeywordCondition(List<string> conditions, List<(string, object)> parameters, string keyword, bool hasDirectors, ref int index)
@@ -663,6 +687,14 @@ public static class ProductReader
         var items = new List<MediaCardDto>(); await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync()) items.Add(Card(reader, bridgeUrl));
         return new(items, total, limit, offset);
+    }
+    private static async Task<long> CountFilteredMoviesAsync(string databasePath, string condition, IReadOnlyList<(string Name,object Value)> parameters)
+    {
+        await using var connection = await OpenAsync(databasePath);
+        await using var count = connection.CreateCommand();
+        count.CommandText = $"SELECT COUNT(DISTINCT m.Id) FROM Movies m LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video' LEFT JOIN UserMovieState s ON s.MovieId=m.Id WHERE {condition}";
+        foreach (var parameter in parameters) count.Parameters.AddWithValue(parameter.Name, parameter.Value);
+        return Convert.ToInt64(await count.ExecuteScalarAsync() ?? 0L);
     }
     private static MediaCardDto Card(SqliteDataReader reader,string bridgeUrl)=>new(reader.GetInt64(0),reader.GetString(1),reader.GetString(2),reader.GetString(3),reader.GetDouble(4),reader.GetInt64(5)==1,reader.GetString(6),reader.GetString(7),reader.GetInt64(8)==1?$"{bridgeUrl}/api/images/{reader.GetInt64(0)}/primary?variant=thumbnail":null,MetadataStatusFromReader(reader,9));
     private static async Task<IReadOnlyList<SearchEntityDto>> ReadEntitiesAsync(SqliteConnection connection,string table,string relation,string key,string like,int limit){

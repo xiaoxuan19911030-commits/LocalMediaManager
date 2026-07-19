@@ -136,32 +136,38 @@ Retained user-data features remain in scope: scoring, favorite, custom tags, act
 
 **P0**
 
-1. MovieWall 随机影片
-2. 图片 SetAs
-3. 复制影片信息
+1. 图片 SetAs
+2. 复制影片信息
 
 **P1**
 
-4. 查重处理流程
-5. 批量整理入口
-6. 日志清理
+3. 查重处理流程
+4. 批量整理入口
+5. 日志清理
 
 **P2**
 
-7. 语言设置
-8. 托盘与关闭行为
-9. 快捷键管理
-10. 检查更新
+6. 语言设置
+7. 托盘与关闭行为
+8. 快捷键管理
+9. 检查更新
 
 ### Completed Retained Parity
 
 - 厂商分类浏览：`/tags` 横向工具栏接入 `Studios/MovieStudios`，并通过统一 MovieWall 的 `studioId` 默认条件进入厂商影片集合。
+- MovieWall 随机影片：所有 MovieWall 页面工具栏提供随机按钮，随机范围复用当前默认条件、Smart Search、FilterBar 和媒体库范围。
 
 ### Fixed Development Order
 
 1. Finish all retained legacy feature migration and update `docs/migration/FEATURE_PARITY_MATRIX.md` after each feature.
 2. After retained Feature Parity reaches 100% and the new implementation is stable, run a dedicated Legacy Cleanup Sprint.
 3. After Legacy Cleanup, move into product optimization, UI redesign, and new feature development driven by Human experience needs rather than legacy UI parity.
+
+### Migration Execution Policy
+
+- Do not create standalone audit sprints for ordinary empty data or low-value sparse fields.
+- Pause retained feature migration only for data corruption risk, user-data loss risk, schema incompatibility, clear old/new result mismatch, release build failure, installed app startup failure, or unusable core functionality.
+- Record non-blocking empty data and low-use-field gaps in documentation, then continue retained Feature Parity migration.
 
 - 对 0.4.1–0.4.3 的媒体管理功能执行最终等价验收；审计结论见 [`audits/FEATURE_PARITY_AUDIT_0.5.0-01.md`](audits/FEATURE_PARITY_AUDIT_0.5.0-01.md)。
 - 首先关闭 P0 的任务生命周期、安装版扫描导入、受保护元数据写入、查重安全工作流和文件操作故障恢复。

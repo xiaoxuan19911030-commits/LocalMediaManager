@@ -3,6 +3,7 @@ import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded'
 import NavigateBeforeRoundedIcon from '@mui/icons-material/NavigateBeforeRounded'
 import NavigateNextRoundedIcon from '@mui/icons-material/NavigateNextRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
+import ShuffleRoundedIcon from '@mui/icons-material/ShuffleRounded'
 import { Box, Button, Collapse, IconButton, InputAdornment, MenuItem, Paper, Snackbar, Stack, TextField, Tooltip, Typography } from '@mui/material'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { MovieResultContainer, useMovieActions } from '@/components/workspace/MovieResults'
@@ -113,6 +114,7 @@ export function MovieWall({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [randomLoading, setRandomLoading] = useState(false)
   const [pageInputFocusSignal, setPageInputFocusSignal] = useState(0)
   const loadSeq = useRef(0)
   const movieActions = useMovieActions({ onNotice: setNotice, play: bridge.play })
@@ -124,25 +126,28 @@ export function MovieWall({
   const activeFilterCount = (query ? 1 : 0) + (sort !== 'newest' ? 1 : 0) + (filterDirty ? 1 : 0)
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
-  const load = useCallback(() => {
-    const seq = ++loadSeq.current
-    setLoading(true); setError('')
+  const buildSearchFilters = useCallback((nextLimit = pageSize, nextOffset = (page - 1) * pageSize): AdvancedSearchFilters => {
     const effectiveMetadataStatus = imageStatus === 'missing' ? 'missing-images' : imageStatus === 'normal' ? 'complete' : metadataStatus
-    const filters: AdvancedSearchFilters = {
+    return {
       query,
       ...defaults,
       ratingFilter: rating,
       metadataStatus: effectiveMetadataStatus,
       libraryId: libraryId || undefined,
       sort,
-      limit: pageSize,
-      offset: (page - 1) * pageSize,
+      limit: nextLimit,
+      offset: nextOffset,
     }
-    bridge.advancedSearch(filters)
+  }, [defaults, imageStatus, libraryId, metadataStatus, page, pageSize, query, rating, sort])
+
+  const load = useCallback(() => {
+    const seq = ++loadSeq.current
+    setLoading(true); setError('')
+    bridge.advancedSearch(buildSearchFilters())
       .then((result) => { if (seq === loadSeq.current) { setItems(result.items); setTotal(result.total) } })
       .catch((reason: Error) => { if (seq === loadSeq.current) setError(reason.message) })
       .finally(() => { if (seq === loadSeq.current) setLoading(false) })
-  }, [defaults, imageStatus, libraryId, metadataStatus, page, pageSize, query, rating, sort])
+  }, [buildSearchFilters])
 
   useEffect(load, [load, reloadSignal])
   useEffect(() => () => { loadSeq.current += 1 }, [])
@@ -210,6 +215,21 @@ export function MovieWall({
     if (onOpenItem) onOpenItem(item, openDefault)
     else openDefault()
   }
+  const openRandomMovie = () => {
+    if (randomLoading) return
+    setRandomLoading(true)
+    bridge.randomMovie(buildSearchFilters(1, 0))
+      .then((result) => {
+        if (!result.item) {
+          setNotice('当前条件下没有可随机的影片')
+          return
+        }
+        rememberScrollForDetail()
+        movieActions.openMovie(result.item, { source: 'movie-wall', search: query, sort })
+      })
+      .catch((reason: Error) => setNotice(reason.message))
+      .finally(() => setRandomLoading(false))
+  }
   const submitSearch = () => { setPage(1); setQuery(normalizeSearch(search)) }
   const clearSearch = () => { setSearch(''); setQuery(''); setPage(1) }
   const clearFilters = () => {
@@ -252,7 +272,7 @@ export function MovieWall({
   </Stack>
 
   return <WorkspacePage title={title} description={description?.(total)} stats={stats} filters={filters} activeFilterCount={activeFilterCount} loading={loading} error={error}
-    primaryActions={[...(primaryActions?.(context) ?? []), refreshAction(load)]}>
+    primaryActions={[...(primaryActions?.(context) ?? []), { key: 'random', label: '随机', icon: <ShuffleRoundedIcon/>, variant: 'outlined', disabled: randomLoading, onClick: openRandomMovie }, refreshAction(load)]}>
     <Box sx={{ position: 'relative', pb: total > pageSize ? { xs: 9, md: 10 } : 0, pr: total > pageSize ? { lg: 13 } : 0 }}>
       <MovieResultContainer items={items} total={total} display={movieWallDisplay} view={view} selectable={selectable} selectedIds={selectedIds} onSelect={onSelect} onRatingClick={onRatingClick} onContextMenu={onContextMenu} onPlay={movieActions.playMovie} onOpen={openMovie} emptyTitle={emptyTitle} emptyDescription={emptyDescription}/>
     </Box>

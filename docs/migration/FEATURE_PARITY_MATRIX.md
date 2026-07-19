@@ -100,6 +100,7 @@
 | 40 | 任务队列 | P0 | 必须保留 | 已部分迁移 | Tasks Schema；Bridge Task Service；Task DTO；Runner；持久日志 | 数据库写入 | 独立图片/NFO Runner 与全部任务类型统一控制 | 0.5.0 | 完整状态机、重启恢复、失败重试和日志通过 | Bridge: task/list/log/pause/resume/cancel/retry；Migration: `0004`/`0005`/`0008`；Automated: 扫描、同步、整理与异常中断恢复；Real smoke: pause/resume/cancel/retry 持久日志；Installed UI: 任务阶段/失败/日志入口；独立图片/NFO Runner 仍待完成，故保持部分迁移 |
 | 41 | 其他旧版能力 | P3 | 待确认 | 需要重构 | 持续源码审计；用户确认；Roadmap/TODO | 需要备份与回滚 | 逐项拆分并进入本矩阵 | 0.5.x | 每项建立独立依赖、风险和验收后实施 | 三份旧版审计文档；Commit `83c53b5`；不代表功能完成 |
 | 42 | 厂商分类浏览 | P0 | 必须保留 | 已完整迁移 | `Studios/MovieStudios`；实体列表；MovieWall 默认条件；媒体库范围 | 无写入 | 无 | 0.5.0 | 标签页切到厂商显示厂商与去重影片数；点击进入 MovieWall 后 `studioId` 与 Smart Search、FilterBar、媒体库范围 AND 组合；返回恢复标签页状态 | Bridge: `GET /api/entities/studios` + `GET /api/search/advanced?studioId=`；Migration: N/A（复用 `0001_InitialSchema` 的 `Studios/MovieStudios`）；Automated: `EntityListsReturnDistinctMovieCounts`、`StudioListCanBeScopedToLibraryAndSorted`、`CategoryFiltersComposeWithSearchAndFilterBar`；Smoke: 本 Sprint 安装版只读验证；Commit: 本 Sprint `feat(tags): add studio category browsing` |
+| 43 | MovieWall 随机影片 | P0 | 必须保留 | 已完整迁移 | MovieWall 统一状态；Advanced Search 条件构建；详情返回恢复 | 无写入 | 无 | 0.5.0 | 随机范围为页面默认条件 AND 媒体库范围 AND Smart Search AND FilterBar；空结果提示；点击进入详情后返回恢复 MovieWall | Bridge: `GET /api/search/random`；Migration: N/A；Automated: `RandomMovieUsesCurrentQueryScope`、`RandomMovieHandlesEmptyAndSingleResultScopes`；Smoke: 本 Sprint 安装版随机端点和启动验证；Commit: 本 Sprint `feat(moviewall): add scoped random movie action` |
 
 ## 证据记录格式
 
@@ -158,6 +159,7 @@ Acceptance: 发布验证记录或独立验收文档
 - Retained user-data features: rating, favorite, custom tags, actor display ordering, poster/image adjustment, manual crop, future image SetAs, playback count, last played time, recent playback, and future Human-approved user notes.
 - Retained Feature Parity order: complete all retained legacy features first and update this matrix after each feature; run Legacy Cleanup only after retained Feature Parity reaches 100% and is stable; start Human-experience-driven product optimization only after Legacy Cleanup.
 - Do not mark custom tags, rating, favorite, actor display order, or image adjustment as cancelled.
+- Non-blocking empty data policy: ordinary empty data, low-use fields, and sparse optional metadata do not create standalone audit sprints. Continue migration unless there is data corruption risk, user-data loss risk, schema incompatibility, clear old/new mismatch, release build failure, installed startup failure, or unusable core functionality.
 
 ## 2026-07-19 Studio Category Evidence Note
 
@@ -174,3 +176,11 @@ Acceptance: 发布验证记录或独立验收文档
 - “全部” behavior: still reuses 标签/Genre data and keeps an independent button state; no mixed entity aggregation API was introduced.
 - Director handoff: director items use `directorId` and optional `libraryId`, then enter the shared MovieWall where defaults compose with Smart Search and FilterBar using AND.
 - Automated: Bridge tests cover director list loading, distinct movie counts, search, name sorting, library scoping, and AND composition.
+
+## 2026-07-19 MovieWall Random Evidence Note
+
+- Scope: migrate random movie as a MovieWall toolbar action, not a standalone page.
+- Algorithm: Bridge reuses the same advanced-search condition plan, counts matching distinct movies, chooses a random offset with `Random.Shared.NextInt64(total)`, and reads one card with the same parameterized condition.
+- Scope composition: page defaults, media-library range, Smart Search, and FilterBar use the same AND semantics as `/api/search/advanced`.
+- UI: MovieWall saves its existing detail-return state before navigating to the random movie detail; repeated clicks are disabled while the request is in flight; empty result shows “当前条件下没有可随机的影片”.
+- Automated: random tests cover all movies, media library, favorite, tag, series, studio, custom tag, Smart Search, FilterBar, combined defaults, empty result, and single-result scopes.

@@ -16,6 +16,7 @@
 - 标签二级页改为横向工具栏浏览，支持范围切换、全部/导演/标签/系列/厂商/自定义分类切换、四种排序，以及返回状态恢复。
 - 标签二级页将刮削元数据 Genre 统一显示为“标签”，内部 API 与数据库字段名保持不变。
 - 厂商分类浏览接入 `Studios/MovieStudios`，点击厂商通过统一 MovieWall 的 `studioId` 默认条件显示对应影片集合。
+- MovieWall 工具栏新增随机影片按钮，按当前默认条件、媒体库范围、Smart Search 和 FilterBar 随机进入详情页。
 - MovieWall Display Optimization：影片墙新增统一海报方向（竖版 2:3 / 横版 16:9）、海报大小（小 / 中 / 大）设置，并经 Unified Settings 持久化。
 - MovieWall 分页改为右下角悬浮控件，支持点击页码输入、Enter 跳转、Esc 取消、左右方向键翻页和 Ctrl+G 聚焦页码。
 

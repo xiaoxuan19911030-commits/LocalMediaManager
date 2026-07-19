@@ -197,6 +197,33 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RandomMovieUsesCurrentQueryScope()
+    {
+        await AssertRandomInSet(await RandomMovie(), [1, 2, 3]);
+        await AssertRandomInSet(await RandomMovie(libraryId: 2), [3]);
+        await AssertRandomInSet(await RandomMovie(favorite: true), [1, 3]);
+        await AssertRandomInSet(await RandomMovie(movieTagId: 1), [1]);
+        await AssertRandomInSet(await RandomMovie(seriesId: 1), [1]);
+        await AssertRandomInSet(await RandomMovie(studioId: 1), [1]);
+        await AssertRandomInSet(await RandomMovie(customTagId: 2), [1]);
+        await AssertRandomInSet(await RandomMovie(query: "ABP"), [3]);
+        await AssertRandomInSet(await RandomMovie(ratingFilter: "5"), [3]);
+        await AssertRandomInSet(await RandomMovie(query: "评分>=4", studioId: 1, favorite: true, libraryId: 1), [1]);
+    }
+
+    [Fact]
+    public async Task RandomMovieHandlesEmptyAndSingleResultScopes()
+    {
+        RandomMovieDto empty = await RandomMovie(directorId: 999);
+        RandomMovieDto single = await RandomMovie(query: "SONE-105");
+
+        Assert.Null(empty.Item);
+        Assert.Equal(0, empty.Total);
+        Assert.Equal(2, single.Item?.DataId);
+        Assert.Equal(1, single.Total);
+    }
+
+    [Fact]
     public async Task FalseBooleanAndRatingComparisonAreApplied()
     {
         MediaPageDto result = await Search("未收藏 评分<4");
@@ -216,6 +243,19 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
     private Task<MediaPageDto> Search(string query) =>
         ProductReader.AdvancedSearchAsync(Database, "http://localhost",
             query, null, null, null, null, null, null, null, null, 0, "all", "all", "all", "all", null, "newest", 24, 0);
+
+    private Task<RandomMovieDto> RandomMovie(string query = "", long? directorId = null, long? movieTagId = null, long? customTagId = null, long? seriesId = null,
+        bool? favorite = null, string ratingFilter = "all", long? libraryId = null, long? genreId = null, long? studioId = null) =>
+        ProductReader.ReadRandomMovieAsync(Database, "http://localhost",
+            query, null, null, directorId, movieTagId, customTagId, seriesId, favorite, null, 0, ratingFilter, "all", "all", "all", libraryId, "newest", genreId, studioId);
+
+    private static Task AssertRandomInSet(RandomMovieDto result, long[] expected)
+    {
+        Assert.NotNull(result.Item);
+        Assert.Contains(result.Item!.DataId, expected);
+        Assert.Equal(expected.Length, result.Total);
+        return Task.CompletedTask;
+    }
 
     private const string At = "2026-07-18T00:00:00Z";
 
