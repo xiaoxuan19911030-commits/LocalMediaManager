@@ -56,18 +56,18 @@ export function MovieResultContainer({
   selectable?: boolean
   selectedIds?: number[]
   onSelect?: (item: MediaItem, selected: boolean) => void
-  onRatingClick?: (item: MediaItem) => void
+  onRatingClick?: (item: MediaItem, value: number | null) => void
   onContextMenu?: (event: MouseEvent, item: MediaItem) => void
 }) {
   return <Stack spacing={2}>
     {title && <SectionTitle title={total === undefined ? title : `${title}（${total}）`}/>}
     {items.length === 0 ? <EmptyState title={emptyTitle} description={emptyDescription}/> : view === 'list'
-      ? <MovieList items={items} onPlay={onPlay} onOpen={onOpen} onContextMenu={onContextMenu}/>
+      ? <MovieList items={items} onPlay={onPlay} onOpen={onOpen} onContextMenu={onContextMenu} onRatingClick={onRatingClick}/>
       : <MediaCardGrid display={display}>{items.map(item => <MediaCard key={item.dataId} item={item} display={display} selected={selectedIds.includes(item.dataId)} onSelect={selectable ? onSelect : undefined} onRatingClick={onRatingClick} onContextMenu={onContextMenu} onPlay={onPlay} onOpen={onOpen}/>)}</MediaCardGrid>}
   </Stack>
 }
 
-export function MovieList({ items, onPlay, onOpen, onContextMenu }: { items: MediaItem[]; onPlay: (item: MediaItem) => void; onOpen: (item: MediaItem) => void; onContextMenu?: (event: MouseEvent, item: MediaItem) => void }) {
+export function MovieList({ items, onPlay, onOpen, onContextMenu, onRatingClick }: { items: MediaItem[]; onPlay: (item: MediaItem) => void; onOpen: (item: MediaItem) => void; onContextMenu?: (event: MouseEvent, item: MediaItem) => void; onRatingClick?: (item: MediaItem, value: number | null) => void }) {
   const clickTimer = useRef<number | undefined>(undefined)
   useEffect(() => () => { if (clickTimer.current) window.clearTimeout(clickTimer.current) }, [])
   const openDelayed = (item: MediaItem) => {
@@ -85,7 +85,9 @@ export function MovieList({ items, onPlay, onOpen, onContextMenu }: { items: Med
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(130px,.7fr) minmax(220px,1.3fr) 120px 120px auto' }, gap: 1.25, alignItems: 'center' }}>
           <Box sx={{ minWidth: 0 }}><Typography noWrap sx={{ fontWeight: 800 }}>{item.code || `#${item.dataId}`}</Typography><Typography variant="caption" color="text.secondary">ID {item.dataId}</Typography></Box>
           <Tooltip title={title}><Typography noWrap>{title}</Typography></Tooltip>
-          <Rating size="small" value={Math.max(0, Math.min(5, item.grade || 0))} readOnly/>
+          <Box onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+            <Rating size="small" value={Math.max(0, Math.min(5, item.grade || 0))} onChange={(_, value) => onRatingClick?.(item, value)}/>
+          </Box>
           <Stack direction="row" spacing={.5} useFlexGap sx={{ flexWrap: 'wrap' }}>
             {item.favorite && <StatusBadge tone="error" label="收藏"/>}
             {item.metadataStatus && <MetadataStatusBadge status={item.metadataStatus}/>}

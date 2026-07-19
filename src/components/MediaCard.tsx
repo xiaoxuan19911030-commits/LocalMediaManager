@@ -24,7 +24,7 @@ export function MediaCardGrid({ children, display = defaultMovieWallDisplay }: {
   }}>{children}</Box>
 }
 
-export function MediaCard({ item, display = defaultMovieWallDisplay, onPlay, onOpen, selected, onSelect, onRatingClick, onContextMenu }: { item: MediaItem; display?: MovieWallDisplaySettings; onPlay: (item: MediaItem) => void; onOpen?: (item: MediaItem) => void; selected?: boolean; onSelect?: (item: MediaItem, selected: boolean) => void; onRatingClick?: (item: MediaItem) => void; onContextMenu?: (event: MouseEvent, item: MediaItem) => void }) {
+export function MediaCard({ item, display = defaultMovieWallDisplay, onPlay, onOpen, selected, onSelect, onRatingClick, onContextMenu }: { item: MediaItem; display?: MovieWallDisplaySettings; onPlay: (item: MediaItem) => void; onOpen?: (item: MediaItem) => void; selected?: boolean; onSelect?: (item: MediaItem, selected: boolean) => void; onRatingClick?: (item: MediaItem, value: number | null) => void; onContextMenu?: (event: MouseEvent, item: MediaItem) => void }) {
   const [coverFailed, setCoverFailed] = useState(false)
   const clickTimer = useRef<number | undefined>(undefined)
   useEffect(() => setCoverFailed(false), [item.coverUrl])
@@ -81,8 +81,8 @@ export function MediaCard({ item, display = defaultMovieWallDisplay, onPlay, onO
         <Typography variant="body2" color="text.secondary" noWrap sx={{ mt: 0.7 }}>
           {item.importedAt?.slice(0, 10) || '日期未知'}
         </Typography>
-        <Box onClick={(event) => { if (onRatingClick) { event.stopPropagation(); onRatingClick(item) } }} sx={{ display: 'inline-flex' }}>
-          <Rating size="small" value={Math.max(0, Math.min(5, item.grade))} readOnly sx={{ mt: 0.55, display: 'flex' }} />
+        <Box onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} sx={{ display: 'inline-flex' }}>
+          <Rating size="small" value={Math.max(0, Math.min(5, item.grade))} onChange={(_, value) => onRatingClick?.(item, value)} sx={{ mt: 0.55, display: 'flex' }} />
         </Box>
       </CardContent>
     </Card>

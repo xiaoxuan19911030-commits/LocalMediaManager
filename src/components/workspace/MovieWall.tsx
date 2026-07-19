@@ -7,13 +7,14 @@ import ShuffleRoundedIcon from '@mui/icons-material/ShuffleRounded'
 import { Box, Button, Collapse, IconButton, InputAdornment, MenuItem, Paper, Snackbar, Stack, TextField, Tooltip, Typography } from '@mui/material'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { MovieResultContainer, useMovieActions } from '@/components/workspace/MovieResults'
-import { ViewModeToggle, WorkspacePage, refreshAction, type WorkspaceAction, type WorkspaceViewMode } from '@/components/workspace/Workspace'
+import { ViewModeToggle, WorkspacePage, WorkspaceToolbar, refreshAction, type WorkspaceAction, type WorkspaceViewMode } from '@/components/workspace/Workspace'
 import { defaultMovieWallDisplay, normalizeMovieWallDisplay, type MovieWallDisplaySettings } from '@/components/workspace/movieWallDisplay'
 import { bridge } from '@/services/bridge'
 import type { AdvancedSearchFilters, MediaItem, MediaLibrary } from '@/types/media'
 
 const normalizeSearch = (value: string) => value.replace(/\u3000/g, ' ').replace(/\s+/g, ' ').trim()
 const fieldSx = { width: { xs: '100%', sm: 164 } }
+const filterOpenStorageKey = 'lmm.movieWall.filters.open'
 
 export interface MovieWallDefaults {
   actorId?: number
@@ -86,7 +87,7 @@ export function MovieWall({
   selectable?: boolean
   selectedIds?: number[]
   onSelect?: (item: MediaItem, selected: boolean) => void
-  onRatingClick?: (item: MediaItem) => void
+  onRatingClick?: (item: MediaItem, value: number | null) => void
   onContextMenu?: (event: MouseEvent, item: MediaItem) => void
   onOpenItem?: (item: MediaItem, openDefault: () => void) => void
   renderStats?: (context: MovieWallRenderContext) => ReactNode
@@ -107,7 +108,7 @@ export function MovieWall({
   const [metadataStatus, setMetadataStatus] = useState(canReuseSavedState ? saved.metadataStatus ?? 'all' : 'all')
   const [imageStatus, setImageStatus] = useState(canReuseSavedState ? saved.imageStatus ?? 'all' : 'all')
   const [libraryId, setLibraryId] = useState(canReuseSavedState ? saved.libraryId ?? 0 : defaults.libraryId ?? 0)
-  const [moreOpen, setMoreOpen] = useState(canReuseSavedState ? saved.moreOpen ?? false : false)
+  const [moreOpen, setMoreOpen] = useState(canReuseSavedState ? saved.moreOpen ?? readFilterOpenPreference() : readFilterOpenPreference())
   const [view, setView] = useState<WorkspaceViewMode>(canReuseSavedState ? saved.view ?? 'grid' : 'grid')
   const [movieWallDisplay, setMovieWallDisplay] = useState<MovieWallDisplaySettings>(defaultMovieWallDisplay)
   const [shortcutsEnabled, setShortcutsEnabled] = useState(true)
@@ -116,6 +117,7 @@ export function MovieWall({
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [randomLoading, setRandomLoading] = useState(false)
+  const [ratingSavingId, setRatingSavingId] = useState<number>()
   const [pageInputFocusSignal, setPageInputFocusSignal] = useState(0)
   const loadSeq = useRef(0)
   const movieActions = useMovieActions({ onNotice: setNotice, play: bridge.play })
@@ -236,11 +238,24 @@ export function MovieWall({
           setNotice('当前条件下没有可随机的影片')
           return
         }
-        rememberScrollForDetail()
-        movieActions.openMovie(result.item, { source: 'movie-wall', search: query, sort })
+        setItems([result.item])
+        setTotal(1)
+        setPage(1)
+        setNotice(`已随机到：${result.item.code || result.item.title || result.item.dataId}`)
       })
       .catch((reason: Error) => setNotice(reason.message))
       .finally(() => setRandomLoading(false))
+  }
+  const saveRating = (item: MediaItem, value: number | null) => {
+    if (ratingSavingId) return
+    setRatingSavingId(item.dataId)
+    bridge.setUserState(item.dataId, value === null ? { clearRating: true } : { rating: value })
+      .then(() => {
+        setItems((current) => current.map((movie) => movie.dataId === item.dataId ? { ...movie, grade: value ?? 0 } : movie))
+        setNotice(value === null ? '已清除评分' : '已保存评分')
+      })
+      .catch((reason: Error) => setNotice(reason.message))
+      .finally(() => setRatingSavingId(undefined))
   }
   const submitSearch = () => { setPage(1); setQuery(normalizeSearch(search)) }
   const clearSearch = () => { setSearch(''); setQuery(''); setPage(1) }
@@ -262,7 +277,9 @@ export function MovieWall({
       </TextField>
       <Button type="submit" variant="contained">搜索</Button>
       <ViewModeToggle value={view} onChange={setView}/>
-      <Button color="inherit" endIcon={moreOpen ? <ExpandLessRoundedIcon/> : <ExpandMoreRoundedIcon/>} onClick={() => setMoreOpen((value) => !value)}>{moreOpen ? '收起筛选' : '更多筛选'}</Button>
+      <Button color="inherit" endIcon={moreOpen ? <ExpandLessRoundedIcon/> : <ExpandMoreRoundedIcon/>} onClick={() => setMoreOpen((value) => { const next = !value; writeFilterOpenPreference(next); return next })}>{moreOpen ? '收起筛选' : '更多筛选'}</Button>
+      <Box sx={{ flex: '1 1 auto' }}/>
+      <WorkspaceToolbar primaryActions={[...(primaryActions?.(context) ?? []), { key: 'random', label: '随机', icon: <ShuffleRoundedIcon/>, variant: 'outlined', disabled: randomLoading, onClick: openRandomMovie }, refreshAction(load)]}/>
     </Stack>
     <Collapse in={moreOpen} unmountOnExit={false}>
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} useFlexGap sx={{ alignItems: { xs: 'stretch', md: 'center' }, flexWrap: 'wrap' }}>
@@ -283,10 +300,9 @@ export function MovieWall({
     </Collapse>
   </Stack>
 
-  return <WorkspacePage title={title} description={description?.(total)} stats={stats} filters={filters} activeFilterCount={activeFilterCount} loading={loading} error={error}
-    primaryActions={[...(primaryActions?.(context) ?? []), { key: 'random', label: '随机', icon: <ShuffleRoundedIcon/>, variant: 'outlined', disabled: randomLoading, onClick: openRandomMovie }, refreshAction(load)]}>
+  return <WorkspacePage title={title} description={description?.(total)} stats={stats} filters={filters} activeFilterCount={activeFilterCount} loading={loading} error={error}>
     <Box sx={{ position: 'relative', pb: total > pageSize ? { xs: 9, md: 10 } : 0, pr: total > pageSize ? { lg: 13 } : 0 }}>
-      <MovieResultContainer items={items} total={total} display={movieWallDisplay} view={view} selectable={selectable} selectedIds={selectedIds} onSelect={onSelect} onRatingClick={onRatingClick} onContextMenu={onContextMenu} onPlay={movieActions.playMovie} onOpen={openMovie} emptyTitle={emptyTitle} emptyDescription={emptyDescription}/>
+      <MovieResultContainer items={items} total={total} display={movieWallDisplay} view={view} selectable={selectable} selectedIds={selectedIds} onSelect={onSelect} onRatingClick={onRatingClick ?? saveRating} onContextMenu={onContextMenu} onPlay={movieActions.playMovie} onOpen={openMovie} emptyTitle={emptyTitle} emptyDescription={emptyDescription}/>
     </Box>
     {total > pageSize && <FloatingPagination page={page} totalPages={totalPages} onPageChange={goToPage} focusSignal={pageInputFocusSignal}/>}
     {childrenAfterResults?.(context)}
@@ -299,6 +315,23 @@ function readSavedState(key: string): SavedMovieWallState {
     return JSON.parse(window.sessionStorage.getItem(key) || '{}') as SavedMovieWallState
   } catch {
     return {}
+  }
+}
+
+function readFilterOpenPreference() {
+  try {
+    const saved = window.localStorage.getItem(filterOpenStorageKey)
+    return saved === null ? true : saved !== 'false'
+  } catch {
+    return true
+  }
+}
+
+function writeFilterOpenPreference(value: boolean) {
+  try {
+    window.localStorage.setItem(filterOpenStorageKey, String(value))
+  } catch {
+    // Ignore storage errors; the current page state still updates.
   }
 }
 

@@ -45,15 +45,15 @@ export function WorkspacePage({
   children?: ReactNode
 }) {
   return <Box>
-    <Paper variant="outlined" sx={{ p: { xs: 2, md: 2.5 }, borderRadius: 3, mb: 2 }}>
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ alignItems: { xs: 'stretch', md: 'center' }, justifyContent: 'space-between' }}>
+    <Paper variant="outlined" sx={{ p: { xs: 1.25, md: 1.5 }, borderRadius: 2.25, mb: 1.25 }}>
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} sx={{ alignItems: { xs: 'stretch', md: 'center' }, justifyContent: 'space-between' }}>
         <Box sx={{ minWidth: 0 }}>
-          <Typography variant="h5" sx={{ fontWeight: 900 }}>{title}</Typography>
-          {description && <Typography color="text.secondary" sx={{ mt: .5, maxWidth: 840 }}>{description}</Typography>}
+          <Typography variant="h6" sx={{ fontWeight: 900 }}>{title}</Typography>
+          {description && <Typography variant="body2" color="text.secondary" sx={{ mt: .25, maxWidth: 840 }}>{description}</Typography>}
         </Box>
         <WorkspaceToolbar primaryActions={primaryActions} secondaryActions={secondaryActions}/>
       </Stack>
-      {stats && <Box sx={{ mt: 2 }}>{stats}</Box>}
+      {stats && <Box sx={{ mt: 1 }}>{stats}</Box>}
     </Paper>
     {filters && <FilterBar activeCount={activeFilterCount} onClear={onClearFilters}>{filters}</FilterBar>}
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}

@@ -4,6 +4,42 @@
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-07-20
+
+### Features
+
+- MovieWall star rating is now editable directly on cards and list rows; changes are saved immediately through the existing user-state API.
+
+### UI Improvements
+
+- MovieWall filter areas now open by default and remember the user's last expanded/collapsed preference.
+- MovieWall header spacing is reduced so the wall shows more useful content above the fold.
+- MovieWall edit actions moved into the filter toolbar. Edit mode now keeps the top controls focused on selected count, select/cancel current page, cancel selection, and finish.
+- Movie context menus are narrower, denser, icon-free, and close correctly on another right-click, blank click, wheel, Escape, window blur, or command execution.
+- Movie context menus remove Edit, Generate Poster, and Generate Preview; Screenshot and GIF generation remain available.
+- Batch context menu is simplified to batch sync information, batch screenshot, batch GIF, batch rename placeholder, and delete movie.
+
+### Bug Fixes
+
+- Fixed manually queued metadata sync tasks staying pending when legacy AutoExecute/provider enabled settings disagreed.
+- Fixed right-click menus remaining open when another movie is right-clicked.
+- Fixed current-page selection so repeated select actions do not duplicate selected movie IDs.
+
+### Behavior Changes
+
+- Random movie now keeps the user on the MovieWall and replaces the current results with one random movie from the active query scope, instead of opening the detail page.
+- Detail page polish from the original 0.6.2 request was intentionally skipped after product instruction: "details page: do not change this item."
+
+### Compatibility
+
+- No database schema changes.
+- No metadata ownership changes.
+- No change to Details page UI.
+
+### Package
+
+- `Local Media Manager_0.6.2_x64-setup.exe`
+
 ## [0.6.1] - 2026-07-20
 
 ### Features

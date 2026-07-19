@@ -2,14 +2,29 @@
 
 ## Current Release
 
-- **Version:** 0.6.1
-- **Release:** Task Center Polish
+- **Version:** 0.6.2
+- **Release:** MovieWall Polish
 - **Branch policy:** Trunk-based development. `main` is the only long-lived development branch after this release.
 - **Restore policy:** Official version recovery uses immutable release tags, starting with `v0.6.0`; rollback branches are no longer long-term restore points.
 
-## 0.6.1 - Task Center Polish
+## 0.6.2 - MovieWall Polish
 
 **Status:** Release candidate / verification in progress
+**Date:** 2026-07-20
+
+Scope:
+
+- MovieWall only. Details page polish was skipped by explicit product instruction.
+- Filters open by default and remember the last expand/collapse preference.
+- MovieWall hero/header spacing is reduced.
+- Card/list ratings can be edited directly from the MovieWall.
+- Context menu behavior is fixed and simplified.
+- Edit mode actions are consolidated into the filter toolbar.
+- Random movie stays inside the MovieWall result surface instead of opening Details.
+
+## 0.6.1 - Task Center Polish
+
+**Status:** Released
 **Date:** 2026-07-20
 
 Scope:
