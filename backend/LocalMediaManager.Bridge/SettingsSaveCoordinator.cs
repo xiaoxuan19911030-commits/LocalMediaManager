@@ -6,6 +6,8 @@ namespace LocalMediaManager.Bridge;
 
 public sealed record AppearanceSettingsDto(string ThemeMode);
 public sealed record MovieWallDisplaySettingsDto(string PosterOrientation, string PosterSize);
+public sealed record SystemSettingsDto(string Language, string CloseBehavior, bool StartMinimizedToTray, int LogRetentionDays,
+    bool GlobalShortcutsEnabled, bool AutoCheckUpdates, string? LastUpdateCheckAt = null);
 
 public sealed record MediaStorageSettingsDto(
     string RootPath,
@@ -28,7 +30,8 @@ public sealed record UnifiedSettingsDto(
     RatingRetentionSettingsDto RatingRetention,
     AppearanceSettingsDto Appearance,
     MediaStorageSettingsDto MediaStorage,
-    MovieWallDisplaySettingsDto MovieWallDisplay);
+    MovieWallDisplaySettingsDto MovieWallDisplay,
+    SystemSettingsDto System);
 
 public sealed record UnifiedSettingsSaveResult(UnifiedSettingsDto Settings, IReadOnlyList<string> ChangedFields, string Message);
 
@@ -47,6 +50,7 @@ public sealed class SettingsSaveCoordinator(
         AppearanceSettingsDto appearance = await ReadAppearanceAsync(token);
         MovieWallDisplaySettingsDto movieWallDisplay = await ReadMovieWallDisplayAsync(token);
         MediaStorageSettingsDto mediaStorage = await ReadMediaStorageAsync(token);
+        SystemSettingsDto system = await ReadSystemAsync(token);
         return new(
             await metadata.ReadMetaTubeAsync(),
             await nfo.ReadSettingsAsync(token),
@@ -54,7 +58,8 @@ public sealed class SettingsSaveCoordinator(
             await ratings.ReadSettingsAsync(token),
             appearance,
             mediaStorage,
-            movieWallDisplay);
+            movieWallDisplay,
+            system);
     }
 
     public UnifiedSettingsDto DefaultSettings() => SettingsDefaults.UnifiedForEnvironment(installRoot, databasePath);
@@ -85,6 +90,12 @@ public sealed class SettingsSaveCoordinator(
         await StoreAsync(connection, transaction, "appearance.themeMode", clean.Appearance.ThemeMode, "string", token);
         await StoreAsync(connection, transaction, "movieWall.posterOrientation", clean.MovieWallDisplay.PosterOrientation, "string", token);
         await StoreAsync(connection, transaction, "movieWall.posterSize", clean.MovieWallDisplay.PosterSize, "string", token);
+        await StoreAsync(connection, transaction, "system.language", clean.System.Language, "string", token);
+        await StoreAsync(connection, transaction, "system.closeBehavior", clean.System.CloseBehavior, "string", token);
+        await StoreAsync(connection, transaction, "system.startMinimizedToTray", clean.System.StartMinimizedToTray, "boolean", token);
+        await StoreAsync(connection, transaction, "system.logRetentionDays", clean.System.LogRetentionDays, "integer", token);
+        await StoreAsync(connection, transaction, "system.globalShortcutsEnabled", clean.System.GlobalShortcutsEnabled, "boolean", token);
+        await StoreAsync(connection, transaction, "system.autoCheckUpdates", clean.System.AutoCheckUpdates, "boolean", token);
         await StoreAsync(connection, transaction, "mediaStorage.rootPath", clean.MediaStorage.RootPath, "string", token);
         await StoreAsync(connection, transaction, "mediaStorage.directory.posters", clean.MediaStorage.PostersDirectory, "string", token);
         await StoreAsync(connection, transaction, "mediaStorage.directory.thumbnails", clean.MediaStorage.ThumbnailsDirectory, "string", token);
@@ -131,7 +142,8 @@ public sealed class SettingsSaveCoordinator(
             new(input.RatingRetention.Enabled),
             new(theme),
             mediaStorage,
-            new(posterOrientation, posterSize));
+            new(posterOrientation, posterSize),
+            NormalizeSystem(input.System));
     }
 
     private static string NormalizeDirectory(string value, string label)
@@ -375,6 +387,7 @@ public sealed class SettingsSaveCoordinator(
         if (before.Appearance != after.Appearance) changed.Add("appearance");
         if (before.MediaStorage != after.MediaStorage) changed.Add("mediaStorage");
         if (before.MovieWallDisplay != after.MovieWallDisplay) changed.Add("movieWallDisplay");
+        if (before.System != after.System) changed.Add("system");
         return changed;
     }
 
@@ -382,6 +395,51 @@ public sealed class SettingsSaveCoordinator(
     {
         if (!values.TryGetValue(key, out string? raw)) return fallback;
         try { return JsonSerializer.Deserialize<string>(raw) ?? fallback; }
+        catch (JsonException) { return fallback; }
+    }
+
+    private async Task<SystemSettingsDto> ReadSystemAsync(CancellationToken token)
+    {
+        SystemSettingsDto defaults = SettingsDefaults.Unified.System;
+        await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadOnly, token);
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT Key,ValueJson FROM AppSettings WHERE Key LIKE 'system.%' OR Key LIKE 'updates.%'";
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token)) values[reader.GetString(0)] = reader.GetString(1);
+        return NormalizeSystem(new(
+            TextSetting(values, "system.language", defaults.Language),
+            TextSetting(values, "system.closeBehavior", defaults.CloseBehavior),
+            BoolSetting(values, "system.startMinimizedToTray", defaults.StartMinimizedToTray),
+            IntSetting(values, "system.logRetentionDays", defaults.LogRetentionDays),
+            BoolSetting(values, "system.globalShortcutsEnabled", defaults.GlobalShortcutsEnabled),
+            BoolSetting(values, "system.autoCheckUpdates", defaults.AutoCheckUpdates),
+            TextSetting(values, "updates.lastCheckedAt", defaults.LastUpdateCheckAt ?? "")));
+    }
+
+    private static SystemSettingsDto NormalizeSystem(SystemSettingsDto? input)
+    {
+        SystemSettingsDto defaults = SettingsDefaults.Unified.System;
+        if (input is null) return defaults;
+        string language = input.Language is "system" or "zh-CN" ? input.Language : defaults.Language;
+        string closeBehavior = input.CloseBehavior is "exit" or "minimizeToTray" ? input.CloseBehavior : defaults.CloseBehavior;
+        return new(language, closeBehavior, input.StartMinimizedToTray,
+            LogMaintenanceService.NormalizeRetentionDays(input.LogRetentionDays),
+            input.GlobalShortcutsEnabled, input.AutoCheckUpdates,
+            string.IsNullOrWhiteSpace(input.LastUpdateCheckAt) ? null : input.LastUpdateCheckAt);
+    }
+
+    private static bool BoolSetting(IReadOnlyDictionary<string, string> values, string key, bool fallback)
+    {
+        if (!values.TryGetValue(key, out string? raw)) return fallback;
+        try { return JsonSerializer.Deserialize<bool>(raw); }
+        catch (JsonException) { return fallback; }
+    }
+
+    private static int IntSetting(IReadOnlyDictionary<string, string> values, string key, int fallback)
+    {
+        if (!values.TryGetValue(key, out string? raw)) return fallback;
+        try { return JsonSerializer.Deserialize<int>(raw); }
         catch (JsonException) { return fallback; }
     }
 }
@@ -397,7 +455,8 @@ public static class SettingsDefaults
         new(true),
         new("dark"),
         MediaStorageForEnvironment(installRoot, databasePath),
-        new("portrait", "medium"));
+        new("portrait", "medium"),
+        new("system", "exit", false, 30, true, false, null));
 
     public static MediaStorageSettingsDto MediaStorageForEnvironment(
         string? installRoot,

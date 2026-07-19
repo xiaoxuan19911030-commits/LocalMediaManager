@@ -1,5 +1,5 @@
 use std::{fs::{self, OpenOptions}, net::{SocketAddr, TcpStream}, path::{Path, PathBuf}, process::{Child, Command, Stdio}, sync::Mutex, time::Duration};
-use tauri::{AppHandle, Manager, RunEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, menu::{Menu, MenuItem}, tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}};
 use uuid::Uuid;
 
 #[cfg(windows)]
@@ -16,6 +16,24 @@ fn bridge_session_token(token: tauri::State<'_, BridgeSessionToken>) -> String {
 #[tauri::command]
 fn close_local_media_manager(app: AppHandle) {
     app.exit(0);
+}
+
+#[tauri::command]
+fn hide_main_window(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.hide().map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn show_main_window(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.show().map_err(|error| error.to_string())?;
+        window.unminimize().map_err(|error| error.to_string())?;
+        window.set_focus().map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -109,7 +127,7 @@ fn bridge_port_is_in_use() -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![bridge_session_token, close_local_media_manager, choose_directory])
+        .invoke_handler(tauri::generate_handler![bridge_session_token, close_local_media_manager, hide_main_window, show_main_window, choose_directory])
         .setup(|app| {
             let token = Uuid::new_v4().simple().to_string();
             let bridge_already_running = bridge_port_is_in_use();
@@ -141,6 +159,30 @@ pub fn run() {
             }
             app.manage(BridgeSessionToken(token));
             app.manage(BridgeProcess(Mutex::new(child)));
+            let show = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
+            let hide = MenuItem::with_id(app, "hide", "隐藏主窗口", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
+            let tray = TrayIconBuilder::new()
+                .tooltip("Local Media Manager")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => { let _ = show_main_window(app.clone()); }
+                    "hide" => { let _ = hide_main_window(app.clone()); }
+                    "quit" => { let _ = app.emit("lmm-tray-quit", ()); }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                        let _ = show_main_window(tray.app_handle().clone());
+                    }
+                });
+            if let Some(icon) = app.default_window_icon() {
+                tray.icon(icon.clone()).build(app)?;
+            } else {
+                tray.build(app)?;
+            }
             Ok(())
         })
         .build(tauri::generate_context!())

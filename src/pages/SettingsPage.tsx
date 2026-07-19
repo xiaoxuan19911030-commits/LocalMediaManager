@@ -20,8 +20,8 @@ import { buildInfo } from '@/buildInfo'
 import { defaultMovieWallDisplay, normalizeMovieWallDisplay } from '@/components/workspace/movieWallDisplay'
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
-import type { BridgeHealth } from '@/types/media'
-import type { BackupValidation, DataSafetyOverview, DiagnosticCheck, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, NfoSettings, PlaybackSettings, RatingRetentionSettings, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings } from '@/types/settings'
+import type { BridgeHealth, TaskItem } from '@/types/media'
+import type { BackupValidation, DataSafetyOverview, DiagnosticCheck, LogCleanupPreview, LogCleanupResult, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, NfoSettings, PlaybackSettings, RatingRetentionSettings, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 
 const categories = [
@@ -33,11 +33,21 @@ const categories = [
 type Category = (typeof categories)[number][0]
 type LeaveAction = 'save' | 'discard'
 type LeaveIntent = 'none' | 'route' | 'window'
-const planned = ['计划支持']
 const size = (bytes?: number) => bytes ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : '0 MB'
 const stable = (value: unknown) => JSON.stringify(value)
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 const mediaStorageFallbackNoticeKey = 'lmm.mediaStorageFallbackNotice.v1'
+
+async function confirmExitIfTasksRunning() {
+  try {
+    const tasks: TaskItem[] = await bridge.tasks(100)
+    const running = tasks.filter(task => ['Pending', 'Running', 'Paused'].includes(task.status))
+    if (running.length === 0) return true
+    return window.confirm(`当前仍有 ${running.length} 个后台任务未结束。退出会中断正在运行的任务，确定退出吗？`)
+  } catch {
+    return true
+  }
+}
 
 export default function SettingsPage() {
   const navigate = useNavigate()
@@ -51,6 +61,9 @@ export default function SettingsPage() {
   const [defaults, setDefaults] = useState<UnifiedSettings>()
   const [diagnostics, setDiagnostics] = useState<SystemDiagnostic>()
   const [cachePreview, setCachePreview] = useState<ImageCachePreview>()
+  const [logPreview, setLogPreview] = useState<LogCleanupPreview>()
+  const [logIncludeAll, setLogIncludeAll] = useState(false)
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult>()
   const [backupPath, setBackupPath] = useState('')
   const [restoreMode, setRestoreMode] = useState('all')
   const [backupValidation, setBackupValidation] = useState<BackupValidation>()
@@ -66,6 +79,8 @@ export default function SettingsPage() {
   const allowWindowCloseRef = useRef(false)
   const closingAppRef = useRef(false)
   const hasUnsavedChangesRef = useRef(false)
+  const systemSettingsRef = useRef<SystemSettings | undefined>(undefined)
+  const autoUpdateCheckStartedRef = useRef(false)
   const leaveIntentRef = useRef<LeaveIntent>('none')
 
   const hasUnsavedChanges = Boolean(original && draft && stable(original) !== stable(draft))
@@ -74,6 +89,14 @@ export default function SettingsPage() {
   useEffect(() => {
     hasUnsavedChangesRef.current = hasUnsavedChanges
   }, [hasUnsavedChanges])
+  useEffect(() => {
+    systemSettingsRef.current = draft?.system
+  }, [draft?.system])
+  useEffect(() => {
+    if (!draft?.system.autoCheckUpdates || autoUpdateCheckStartedRef.current) return
+    autoUpdateCheckStartedRef.current = true
+    bridge.checkUpdates().then(setUpdateResult).catch(() => undefined)
+  }, [draft?.system.autoCheckUpdates])
 
   const load = useCallback(() => {
     setError('')
@@ -118,6 +141,13 @@ export default function SettingsPage() {
       }
       if (!hasUnsavedChangesRef.current) {
         event.preventDefault()
+        const system = systemSettingsRef.current
+        if (system?.closeBehavior === 'minimizeToTray') {
+          await invoke('hide_main_window').catch(() => getCurrentWindow().hide())
+          return
+        }
+        const canExit = await confirmExitIfTasksRunning()
+        if (!canExit) return
         closingAppRef.current = true
         await invoke('close_local_media_manager').catch(() => getCurrentWindow().destroy())
         return
@@ -180,6 +210,22 @@ export default function SettingsPage() {
     catch (reason) { setError((reason as Error).message) }
     finally { setBusy(false); setConfirm(undefined) }
   }
+  const previewLogs = (includeAll = logIncludeAll) => draft && bridge.logCleanupPreview(draft.system.logRetentionDays, includeAll).then(setLogPreview).catch((reason: Error) => setError(reason.message))
+  const cleanupLogs = () => {
+    if (!draft || !logPreview) return
+    void run(async () => {
+      const result: LogCleanupResult = await bridge.cleanupLogs(draft.system.logRetentionDays, logIncludeAll, logPreview.confirmationToken)
+      setNotice(`${result.message} 释放 ${size(result.freedBytes)}。`)
+      setLogPreview(undefined)
+      await previewLogs(logIncludeAll)
+    }, '日志清理完成')
+  }
+  const checkUpdates = () => run(async () => {
+    const result = await bridge.checkUpdates()
+    setUpdateResult(result)
+    setNotice(result.message)
+    await load()
+  }, '更新检查完成')
   const testMetaTube = () => draft && run(async () => { const result = await bridge.testMetaTube(draft.metaTube); if (!result.success) throw new Error(result.message); setNotice(`${result.message}（${result.elapsedMilliseconds} ms）`) }, 'MetaTube 连接正常')
   const previewImport = () => {
     try { bridge.previewSettingsImport(JSON.parse(importJson)).then(setImportPreview).catch((reason: Error) => setError(reason.message)) }
@@ -247,7 +293,7 @@ export default function SettingsPage() {
             {hasUnsavedChanges ? <StatusBadge tone="warning" label="有未保存更改"/> : <StatusBadge tone="success" label="已保存"/>}
           </Stack>
         </Paper>
-        {category === 'general' && <GeneralSection snapshot={snapshot}/>}
+        {category === 'general' && <GeneralSection snapshot={snapshot} system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
         {category === 'library' && <LibrarySection onOpen={() => navigate('/libraries')}/>}
         {category === 'scan' && <PlannedSection labels={['自动读取 NFO', '自动读取本地图片', '忽略隐藏文件', '视频扩展名白名单']} fields={legacyFields}/>}
         {category === 'metadata' && <MetadataSection metaTube={draft.metaTube} setMetaTube={(value) => updateDraft('metaTube', value)} nfo={draft.nfo} setNfo={(value) => updateDraft('nfo', value)} busy={busy} testMetaTube={testMetaTube}/>}
@@ -255,14 +301,14 @@ export default function SettingsPage() {
         {category === 'mediaStorage' && <MediaStorageSection mediaStorage={draft.mediaStorage} defaults={defaults.mediaStorage} setMediaStorage={(value) => updateDraft('mediaStorage', value)} setNotice={setNotice}/>}
         {category === 'playback' && <PlaybackSection playback={draft.playback} setPlayback={(value) => updateDraft('playback', value)}/>}
         {category === 'search' && <PlannedSection labels={['默认搜索范围', '默认排序', '默认卡片/列表模式', '保存页面筛选状态']} fields={legacyFields}/>}
-        {category === 'shortcuts' && <ShortcutSection/>}
+        {category === 'shortcuts' && <ShortcutSection system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
         {category === 'appearance' && <Stack spacing={2}>
           <AppearanceSection mode={draft.appearance.themeMode} setMode={(value) => updateDraft('appearance', { themeMode: value })}/>
           <MovieWallSection value={normalizeMovieWallDisplay(draft.movieWallDisplay ?? defaultMovieWallDisplay)} setValue={(value) => updateDraft('movieWallDisplay', normalizeMovieWallDisplay(value))}/>
         </Stack>}
         {category === 'data' && <DataSection overview={overview} ratingRetention={draft.ratingRetention} setRatingRetention={(value) => updateDraft('ratingRetention', value)} backupPath={backupPath} setBackupPath={setBackupPath} restoreMode={restoreMode} setRestoreMode={setRestoreMode} validation={backupValidation} setValidation={setBackupValidation} importJson={importJson} setImportJson={setImportJson} importPreview={importPreview} previewImport={previewImport} onBackup={() => setConfirm('backup')} onRestore={() => setConfirm('restore')}/>}
-        {category === 'logs' && <LogsSection diagnostics={diagnostics} runDiagnostics={() => bridge.settingsDiagnostics().then(setDiagnostics).catch((reason: Error) => setError(reason.message))} onCleanLogs={() => setConfirm('logs')}/>}
-        {category === 'about' && <AboutSection overview={overview} health={health}/>}
+        {category === 'logs' && <LogsSection system={draft.system} setSystem={(value) => updateDraft('system', value)} diagnostics={diagnostics} logPreview={logPreview} includeAll={logIncludeAll} setIncludeAll={setLogIncludeAll} runDiagnostics={() => bridge.settingsDiagnostics().then(setDiagnostics).catch((reason: Error) => setError(reason.message))} previewLogs={() => void previewLogs()}/>}
+        {category === 'about' && <AboutSection overview={overview} health={health} system={draft.system} setSystem={(value) => updateDraft('system', value)} updateResult={updateResult} checkUpdates={checkUpdates}/>}
         {legacyFields.length > 0 && category !== 'metadata' && category !== 'playback' && category !== 'images' && <LegacyFields fields={legacyFields}/>}
       </Stack>
     </Box>
@@ -277,7 +323,6 @@ export default function SettingsPage() {
       if (confirm === 'cache' && cachePreview) void run(() => bridge.cleanupImageCache(cachePreview.confirmationToken), '缓存已清理')
       if (confirm === 'thumbs') void run(() => bridge.rebuildImageCache(), '缩略图重建任务已创建')
       if (confirm === 'restore') void run(() => bridge.createRestorePlan(backupPath, restoreMode), '恢复计划已创建，请重启后按计划恢复')
-      if (confirm === 'logs') void run(() => Promise.resolve(), '日志清理目前为计划支持，未执行删除')
     }}/>
     <Dialog open={restoreDefaultsOpen} onClose={() => setRestoreDefaultsOpen(false)}>
       <DialogTitle>恢复默认设置</DialogTitle>
@@ -301,12 +346,45 @@ export default function SettingsPage() {
         <Button variant="contained" disabled={busy} onClick={() => void finishLeave('save')}>{busy ? '正在保存...' : '保存并离开'}</Button>
       </DialogActions>
     </Dialog>
+    <Dialog open={Boolean(logPreview)} onClose={() => !busy && setLogPreview(undefined)} fullWidth maxWidth="md">
+      <DialogTitle>确认清理历史日志</DialogTitle>
+      <DialogContent dividers>
+        {logPreview && <Stack spacing={1.5}>
+          <Alert severity={logPreview.deletableCount ? 'warning' : 'info'}>将删除 {logPreview.deletableCount} 个历史日志，预计释放 {size(logPreview.deletableBytes)}。当前活动日志不会删除。</Alert>
+          <Typography variant="body2" color="text.secondary">目录：{logPreview.logDirectory}</Typography>
+          <Stack spacing={0.75}>{logPreview.files.slice(0, 24).map(file => <Paper key={file.path} variant="outlined" sx={{ p: 1, borderRadius: 1.5 }}>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ justifyContent: 'space-between' }}>
+              <Box><Typography sx={{ fontWeight: 800 }}>{file.name}</Typography><Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{file.path}</Typography></Box>
+              <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}><StatusBadge tone={file.eligible ? 'warning' : 'success'} label={file.reason}/><Typography variant="body2">{size(file.bytes)}</Typography></Stack>
+            </Stack>
+          </Paper>)}</Stack>
+        </Stack>}
+      </DialogContent>
+      <DialogActions><Button onClick={() => setLogPreview(undefined)} disabled={busy}>取消</Button><Button color="error" variant="contained" disabled={busy || !logPreview?.deletableCount} onClick={cleanupLogs}>{busy ? '清理中...' : '确认清理'}</Button></DialogActions>
+    </Dialog>
     <Snackbar open={Boolean(notice)} autoHideDuration={2500} onClose={() => setNotice('')} message={notice}/>
   </WorkspacePage>
 }
 
-function GeneralSection({ snapshot }: { snapshot: SettingsSnapshot }) {
-  return <SurfaceSection title="常规状态" description="统一设置服务读取结果。"><Stack spacing={1}><StatusBadge tone="success" label={`${snapshot.mappedCount} 个已映射设置`}/><StatusBadge tone={snapshot.errors.length ? 'warning' : 'success'} label={`${snapshot.errors.length} 个读取问题`}/><Typography variant="body2" color="text.secondary">读取时间：{new Date(snapshot.readAt).toLocaleString()}</Typography></Stack></SurfaceSection>
+function GeneralSection({ snapshot, system, setSystem }: { snapshot: SettingsSnapshot; system: SystemSettings; setSystem: (value: SystemSettings) => void }) {
+  return <Stack spacing={2}>
+    <SurfaceSection title="常规状态" description="统一设置服务读取结果。"><Stack spacing={1}><StatusBadge tone="success" label={`${snapshot.mappedCount} 个已映射设置`}/><StatusBadge tone={snapshot.errors.length ? 'warning' : 'success'} label={`${snapshot.errors.length} 个读取问题`}/><Typography variant="body2" color="text.secondary">读取时间：{new Date(snapshot.readAt).toLocaleString()}</Typography></Stack></SurfaceSection>
+    <SurfaceSection title="系统" description="应用界面语言与窗口关闭行为。语言设置只影响 Local Media Manager 界面，不影响刮削、元数据或字幕语言。">
+      <Stack spacing={1.5}>
+        <TextField select size="small" label="应用语言" value={system.language} onChange={event => setSystem({ ...system, language: event.target.value as SystemSettings['language'] })}>
+          <MenuItem value="system">跟随系统</MenuItem>
+          <MenuItem value="zh-CN">简体中文</MenuItem>
+        </TextField>
+        <Alert severity="info">当前可维护语言为简体中文与跟随系统。英文资源不完整，因此本轮不提供正式 English 选项。</Alert>
+        <TextField select size="small" label="关闭主窗口时" value={system.closeBehavior} onChange={event => setSystem({ ...system, closeBehavior: event.target.value as SystemSettings['closeBehavior'] })}>
+          <MenuItem value="exit">退出应用</MenuItem>
+          <MenuItem value="minimizeToTray">最小化到托盘</MenuItem>
+        </TextField>
+        <FormControlLabel control={<Switch checked={system.startMinimizedToTray} onChange={event => setSystem({ ...system, startMinimizedToTray: event.target.checked })}/>} label="启动后最小化到托盘（保存后下次启动生效）"/>
+        <Typography variant="body2" color="text.secondary">托盘菜单包含显示主窗口、隐藏主窗口和退出。退出会结束主程序及 Bridge 子进程。</Typography>
+      </Stack>
+    </SurfaceSection>
+  </Stack>
 }
 function LibrarySection({ onOpen }: { onOpen: () => void }) {
   return <SurfaceSection title="媒体库设置" description="媒体库 CRUD 复用现有安全页面；删除只删除配置，不删除磁盘文件。"><Button variant="contained" startIcon={<FolderRoundedIcon/>} onClick={onOpen}>打开媒体库管理</Button></SurfaceSection>
@@ -436,9 +514,23 @@ function PreviewPoster({ width, height }: { width: number; height: number }) {
 function PlannedSection({ labels, fields }: { labels: string[]; fields: unknown[] }) {
   return <SurfaceSection title="计划与兼容设置" description="可读取的旧配置会显示在下方；暂无后端能力的选项只标记计划支持。"><Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>{labels.map(label => <Chip key={label} label={label} variant="outlined"/>)}<StatusBadge tone={fields.length ? 'info' : 'neutral'} label={`${fields.length} 个兼容字段`}/></Stack></SurfaceSection>
 }
-function ShortcutSection() {
-  const keys = ['上一页', '下一页', '聚焦搜索', '播放', '打开详情', '收藏', '同步信息', '切换视图', '返回', '随机影片']
-  return <SurfaceSection title="快捷键" description="应用内快捷键管理；冲突检测和保存为计划支持。"><Stack spacing={1}>{keys.map(key => <Card key={key} variant="outlined"><CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}><Stack direction="row" sx={{ justifyContent: 'space-between' }}><Typography>{key}</Typography><StatusBadge label={planned[0]} tone="neutral"/></Stack></CardContent></Card>)}</Stack></SurfaceSection>
+function ShortcutSection({ system, setSystem }: { system: SystemSettings; setSystem: (value: SystemSettings) => void }) {
+  const keys = [
+    ['←', '影片墙上一页', '输入框、弹窗、菜单打开时不触发'],
+    ['→', '影片墙下一页', '输入框、弹窗、菜单打开时不触发'],
+    ['Ctrl+G', '聚焦页码输入', '仅影片墙分页出现时可用'],
+    ['Enter', '确认搜索或页码输入', '仅当前输入控件内生效'],
+    ['Esc', '清空搜索、取消页码输入或关闭弹层', '优先交给当前弹层/输入框处理'],
+    ['Ctrl+F', '聚焦搜索', '作为可管理快捷键列入；当前页面级搜索框不会抢输入焦点'],
+    ['Delete', '危险删除', '默认不启用，只能通过 Safe Delete 确认流程'],
+  ]
+  return <SurfaceSection title="快捷键" description="本轮提供快捷键说明、总开关和恢复默认；不提供复杂按键录制器。">
+    <Stack spacing={1.5}>
+      <FormControlLabel control={<Switch checked={system.globalShortcutsEnabled} onChange={event => setSystem({ ...system, globalShortcutsEnabled: event.target.checked })}/>} label="启用全局快捷键"/>
+      <Stack spacing={1}>{keys.map(([key, label, detail]) => <Card key={key} variant="outlined"><CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}><Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' } }}><Box><Typography sx={{ fontWeight: 850 }}>{label}</Typography><Typography variant="caption" color="text.secondary">{detail}</Typography></Box><StatusBadge label={key} tone={system.globalShortcutsEnabled ? 'info' : 'neutral'}/></Stack></CardContent></Card>)}</Stack>
+      <Stack direction="row" spacing={1}><Button variant="outlined" onClick={() => setSystem({ ...system, globalShortcutsEnabled: true })}>恢复默认</Button><StatusBadge tone="success" label="输入框焦点保护已启用"/></Stack>
+    </Stack>
+  </SurfaceSection>
 }
 function AppearanceSection({ mode, setMode }: { mode: 'light' | 'dark'; setMode: (value: 'light' | 'dark') => void }) {
   return <SurfaceSection title="外观" description="主题预览立即生效，点击保存设置后持久化。"><Stack direction="row" spacing={1}><Button variant={mode === 'light' ? 'contained' : 'outlined'} startIcon={<LightModeRoundedIcon/>} onClick={() => setMode('light')}>浅色</Button><Button variant={mode === 'dark' ? 'contained' : 'outlined'} startIcon={<DarkModeRoundedIcon/>} onClick={() => setMode('dark')}>深色</Button></Stack></SurfaceSection>
@@ -446,14 +538,66 @@ function AppearanceSection({ mode, setMode }: { mode: 'light' | 'dark'; setMode:
 function DataSection({ overview, ratingRetention, setRatingRetention, backupPath, setBackupPath, restoreMode, setRestoreMode, validation, setValidation, importJson, setImportJson, importPreview, previewImport, onBackup, onRestore }: { overview: DataSafetyOverview; ratingRetention: RatingRetentionSettings; setRatingRetention: (v: RatingRetentionSettings) => void; backupPath: string; setBackupPath: (v: string) => void; restoreMode: string; setRestoreMode: (v: string) => void; validation?: BackupValidation; setValidation: (v: BackupValidation) => void; importJson: string; setImportJson: (v: string) => void; importPreview?: SettingsImportPreview; previewImport: () => void; onBackup: () => void; onRestore: () => void }) {
   return <Stack spacing={2}><SurfaceSection title="数据位置" description="不会把原始影片和原始图片打包进备份。"><Stack spacing={1}><Typography>数据库：{overview.databasePath}</Typography><Typography>数据库大小：{size(overview.databaseBytes)}</Typography><Typography>配置库：{overview.configDatabasePath}</Typography><Typography>备份目录：{overview.backupDirectory}</Typography><Typography>缓存目录：{overview.cacheDirectory}</Typography><Typography>日志目录：{overview.logDirectory}</Typography><Typography>最近备份：{overview.lastBackupAt ? new Date(overview.lastBackupAt).toLocaleString() : '暂无'}</Typography></Stack></SurfaceSection><SurfaceSection title="评分保留" description="删除已评分影片时保存番号与评分；以后重新导入相同番号时自动恢复。"><FormControlLabel control={<Switch checked={ratingRetention.enabled} onChange={event => setRatingRetention({ enabled: event.target.checked })}/>} label="自动保留并恢复已删除影片评分"/></SurfaceSection><SurfaceSection title="备份与恢复计划" description="恢复采用计划文件，避免运行中热替换数据库。"><Stack spacing={1.5}><Button variant="contained" startIcon={<BackupRoundedIcon/>} onClick={onBackup}>创建手动备份</Button><TextField size="small" label="备份路径" value={backupPath} onChange={event => setBackupPath(event.target.value)}/><Stack direction="row" spacing={1}><Button variant="outlined" onClick={() => bridge.validateBackup(backupPath).then(setValidation)}>校验备份</Button><TextField select size="small" label="恢复模式" value={restoreMode} onChange={event => setRestoreMode(event.target.value)} sx={{ width: 150 }}><MenuItem value="all">全部</MenuItem><MenuItem value="database">仅数据库</MenuItem><MenuItem value="settings">仅设置</MenuItem></TextField><Button color="error" variant="outlined" startIcon={<RestoreRoundedIcon/>} disabled={!validation?.valid} onClick={onRestore}>创建恢复计划</Button></Stack>{validation && <Alert severity={validation.valid ? 'success' : 'error'}>{validation.valid ? '备份校验通过' : validation.errors.join('；')}</Alert>}</Stack></SurfaceSection><SurfaceSection title="配置导入导出" description="导出会剔除敏感字段；导入先预览差异，不直接覆盖。"><Stack spacing={1.5}><Button startIcon={<SettingsBackupRestoreRoundedIcon/>} onClick={() => bridge.exportSettings().then(result => setImportJson(JSON.stringify(result, null, 2)))}>导出当前设置</Button><TextField multiline minRows={6} label="导入 JSON / 导出预览" value={importJson} onChange={event => setImportJson(event.target.value)}/><Button startIcon={<UploadFileRoundedIcon/>} variant="outlined" onClick={previewImport}>预览导入差异</Button>{importPreview && <Alert severity={importPreview.valid ? 'info' : 'warning'}>{importPreview.valid ? `可识别 ${importPreview.changes.length} 项：${importPreview.categories.join('、')}` : importPreview.warnings.join('；')}</Alert>}</Stack></SurfaceSection></Stack>
 }
-function LogsSection({ diagnostics, runDiagnostics, onCleanLogs }: { diagnostics?: SystemDiagnostic; runDiagnostics: () => void; onCleanLogs: () => void }) {
-  return <SurfaceSection title="日志与诊断" description="诊断包不包含影片、原始图片、Cookie、Token 或完整个人路径列表。"><Stack spacing={1.5}><Stack direction="row" spacing={1}><Button startIcon={<RefreshRoundedIcon/>} variant="contained" onClick={runDiagnostics}>执行基础诊断</Button><Button color="error" variant="outlined" onClick={onCleanLogs}>清理旧日志</Button></Stack>{diagnostics?.checks.map(check => <DiagnosticRow key={check.key} check={check}/>)}</Stack></SurfaceSection>
+function LogsSection({ system, setSystem, diagnostics, logPreview, includeAll, setIncludeAll, runDiagnostics, previewLogs }: {
+  system: SystemSettings
+  setSystem: (value: SystemSettings) => void
+  diagnostics?: SystemDiagnostic
+  logPreview?: LogCleanupPreview
+  includeAll: boolean
+  setIncludeAll: (value: boolean) => void
+  runDiagnostics: () => void
+  previewLogs: () => void
+}) {
+  return <Stack spacing={2}>
+    <SurfaceSection title="日志清理" description="只清理应用日志目录中的历史日志，不删除数据库、配置、任务记录或当前正在写入的日志。">
+      <Stack spacing={1.5}>
+        <TextField select size="small" label="日志保留时间" value={system.logRetentionDays} onChange={event => setSystem({ ...system, logRetentionDays: Number(event.target.value) as SystemSettings['logRetentionDays'] })}>
+          <MenuItem value={0}>永久保留</MenuItem>
+          {[7, 14, 30, 90].map(days => <MenuItem key={days} value={days}>{days} 天</MenuItem>)}
+        </TextField>
+        <FormControlLabel control={<Switch checked={includeAll} onChange={event => setIncludeAll(event.target.checked)}/>} label="手动清理全部可安全删除的历史日志"/>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+          <Button variant="contained" onClick={previewLogs}>预览日志清理</Button>
+          <Button startIcon={<RefreshRoundedIcon/>} variant="outlined" onClick={runDiagnostics}>执行基础诊断</Button>
+        </Stack>
+        {logPreview && <Alert severity={logPreview.deletableCount ? 'warning' : 'info'}>
+          日志目录：{logPreview.logDirectory}。共 {logPreview.fileCount} 个日志，{size(logPreview.totalBytes)}；可删除 {logPreview.deletableCount} 个，预计释放 {size(logPreview.deletableBytes)}。活动日志保留：{logPreview.activeLogs.join('、') || '无'}。
+        </Alert>}
+      </Stack>
+    </SurfaceSection>
+    <SurfaceSection title="诊断" description="诊断包不包含影片、原始图片、Cookie、Token 或完整个人路径列表。">
+      <Stack spacing={1}>{diagnostics?.checks.map(check => <DiagnosticRow key={check.key} check={check}/>)}</Stack>
+    </SurfaceSection>
+  </Stack>
 }
 function DiagnosticRow({ check }: { check: DiagnosticCheck }) {
   return <Card variant="outlined"><CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}><Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}><StatusBadge tone={check.status === 'success' ? 'success' : check.status === 'error' ? 'error' : 'warning'} label={check.label}/><Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{check.detail}</Typography></Stack></CardContent></Card>
 }
-function AboutSection({ overview, health }: { overview: DataSafetyOverview; health?: BridgeHealth }) {
-  return <SurfaceSection title="关于" description="本地优先、可维护的现代媒体管理工具。"><Stack spacing={1}><BrandMark/><Typography>Version: {buildInfo.version}</Typography><Typography>Commit: {buildInfo.commit}</Typography><Typography>Build: {buildInfo.buildTime}</Typography><Typography>Bridge: {health?.version ?? 'unknown'} · {health?.writeEnabled ? '写入已启用' : '只读或会话未启用'}</Typography><Typography color="text.secondary">数据目录：{overview.databasePath}</Typography><HealthMeter label="数据安全中心" value={100} detail="已启用" tone="success"/></Stack></SurfaceSection>
+function AboutSection({ overview, health, system, setSystem, updateResult, checkUpdates }: {
+  overview: DataSafetyOverview
+  health?: BridgeHealth
+  system: SystemSettings
+  setSystem: (value: SystemSettings) => void
+  updateResult?: UpdateCheckResult
+  checkUpdates: () => void
+}) {
+  return <Stack spacing={2}>
+    <SurfaceSection title="关于" description="本地优先、可维护的现代媒体管理工具。"><Stack spacing={1}><BrandMark/><Typography>Version: {buildInfo.version}</Typography><Typography>Commit: {buildInfo.commit}</Typography><Typography>Build: {buildInfo.buildTime}</Typography><Typography>Bridge: {health?.version ?? 'unknown'} · {health?.writeEnabled ? '写入已启用' : '只读或会话未启用'}</Typography><Typography color="text.secondary">数据目录：{overview.databasePath}</Typography><HealthMeter label="数据安全中心" value={100} detail="已启用" tone="success"/></Stack></SurfaceSection>
+    <SurfaceSection title="检查更新" description="当前仅检查 GitHub Release 并打开官方下载页面，不执行自动下载安装。网络失败不会影响应用启动。">
+      <Stack spacing={1.5}>
+        <FormControlLabel control={<Switch checked={system.autoCheckUpdates} onChange={event => setSystem({ ...system, autoCheckUpdates: event.target.checked })}/>} label="启动后自动检查更新"/>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+          <Button variant="contained" onClick={checkUpdates}>检查更新</Button>
+          <Button variant="outlined" onClick={() => window.open(updateResult?.releaseUrl || 'https://github.com/xiaoxuan19911030-commits/LocalMediaManager/releases', '_blank')}>打开发布页面</Button>
+        </Stack>
+        <Typography variant="body2" color="text.secondary">最近检查：{system.lastUpdateCheckAt ? new Date(system.lastUpdateCheckAt).toLocaleString() : '暂无'}</Typography>
+        {updateResult && <Alert severity={updateResult.status === 'update-available' ? 'warning' : updateResult.status === 'network-error' ? 'info' : 'success'}>
+          {updateResult.message}{updateResult.latestVersion ? ` 最新版本：${updateResult.latestVersion}` : ''}
+        </Alert>}
+        {updateResult?.releaseNotes && <TextField multiline minRows={4} label="更新说明" value={updateResult.releaseNotes} slotProps={{ input: { readOnly: true } }}/>}
+      </Stack>
+    </SurfaceSection>
+  </Stack>
 }
 function LegacyFields({ fields }: { fields: { key: string; label: string; value: unknown; readStatus: string; requiresRestart: boolean; safeToWrite: boolean }[] }) {
   return <SurfaceSection title="已读取的兼容设置" description="这些字段来自现有配置体系；不可安全写入的字段仅展示。"><Stack spacing={1}>{fields.slice(0, 24).map(field => <Card key={field.key} variant="outlined"><CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}><Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ justifyContent: 'space-between' }}><Box><Typography sx={{ fontWeight: 750 }}>{field.label}</Typography><Typography variant="caption" color="text.secondary">{field.key}</Typography></Box><Stack direction="row" spacing={1}><StatusBadge tone={field.readStatus === 'ok' ? 'success' : 'warning'} label={field.readStatus}/>{field.requiresRestart && <StatusBadge tone="warning" label="需重启"/>}<Typography variant="body2">{String(field.value ?? '')}</Typography></Stack></Stack></CardContent></Card>)}</Stack></SurfaceSection>
@@ -463,7 +607,6 @@ function confirmDescription(value?: string) {
   if (value === 'cache') return '将清理应用生成的可重建图片缓存，不会删除源图。'
   if (value === 'restore') return '将创建恢复计划。数据库替换会在重启流程中完成。'
   if (value === 'thumbs') return '将创建全量 Thumbnail 重建任务。'
-  if (value === 'logs') return '日志清理当前仅做计划提示，不执行删除。'
   return '将执行维护操作。'
 }
 function confirmWarnings(value?: string) {

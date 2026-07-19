@@ -39,6 +39,8 @@ builder.Services.AddSingleton(serviceProvider => new ImageWorkflowService(
     imageRoot,
     serviceProvider.GetRequiredService<MediaStoragePathResolver>()));
 builder.Services.AddSingleton(new DataSafetyService(databasePath, configDatabasePath, imageRoot));
+builder.Services.AddSingleton(new LogMaintenanceService());
+builder.Services.AddSingleton(serviceProvider => new UpdateCheckService(serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient(), databasePath));
 builder.Services.AddSingleton<PlatformCommandService>();
 builder.Services.AddSingleton<ImageDownloadService>();
 builder.Services.AddSingleton(serviceProvider => new NfoService(
@@ -172,6 +174,12 @@ app.MapPost("/api/settings/import-preview", async (JsonElement payload, DataSafe
     Results.Ok(await safety.PreviewSettingsImportAsync(payload)));
 app.MapGet("/api/settings/diagnostics", async (DataSafetyService safety, CancellationToken token) =>
     Results.Ok(await safety.DiagnosticsAsync(token)));
+app.MapGet("/api/system/logs/cleanup-preview", (int? retentionDays, bool? includeAllHistory, LogMaintenanceService logs) =>
+    Results.Ok(logs.Preview(retentionDays ?? 30, includeAllHistory == true)));
+app.MapPost("/api/system/logs/cleanup", (LogCleanupCommand command, LogMaintenanceService logs) =>
+    Results.Ok(logs.Cleanup(command)));
+app.MapPost("/api/system/update/check", async (UpdateCheckService updates, CancellationToken token) =>
+    Results.Ok(await updates.CheckAsync(token)));
 
 app.MapGet("/api/dashboard", async () => File.Exists(databasePath)
     ? Results.Ok(await ProductReader.ReadDashboardAsync(databasePath, bridgeUrl))

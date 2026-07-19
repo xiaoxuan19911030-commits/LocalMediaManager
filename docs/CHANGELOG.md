@@ -10,10 +10,16 @@
 - Product-cancelled legacy expectations: full-field movie edit, manual edits for titles/code/plot/date/runtime/director/studio/series/tags/Genre, actor add/delete/search/manual profile edit, display/custom/second title fields, and standalone watched toggle.
 - Product-cancelled Image SetAs: LMM will not migrate manual "set as poster / thumbnail / banner" actions because image resources are managed by MetaTube scraping, NFO, and metadata sync.
 - Duplicate Management & Batch Organizer (DEC-015): duplicate review and batch organizer now share one Organizer Tools entry instead of separate product tracks.
+- Final System Features and Feature Freeze (DEC-016): retained Feature Parity is complete by current product scope; the next phase is Legacy Cleanup.
 - Retained user-data scope: rating, favorite, custom tags, actor display ordering, poster/image adjustment, manual crop, playback history, and future Human-approved notes.
 - Development order is now fixed: retained Feature Parity first, Legacy Cleanup second, Human-experience-driven optimization/new features third.
 
 ### Added
+
+- Final System Features Migration: Settings now includes language selection (`system` / `zh-CN`), tray and close behavior, start minimized to tray, global shortcut enablement, log retention and cleanup, and GitHub Release update checks.
+- Log cleanup now uses a preview + confirmation-token flow, supports 7/14/30/90 days and permanent retention, keeps active logs, and never deletes databases, settings, task records, or user media.
+- Tauri tray support now provides show, hide, and quit actions. Quit checks running tasks from the frontend before closing; close-to-tray keeps Bridge running.
+- Shortcut management now exposes the retained shortcut set and a global enable switch. MovieWall paging shortcuts and Ctrl+G honor the switch and protect input/modal focus; Ctrl+F focuses global search.
 
 - 标签二级页改为横向工具栏浏览，支持范围切换、全部/导演/标签/系列/厂商/自定义分类切换、四种排序，以及返回状态恢复。
 - 标签二级页将刮削元数据 Genre 统一显示为“标签”，内部 API 与数据库字段名保持不变。
@@ -27,6 +33,7 @@
 
 ### Changed
 
+- Retained Feature Parity is now complete by the current product scope and enters Feature Freeze. The next phase is Legacy Cleanup, not product optimization or new feature development.
 - Organizer execution now routes duplicate deletion through the existing Safe Delete workflow and routes batch move/rename through the existing File Organizer workflow. Ordinary MovieWall batch delete remains disabled; destructive delete is only exposed from duplicate groups after explicit keep selection and preview confirmation.
 
 - 左侧工具区将“查重结果”合并为“整理工具”；旧 `/duplicates` 路由仅作为兼容重定向保留。

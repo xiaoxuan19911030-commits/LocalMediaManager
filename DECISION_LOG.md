@@ -48,6 +48,7 @@ docs/               → 证据、Release 验收、字段映射、矩阵
 | [DEC-013](#dec-013-metadata-ownership-and-user-data-boundary) | 元数据归属与用户数据边界 | Metadata / User Data | Repository Stabilization | `docs(product)` |
 | [DEC-014](#dec-014-image-setas-product-cancelled) | Image SetAs 产品取消 | Images / Feature Parity | Feature Parity | `docs(product)` |
 | [DEC-015](#dec-015-duplicate-management-and-batch-organizer-convergence) | 查重与批量整理统一入口 | Organizer / Feature Parity | Feature Parity | `refactor(organizer)` |
+| [DEC-016](#dec-016-final-system-features-and-feature-freeze) | 最终系统功能迁移与 Feature Freeze | Settings / System / Feature Parity | Feature Parity | `feat(system)` |
 
 ---
 
@@ -1294,6 +1295,49 @@ Duplicate Management & Batch Organizer 的执行阶段遵循同一条安全链�
 
 ---
 
+### DEC-016: Final System Features and Feature Freeze
+
+| 字段 | 值 |
+|------|-----|
+| **Decision ID** | DEC-016 |
+| **模块** | Settings / System / Feature Parity |
+| **Sprint** | Final System Features Migration |
+| **日期** | 2026-07-19 |
+| **状态** | Accepted |
+
+#### 背景
+
+保留功能迁移阶段剩余的旧版系统能力集中在日志清理、语言设置、托盘与关闭行为、快捷键管理和检查更新。它们属于 Settings / Tauri 壳层能力，不应扩展为新的系统管理中心，也不应引入 Legacy Cleanup 或新功能。
+
+#### 最终方案
+
+- 日志清理进入设置页：支持 7/14/30/90 天和永久保留；执行前必须预览；只清理应用日志目录的历史日志，不删除活动日志、数据库、配置、任务记录或用户媒体。
+- 语言设置进入统一 Settings：当前仅开放系统默认和简体中文；英文资源不完整前不作为可选语言暴露。
+- 托盘与关闭行为进入统一 Settings 和 Tauri 壳层：支持关闭时退出或最小化到托盘、启动后最小化到托盘、托盘显示/隐藏/退出；退出前检查运行中任务。
+- 快捷键管理进入设置页：提供当前可用快捷键说明、总开关和恢复默认；不开发复杂按键录制器。
+- 检查更新进入关于页：只检查 GitHub Releases、显示结果并打开发布页；不自动下载、不自动安装。
+
+#### Feature Freeze
+
+以 2026-07-19 的产品取舍为准，保留旧版功能迁移完成后进入 Feature Freeze。后续顺序固定为：
+
+1. Legacy Cleanup
+2. Testable Release
+3. Human Testing
+4. Product Optimization
+
+Feature Freeze 期间不得新增 UI 优化、新产品功能或旧版范围外能力。
+
+#### 禁止事项
+
+- 不把日志清理扩展为删除用户数据、数据库、配置或媒体资源。
+- 不新增 Tauri 自动更新安装器。
+- 不新增快捷键录制器或复杂冲突编辑器。
+- 不把语言设置误标为完整多语言翻译。
+- 不在 Feature Freeze 后直接进入产品优化；必须先完成 Legacy Cleanup。
+
+---
+
 ## PROJECT §21 Sprint History（摘要）
 
 | Sprint | 摘要 | 决策 |
@@ -1306,6 +1350,7 @@ Duplicate Management & Batch Organizer 的执行阶段遵循同一条安全链�
 | Repository Stabilization | 元数据归属规则：取消完整影片编辑器，只维护用户个人数据 | DEC-013 |
 | Feature Parity | Image SetAs 产品取消：图片资源由刮削、NFO 和 MetaTube 统一管理 | DEC-014 |
 | Feature Parity | 查重与批量整理合并为整理工具统一入口，并完成重复 Safe Delete、批量移动、批量重命名执行流 | DEC-015 |
+| Feature Parity | 日志清理、语言、托盘/关闭、快捷键管理和检查更新完成保留范围迁移，进入 Feature Freeze | DEC-016 |
 
 ---
 

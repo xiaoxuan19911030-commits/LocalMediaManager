@@ -110,6 +110,7 @@ export function MovieWall({
   const [moreOpen, setMoreOpen] = useState(canReuseSavedState ? saved.moreOpen ?? false : false)
   const [view, setView] = useState<WorkspaceViewMode>(canReuseSavedState ? saved.view ?? 'grid' : 'grid')
   const [movieWallDisplay, setMovieWallDisplay] = useState<MovieWallDisplaySettings>(defaultMovieWallDisplay)
+  const [shortcutsEnabled, setShortcutsEnabled] = useState(true)
   const [libraries, setLibraries] = useState<MediaLibrary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -152,7 +153,7 @@ export function MovieWall({
   useEffect(load, [load, reloadSignal])
   useEffect(() => () => { loadSeq.current += 1 }, [])
   useEffect(() => { bridge.libraries().then(setLibraries).catch(() => undefined) }, [])
-  useEffect(() => { bridge.allSettings().then(settings => setMovieWallDisplay(normalizeMovieWallDisplay(settings.movieWallDisplay))).catch(() => undefined) }, [])
+  useEffect(() => { bridge.allSettings().then(settings => { setMovieWallDisplay(normalizeMovieWallDisplay(settings.movieWallDisplay)); setShortcutsEnabled(settings.system?.globalShortcutsEnabled ?? true) }).catch(() => undefined) }, [])
   useEffect(() => {
     if (!loading && total > 0 && page > totalPages) setPage(totalPages)
   }, [loading, page, total, totalPages])
@@ -190,6 +191,7 @@ export function MovieWall({
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || isMovieWallShortcutBlocked(event)) return
+      if (!shortcutsEnabled) return
       if (event.ctrlKey && event.key.toLowerCase() === 'g') {
         event.preventDefault()
         setPageInputFocusSignal(value => value + 1)
@@ -206,7 +208,7 @@ export function MovieWall({
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [goToPage, page, totalPages])
+  }, [goToPage, page, shortcutsEnabled, totalPages])
   const openMovie = (item: MediaItem) => {
     const openDefault = () => {
       rememberScrollForDetail()

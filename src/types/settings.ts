@@ -34,6 +34,15 @@ export interface PlaybackSettings { playerPath: string; useSystemDefault: boolea
 export interface RatingRetentionSettings { enabled: boolean }
 export interface AppearanceSettings { themeMode: 'light' | 'dark' }
 export interface MovieWallDisplaySettings { posterOrientation: 'portrait' | 'landscape'; posterSize: 'small' | 'medium' | 'large' }
+export interface SystemSettings {
+  language: 'system' | 'zh-CN'
+  closeBehavior: 'exit' | 'minimizeToTray'
+  startMinimizedToTray: boolean
+  logRetentionDays: 0 | 7 | 14 | 30 | 90
+  globalShortcutsEnabled: boolean
+  autoCheckUpdates: boolean
+  lastUpdateCheckAt?: string
+}
 export interface MediaStorageSettings {
   rootPath: string
   postersDirectory: string
@@ -56,6 +65,7 @@ export interface UnifiedSettings {
   appearance: AppearanceSettings
   mediaStorage: MediaStorageSettings
   movieWallDisplay: MovieWallDisplaySettings
+  system: SystemSettings
 }
 export interface UnifiedSettingsSaveResult { settings: UnifiedSettings; changedFields: string[]; message: string }
 
@@ -74,3 +84,15 @@ export interface SettingsExport { exportedAt: string; product: string; version: 
 export interface SettingsImportPreview { valid: boolean; version: string; categories: string[]; changes: string[]; warnings: string[] }
 export interface DiagnosticCheck { key: string; label: string; status: 'success' | 'warning' | 'error' | 'info'; detail: string }
 export interface SystemDiagnostic { checkedAt: string; checks: DiagnosticCheck[]; recentLogs: string[] }
+export interface LogFile {
+  name: string; path: string; bytes: number; lastWriteTime: string; active: boolean; eligible: boolean; reason: string
+}
+export interface LogCleanupPreview {
+  logDirectory: string; retentionDays: number; fileCount: number; totalBytes: number; deletableCount: number
+  deletableBytes: number; oldestLogTime?: string; activeLogs: string[]; files: LogFile[]; confirmationToken: string
+}
+export interface LogCleanupResult { deletedFiles: number; freedBytes: number; failedFiles: number; failures: string[]; message: string }
+export interface UpdateCheckResult {
+  currentVersion: string; status: 'up-to-date' | 'update-available' | 'network-error' | 'invalid-response' | 'current-newer'
+  message: string; latestVersion?: string; releaseUrl?: string; releaseNotes?: string; checkedAt: string
+}

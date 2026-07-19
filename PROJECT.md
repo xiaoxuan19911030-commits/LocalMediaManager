@@ -521,6 +521,7 @@ Impact Preview → User Confirmation → Backup/Audit → Execute → Verify →
 | `DataSafetyService` | 数据安全/备份 |
 | `RatingHistoryService` | 评分历史 |
 | `PlaybackSettingsService` | 播放设置 |
+| `LogMaintenanceService` / `UpdateCheckService` | 日志清理与更新检查 |
 | `MetaTubeProvider` | MetaTube 元数据 Provider |
 
 **Session 鉴权：**
@@ -861,7 +862,7 @@ SchemaMigrations（版本与 checksum）
 
 `AppSettings` 表：`Key` · `ValueJson` · `ValueType` · `UpdatedAt`
 
-Settings 键前缀：`metadata.metatube.*` · `nfo.*` · `playback.*` · `ratingHistory.*` · `appearance.*` · `mediaStorage.*` · `movieWall.*`
+Settings 键前缀：`metadata.metatube.*` · `nfo.*` · `playback.*` · `ratingHistory.*` · `appearance.*` · `mediaStorage.*` · `movieWall.*` · `system.*` · `updates.*`
 
 **唯一写入口：** `SettingsSaveCoordinator`（§10）
 
@@ -971,7 +972,7 @@ React 更新 original + draft（两者同步为 saved 状态）
 
 ### 10.2 UnifiedSettings 结构
 
-`UnifiedSettingsDto` 包含七个域，**一次 Save 全部提交**：
+`UnifiedSettingsDto` 包含八个域，**一次 Save 全部提交**：
 
 | 域 | DTO | AppSettings 键前缀 | 说明 |
 |----|-----|-------------------|------|
@@ -982,6 +983,7 @@ React 更新 original + draft（两者同步为 saved 状态）
 | **Appearance** | `AppearanceSettingsDto` | `appearance.*` | 主题模式 `dark` / `light` |
 | **MediaStorage** | `MediaStorageSettingsDto` | `mediaStorage.*` | 根目录、资源子目录、路径模板 |
 | **MovieWallDisplay** | `MovieWallDisplaySettingsDto` | `movieWall.*` | 影片墙卡片海报方向与大小 |
+| **System** | `SystemSettingsDto` | `system.*` / `updates.*` | 语言、关闭/托盘行为、日志保留、快捷键总开关、更新检查 |
 
 `NonDestructive`（MetaTube 不覆盖手工数据）和 `ImportFillEmptyOnly`（NFO 导入只补空）在 Coordinator 层**强制为 true**，UI 不能关闭。
 
@@ -1093,6 +1095,9 @@ COMMIT
 | POST | `/api/settings/data-safety/backup` | 创建备份 |
 | GET | `/api/settings/diagnostics` | 系统诊断 |
 | POST | `/api/settings/providers/metatube/test` | MetaTube 连接测试（用 Draft 值，不 Save） |
+| GET | `/api/system/logs/cleanup-preview` | 日志清理预览 |
+| POST | `/api/system/logs/cleanup` | 按预览令牌清理历史应用日志 |
+| POST | `/api/system/update/check` | 检查 GitHub Release 更新 |
 
 **历史遗留的分域 PUT 端点**（`/api/settings/nfo`、`/api/settings/playback`、`/api/settings/rating-history`、`/api/settings/providers/metatube`）仍存在于 Bridge，但 **Settings UI 不使用**。新代码禁止新增类似分域 Save 路径。
 
@@ -1846,7 +1851,7 @@ Bridge **不内嵌播放器**；只负责路径解析和进程启动。无法返
 
 见 **§10 Settings 系统**。路由 `/settings`，页面 `SettingsPage.tsx`。
 
-Settings 分区：常规 · 媒体库 · 扫描与导入 · 元数据与同步 · 图片与缓存 · 媒体存储 · 播放器 · 搜索与筛选 · 快捷键 · 外观 · 数据与备份 · 日志与诊断 · 关于。影片墙显示偏好位于「外观」分区。
+Settings 分区：常规 · 媒体库 · 扫描与导入 · 元数据与同步 · 图片与缓存 · 媒体存储 · 播放器 · 搜索与筛选 · 快捷键 · 外观 · 数据与备份 · 日志与诊断 · 关于。影片墙显示偏好位于「外观」分区；语言、关闭/托盘行为、快捷键总开关、日志保留/清理和检查更新属于 `UnifiedSettings.system` 与系统辅助 API。检查更新只检查 GitHub Release 并打开发布页，不执行自动下载或安装。
 
 ### 16.13 扩展模块（Placeholder）
 

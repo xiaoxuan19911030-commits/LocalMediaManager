@@ -103,6 +103,27 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SystemSettingsPersistAndNormalize()
+    {
+        UnifiedSettingsDto current = await coordinator.ReadAsync();
+        UnifiedSettingsDto draft = current with
+        {
+            System = new("en-US", "minimizeToTray", true, 14, false, true, "2026-07-19T00:00:00Z"),
+        };
+
+        UnifiedSettingsSaveResult result = await coordinator.SaveAsync(draft);
+        UnifiedSettingsDto saved = await coordinator.ReadAsync();
+
+        Assert.Contains("system", result.ChangedFields);
+        Assert.Equal("system", saved.System.Language);
+        Assert.Equal("minimizeToTray", saved.System.CloseBehavior);
+        Assert.True(saved.System.StartMinimizedToTray);
+        Assert.Equal(14, saved.System.LogRetentionDays);
+        Assert.False(saved.System.GlobalShortcutsEnabled);
+        Assert.True(saved.System.AutoCheckUpdates);
+    }
+
+    [Fact]
     public async Task FailedSaveDoesNotPartiallyPersistEarlierFields()
     {
         UnifiedSettingsDto before = await coordinator.ReadAsync();

@@ -155,11 +155,11 @@ No item currently qualifies for immediate deletion under the user's eight deleti
 | 6 | 图片 SetAs | No SetAs endpoint found | image view/zoom/crop/refresh remain; no SetAs route | No | 不再保留 / 产品决策取消 | Manual SetAs poster/thumbnail/banner is cancelled by DEC-014 | Images are owned by MetaTube, NFO, and metadata sync |
 | 7 | 智能卡图 | Details/media/favorites have manual crop | `ImageWorkflowService.CropCardAsync`, `/images/crop-card`, `GeneratedCard` thumbnail source | Partially | 🟡 Partial | Automatic recognition, re-detect workflow, task logs, setting-controlled auto-complete | Legacy rules retained as evidence |
 | 8 | 图片列表批量删除 | Detail image cards delete one asset | `previewDeleteImage`, `deleteImage` only single asset | Partially | ❌ Not migrated | Delete all images in a current image list with preview | No legacy code dependency |
-| 9 | 日志清理 | Settings has button but no delete | `SettingsPage.tsx` returns planned message; task cleanup exists separately | Task logs yes; app logs no | 🟡 Partial | Real app log cleanup with preview/scope | Log path from `DataSafetyService` |
-| 10 | 语言设置 | No language category/setting found | Settings categories exclude language | No | ❌ Not migrated | i18n model and restart behavior | Legacy config read only, not runtime needed |
-| 11 | 托盘与关闭行为 | Tauri close command exists for settings leave; no tray setting | `src-tauri/src/lib.rs`, no tray config | No | ❌ Not migrated | Tray icon, close-to-tray settings, lifecycle tests | No legacy code dependency |
-| 12 | 快捷键配置 | Settings shows planned shortcut list | `ShortcutSection` displays neutral "规划" | No config | ❌ Not migrated | Save/configure shortcuts and conflict handling | No legacy code dependency |
-| 13 | 检查更新 | About shows version/build only | `buildInfo`, Settings about; no update check endpoint | No | ❌ Not migrated | Update check policy/source | No legacy code dependency |
+| 9 | 日志清理 | Settings 日志与诊断 | `LogMaintenanceService`, `/api/system/logs/cleanup-preview`, `/api/system/logs/cleanup`, `SettingsPage.tsx` | Yes | ✅ Migrated | None in retained scope | No legacy code dependency; keeps active logs and user data |
+| 10 | 语言设置 | Settings 常规 | `UnifiedSettings.system.language`, `SettingsSaveCoordinator`, `SettingsPage.tsx` | Yes | ✅ Migrated | Full English translation is not exposed because resources are incomplete | Legacy config read only, not runtime needed |
+| 11 | 托盘与关闭行为 | Settings 常规 + Tauri tray | `src-tauri/src/lib.rs`, `AppShell.tsx`, `SettingsPage.tsx` | Yes | ✅ Migrated | None in retained scope | No legacy code dependency |
+| 12 | 快捷键配置 | Settings 快捷键 | `UnifiedSettings.system.globalShortcutsEnabled`, `MovieWall.tsx`, `AppShell.tsx` | Yes | ✅ Migrated | Complex shortcut recorder is intentionally out of retained scope | No legacy code dependency |
+| 13 | 检查更新 | Settings 关于 | `UpdateCheckService`, `/api/system/update/check`, `SettingsPage.tsx` | Yes | ✅ Migrated | Automatic download/install intentionally not provided | No legacy code dependency |
 | 14 | 查重处理流程 | Organizer duplicate workspace | `/organizer`; `DuplicateOrganizerWorkflowService`; `SafeDeleteWorkflowService` | Yes | ✅ Migrated | None in retained scope | Safe Delete remains current dependency; no old code dependency |
 | 15 | 批量整理 | Organizer batch workspace | `/organizer`; MovieWall selection; `FileOrganizerService` dry-run/preview/execute/tasks | Yes | ✅ Migrated | None in retained scope | No old code dependency |
 | 16 | NFO 详细设置 | Basic NFO settings exist | `NfoService`, `SettingsPage` output dir/policy/include images | Partially | 🟡 Partial | Old per-image/actor/screenshot/previews/path switches | No old code dependency |
@@ -221,7 +221,7 @@ Reason: no candidate satisfies all required proof conditions plus Web/Bridge/Tau
 
 1. Finish uncommitted local feature work: commit/push MovieWall Display, detail poster, manual crop, and collection context-menu changes after Human review.
 2. Update `FEATURE_PARITY_MATRIX.md` only after committed evidence exists.
-3. Complete retained P0/P1 parity gaps in this order: studio category, MovieWall random movie, image SetAs, copy movie info, duplicate workflow, batch organizer, and log cleanup.
+3. Retained Feature Parity is complete as of Final System Features Migration. The next Sprint should be Legacy Cleanup, not another migration or product-optimization sprint.
 4. Run installed smoke for player, NFO, image crop, MovieWall state restoration, and each retained parity gap.
 5. When retained Feature Parity reaches 100% and the new implementation is stable, start a dedicated Legacy Cleanup Sprint.
 6. Only during Legacy Cleanup should fully replaced, unreferenced old code/pages/resources be deleted. Keep database migrations, upgrade compatibility, scoring/favorite/tag/image-path compatibility, `docs/migration`, `docs/audits`, and source evidence unless Human explicitly approves retirement.
@@ -260,13 +260,12 @@ This sprint is documentation/audit only.
 
 ## 12. Next Recommended Sprint
 
-Recommended next feature sprint:
+Recommended next sprint:
 
-1. **Movie Editing Parity**: full movie field edit with Preview/Save and existing detail/MovieWall state restoration.
-2. **Studio Category + Random Movie**: small high-value MovieWall reuse tasks once editing scope is not active.
-3. **Image Operations Parity**: image SetAs, image-list batch delete, and complete smart-card task workflow.
+1. **Legacy Cleanup**: remove only old code, old pages, old resources, and old references that are fully replaced and no longer referenced.
+2. Keep database migrations, upgrade compatibility, scoring/favorite/tag/image-path compatibility, `docs/migration`, `docs/audits`, and source evidence unless Human explicitly approves retirement.
 
-Do not start cleanup deletion until retained Feature Parity reaches 100%, the new implementation is stable, and Human explicitly approves the Legacy Cleanup Sprint.
+Retained Feature Parity has reached 100% by current product scope. Start cleanup deletion only after Human explicitly approves the Legacy Cleanup Sprint.
 
 ## 13. Confidence
 

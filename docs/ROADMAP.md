@@ -117,7 +117,7 @@ Planning → Design → Develop → Self Test → Smoke Test → Freeze → Rele
 
 ## 0.5.0 — Feature Parity Release
 
-**状态：Planning / Sprint 0.5.0-01 Audit complete**
+**状态：Feature Freeze / Retained Feature Parity Complete**
 
 ### 2026-07-19 Scope Update — Metadata Ownership
 
@@ -134,22 +134,11 @@ Retained user-data features remain in scope: scoring, favorite, custom tags, act
 
 ### Retained Feature Parity Priority
 
-**P0**
-
-- 当前无待迁移项。
-
-**P1**
-
-1. 日志清理
-
-**P2**
-
-2. 语言设置
-3. 托盘与关闭行为
-4. 快捷键管理
-5. 检查更新
+- 当前无待迁移项。以 2026-07-19 的产品取舍为准，保留旧版功能迁移已完成；下一阶段只能启动 Legacy Cleanup，不再追加产品优化或新功能。
 
 ### Completed Retained Parity
+
+- Final System Features Migration: Settings now includes app language (`system` / `zh-CN`), tray and close behavior, start minimized to tray, global shortcut enablement, log retention and cleanup preview/execute, and GitHub release update checks. Close exit checks active tasks before quitting, and minimize-to-tray does not stop Bridge.
 
 - Duplicate Management & Batch Organizer Execution Completion: `/organizer` now supports duplicate-group Safe Delete execution and batch move/rename execution. Duplicate deletion requires one explicit keep item per selected group, previews user-data merge effects, revalidates before execute, and delegates real deletion to Safe Delete. Batch move and batch rename reuse the existing File Organizer dry-run, preview, execute, and Tasks workflow for the current MovieWall selection set.
 
