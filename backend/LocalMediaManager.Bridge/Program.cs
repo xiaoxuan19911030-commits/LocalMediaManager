@@ -83,6 +83,9 @@ builder.Services.AddSingleton(serviceProvider => new SafeDeleteWorkflowService(
     serviceProvider.GetRequiredService<TaskLogService>(),
     serviceProvider.GetRequiredService<RatingHistoryService>()));
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<SafeDeleteWorkflowService>());
+builder.Services.AddSingleton(serviceProvider => new DuplicateOrganizerWorkflowService(
+    databasePath,
+    serviceProvider.GetRequiredService<SafeDeleteWorkflowService>()));
 builder.Services.AddSingleton(serviceProvider => new TaskCommandService(databasePath,
     serviceProvider.GetRequiredService<LibraryWorkflowService>(),
     serviceProvider.GetRequiredService<MetadataSyncExecutor>(),
@@ -413,6 +416,10 @@ app.MapGet("/api/organizer/{taskId:long}/preview", async (long taskId, FileOrgan
     Results.Ok(await organizer.PreviewAsync(taskId, token)));
 app.MapPost("/api/organizer/{taskId:long}/execute", async (long taskId, OrganizerExecuteCommand command, FileOrganizerService organizer, CancellationToken token) =>
     Results.Ok(await organizer.ExecuteConfirmedAsync(taskId, command.ConfirmationToken, token)));
+app.MapPost("/api/organizer/duplicates/preview-delete", async (DuplicateDeletePlanCommand command, DuplicateOrganizerWorkflowService organizer, CancellationToken token) =>
+    Results.Ok(await organizer.PreviewAsync(command, token)));
+app.MapPost("/api/organizer/duplicates/execute-delete", async (DuplicateDeleteExecuteRequest command, DuplicateOrganizerWorkflowService organizer, CancellationToken token) =>
+    Results.Ok(await organizer.ExecuteAsync(command, token)));
 
 app.MapGet("/api/actors/{actorId:long}/image", async (long actorId, ImageAssetService images, CancellationToken token) => {
     ImageAssetContent? content = await images.ResolveActorAsync(actorId, token);

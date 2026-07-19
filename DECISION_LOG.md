@@ -1273,6 +1273,18 @@ Image SetAs 功能不再迁移，标记为 Product Cancelled。不开发以下�
 - 重复影片和批量整理在同一页面内切换。
 - 批量整理阶段复用 MovieWall 选择影片，并走现有 File Organizer Dry Run / Preview / Execute 链路。
 
+#### 执行完成规则
+
+Duplicate Management & Batch Organizer 的执行阶段遵循同一条安全链路：
+
+- 重复影片删除必须先选择重复组，再为每组明确选择一个保留项；系统不得自动选择删除候选。
+- 删除候选进入 `DuplicateOrganizerWorkflowService` 预览，最终实际删除委托现有 `SafeDeleteWorkflowService`，不新增第二套文件删除逻辑。
+- Safe Delete 的媒体删除模式先将原始媒体、图片和 NFO 送入系统回收站，原始媒体删除成功后才删除数据库记录；metadata 模式只删除数据库信息。
+- 执行前必须重新预览并校验确认令牌，防止文件或数据库状态变化后继续使用过期预览。
+- 重复删除前只合并用户个人数据：收藏取 OR、自定义标签取并集、播放次数合并、最后播放时间取最新；评分和备注冲突必须阻止执行或等待后续显式解决，不能静默覆盖。
+- 批量移动和批量重命名必须复用 `FileOrganizerService` 的 dry-run / preview / execute / task 链路，并以用户当前选择集为范围，不对整个筛选结果隐式执行。
+- 普通 MovieWall 批量选择不开放任意批量删除；批量删除只允许经重复影片 Safe Delete 流程进入。
+
 #### 禁止
 
 - 不开发 AI 整理、AI 分类、AI 评分。
@@ -1293,7 +1305,7 @@ Image SetAs 功能不再迁移，标记为 Product Cancelled。不开发以下�
 | 0.5.0-20 | MovieWall 显示偏好、响应式卡片尺寸和悬浮分页交互 | DEC-012 |
 | Repository Stabilization | 元数据归属规则：取消完整影片编辑器，只维护用户个人数据 | DEC-013 |
 | Feature Parity | Image SetAs 产品取消：图片资源由刮削、NFO 和 MetaTube 统一管理 | DEC-014 |
-| Feature Parity | 查重与批量整理合并为整理工具统一入口，第一阶段迁移架构 | DEC-015 |
+| Feature Parity | 查重与批量整理合并为整理工具统一入口，并完成重复 Safe Delete、批量移动、批量重命名执行流 | DEC-015 |
 
 ---
 

@@ -403,7 +403,7 @@ public sealed class SafeDeleteWorkflowService(
 
     private async Task<SqliteConnection> OpenAsync(SqliteOpenMode mode, CancellationToken token = default)
     {
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = mode, Cache = SqliteCacheMode.Shared }.ToString());
+        var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = mode, Cache = SqliteCacheMode.Private }.ToString());
         await connection.OpenAsync(token);
         await ExecuteAsync(connection, "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;", token);
         return connection;

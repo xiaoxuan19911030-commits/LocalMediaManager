@@ -339,6 +339,30 @@ export interface SafeDeletePreview {
 }
 export interface SafeDeletePreviewCommand { movieIds: number[]; mode: 'metadata' | 'media'; deleteDatabaseInfo?: boolean }
 export interface SafeDeleteLaunchResult { taskId: number; status: string; totalItems: number; message: string }
+export interface DuplicateDeleteGroupCommand { groupKey: string; keepMovieId: number; candidateMovieIds: number[] }
+export interface DuplicateMergePreview {
+  groupKey: string
+  keepMovieId: number
+  deleteMovieIds: number[]
+  favoriteWillMerge: boolean
+  ratingToApply?: number
+  ratingConflict: boolean
+  ratingConflictDetail?: string
+  tagsToMerge: string[]
+  playCountToApply: number
+  lastPlayedAtToApply?: string
+  notesConflict: boolean
+  notesConflictDetail?: string
+  warnings: string[]
+}
+export interface DuplicateDeletePreview {
+  safeDelete: SafeDeletePreview
+  merges: DuplicateMergePreview[]
+  canExecute: boolean
+  confirmationToken: string
+  warnings: string[]
+  blockers: string[]
+}
 
 export interface ImageAsset {
   id: number; type: string; url?: string; ownership: string; locked: boolean; derived: boolean

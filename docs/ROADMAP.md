@@ -140,19 +140,20 @@ Retained user-data features remain in scope: scoring, favorite, custom tags, act
 
 **P1**
 
-1. 查重与批量整理
-2. 日志清理
+1. 日志清理
 
 **P2**
 
-3. 语言设置
-4. 托盘与关闭行为
-5. 快捷键管理
-6. 检查更新
+2. 语言设置
+3. 托盘与关闭行为
+4. 快捷键管理
+5. 检查更新
 
 ### Completed Retained Parity
 
-- Organizer UI Completion: `/organizer` now uses a left Organizer Tools rail with Duplicate Movies and Batch Organizer. Duplicate groups show poster, title, code, file name, file size, resolution, rating, favorite, library, file path, true duplicate reason, expand/collapse, select/cancel, and non-binding keep suggestions. Batch Organizer reuses MovieWall and exposes a single batch action bar; move, rename, and delete remain disabled placeholders until Safe Delete / organizer execute is explicitly migrated.
+- Duplicate Management & Batch Organizer Execution Completion: `/organizer` now supports duplicate-group Safe Delete execution and batch move/rename execution. Duplicate deletion requires one explicit keep item per selected group, previews user-data merge effects, revalidates before execute, and delegates real deletion to Safe Delete. Batch move and batch rename reuse the existing File Organizer dry-run, preview, execute, and Tasks workflow for the current MovieWall selection set.
+
+- Organizer UI Completion: `/organizer` uses a left Organizer Tools rail with Duplicate Movies and Batch Organizer. Duplicate groups show poster, title, code, file name, file size, resolution, rating, favorite, library, file path, true duplicate reason, expand/collapse, select/cancel, and non-binding keep suggestions. Batch Organizer reuses MovieWall and exposes a single batch action bar.
 
 - 厂商分类浏览：`/tags` 横向工具栏接入 `Studios/MovieStudios`，并通过统一 MovieWall 的 `studioId` 默认条件进入厂商影片集合。
 - MovieWall 随机影片：所有 MovieWall 页面工具栏提供随机按钮，随机范围复用当前默认条件、Smart Search、FilterBar 和媒体库范围。

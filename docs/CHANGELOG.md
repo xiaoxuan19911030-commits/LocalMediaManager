@@ -21,12 +21,13 @@
 - MovieWall 工具栏新增随机影片按钮，按当前默认条件、媒体库范围、Smart Search 和 FilterBar 随机进入详情页。
 - 详情页更多菜单新增“复制影片信息”，复用当前详情模型并写入系统剪贴板，不重新查询数据库。
 - 整理工具新增统一入口 `/organizer`，在同一页面内切换重复影片和批量整理；批量整理阶段复用 MovieWall 选择集与现有 Organizer Dry Run / Preview / Execute 链路。
+- 整理工具完成执行流：重复影片支持显式保留项选择、Safe Delete 预览/确认/执行和用户个人数据合并预览；批量整理支持按当前 MovieWall 选择集执行批量移动与批量重命名。
 - MovieWall Display Optimization：影片墙新增统一海报方向（竖版 2:3 / 横版 16:9）、海报大小（小 / 中 / 大）设置，并经 Unified Settings 持久化。
 - MovieWall 分页改为右下角悬浮控件，支持点击页码输入、Enter 跳转、Esc 取消、左右方向键翻页和 Ctrl+G 聚焦页码。
 
 ### Changed
 
-- Organizer UI Completion: `/organizer` now has a left Organizer Tools rail, a duplicate review surface with poster/file metadata/true reasons/non-binding keep suggestions, and a MovieWall-based Batch Organizer action bar. Batch move, rename, and delete remain visible but disabled placeholders; this sprint does not execute Safe Delete or real file changes.
+- Organizer execution now routes duplicate deletion through the existing Safe Delete workflow and routes batch move/rename through the existing File Organizer workflow. Ordinary MovieWall batch delete remains disabled; destructive delete is only exposed from duplicate groups after explicit keep selection and preview confirmation.
 
 - 左侧工具区将“查重结果”合并为“整理工具”；旧 `/duplicates` 路由仅作为兼容重定向保留。
 - 影片墙卡片网格改为基于显示偏好的响应式 CSS Grid，不写死列数；列表视图不受海报方向和大小设置影响。
