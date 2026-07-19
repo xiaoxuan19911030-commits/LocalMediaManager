@@ -45,6 +45,7 @@ docs/               → 证据、Release 验收、字段映射、矩阵
 | [DEC-010](#dec-010-generatedcard-wallcrops-unified-pipeline) | GeneratedCard/WallCrops 纳入统一管线 | MediaStorage | 0.5.0-17 | `2437e39` |
 | [DEC-011](#dec-011-smart-search-and-entity-taxonomy) | Smart Search 与实体标签语义边界 | Search / Entities | 0.5.0-18 | `5b68aa5` |
 | [DEC-012](#dec-012-moviewall-display-preferences-and-floating-pagination) | MovieWall 显示偏好与悬浮分页 | MovieWall / Settings | 0.5.0-20 | `bbed780` |
+| [DEC-013](#dec-013-metadata-ownership-and-user-data-boundary) | 元数据归属与用户数据边界 | Metadata / User Data | Repository Stabilization | `docs(product)` |
 
 ---
 
@@ -1098,6 +1099,92 @@ movieWall.posterSize        = small | medium | large
 
 ---
 
+## Repository Stabilization — Metadata Ownership Decision
+
+**分支：** `sprint/0.5.0-20-moviewall-display`
+**时间：** 2026-07-19
+**目标：** 收缩 Local Media Manager 的元数据写入边界，明确影片元数据由刮削、NFO 导入和元数据同步维护；LMM 只维护用户个人数据与用户选择的媒体资源。
+
+---
+
+### DEC-013: Metadata Ownership And User Data Boundary
+
+| 字段 | 值 |
+|------|-----|
+| **Decision ID** | DEC-013 |
+| **模块** | Metadata / User Data |
+| **Sprint** | Repository Stabilization |
+| **日期** | 2026-07-19 |
+
+#### 背景
+
+旧版 Jvedio 暴露了大量影片字段编辑能力。继续迁移“完整影片编辑器”会让 LMM 同时成为刮削器、NFO 编辑器和个人媒体管理器，带来三类问题：
+
+- 同一字段有多个写入来源，标题、演员、导演、厂商、系列、Genre 等容易冲突。
+- 重新刮削或 NFO 导入可能覆盖手工修改，用户难以判断哪个来源是权威。
+- 为显示标题、自定义标题、第二标题等派生字段增加长期维护成本，却不能解决元数据源错误。
+
+#### 最终方案
+
+影片元数据的权威来源仅包括：
+
+- 刮削
+- NFO 导入
+- 元数据同步
+
+LMM 不提供完整影片元数据手动编辑器，也不新增“显示标题”“自定义标题”“第二标题”等额外标题字段。MovieWall 和详情页直接展示刮削/NFO/同步得到的标题或原标题。元数据错误时，用户通过重新刮削、重新同步或重新导入 NFO 修正来源数据，而不是手动改数据库字段。
+
+#### 不再开发
+
+- 标题、原始标题、番号、简介、上映日期、年份、时长
+- 显示标题、自定义标题、第二标题
+- 手动修改导演、厂商、系列、Genre / 影片标签
+- 添加演员、删除演员、搜索演员、手动修改演员资料
+- 独立“已观看”开关
+- 完整 Movie Editor / 全字段影片编辑器
+
+#### 继续保留
+
+这些是用户个人数据或用户明确选择的资源，不属于刮削元数据：
+
+- 星级评分
+- 收藏
+- 自定义标签
+- 海报调整、人工裁切、后续图片 SetAs
+- 演员显示排序
+- 播放次数、最后播放时间、最近播放
+- 未来明确提出后才开发的用户备注
+- AI 推荐相关用户行为数据
+
+重新刮削、NFO 导入或元数据同步不得覆盖评分、收藏、自定义标签、播放历史、用户选择的图片资源或演员显示排序。
+
+#### 演员边界
+
+演员实体和影片演员集合由刮削/NFO/同步维护。LMM 只允许调整演员显示顺序：仅修改排序字段或关联顺序，不新增演员、不删除演员关联、不修改演员实体。重新刮削后，对仍存在的演员尽量保留用户排序；新增演员按默认顺序追加。
+
+#### 已观看边界
+
+不新增 `Watched` 布尔开关。播放状态由播放次数、最后播放时间和最近播放表达，避免与历史记录重复。
+
+#### 以后必须遵守
+
+- 不得新建完整 Movie Editor 或全字段影片编辑 API。
+- 不得为显示标题、自定义标题或第二标题新增数据库字段。
+- 不得把自定义标签、评分、收藏、演员排序和图片选择标记为取消。
+- AI 后续只能建议或写入用户确认的自定义标签/用户行为数据，不能污染刮削标签或 Provider 元数据。
+
+#### 后续开发顺序
+
+所有后续 Sprint 固定遵循：
+
+1. 先完成所有决定保留的旧版功能迁移，达到以保留功能为准的 Feature Parity。
+2. 新实现稳定后，再统一执行 Legacy Cleanup，删除已经完全替代且无引用的旧代码、旧页面、旧资源和无引用实现；必要的数据迁移与升级兼容逻辑继续保留。
+3. Legacy Cleanup 完成后，再进入产品优化、UI 重构和新功能开发；该阶段以 Human 的体验需求为最高优先级，不再以旧版一致性为主要目标。
+
+禁止边迁移边大规模重构，禁止边迁移边删除旧实现。每完成一个保留功能，必须更新 Feature Parity 状态。
+
+---
+
 ## PROJECT §21 Sprint History（摘要）
 
 | Sprint | 摘要 | 决策 |
@@ -1107,6 +1194,7 @@ movieWall.posterSize        = small | medium | large
 | 0.5.0-17 | 统一写入 Resolver；Legacy Read 保留；WallCrops 纳入 | DEC-008 ～ DEC-010 |
 | 0.5.0-18 | Smart Search；实体标签语义区分；导航分类补齐 | DEC-011 |
 | 0.5.0-20 | MovieWall 显示偏好、响应式卡片尺寸和悬浮分页交互 | DEC-012 |
+| Repository Stabilization | 元数据归属规则：取消完整影片编辑器，只维护用户个人数据 | DEC-013 |
 
 ---
 

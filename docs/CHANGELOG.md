@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Product Decisions
+
+- Metadata Ownership Decision (DEC-013): LMM no longer plans a full Movie Editor or manual movie metadata editing. Movie metadata is owned by scraping, NFO import, and metadata sync; incorrect metadata should be fixed by re-scrape/re-sync/NFO re-import.
+- Product-cancelled legacy expectations: full-field movie edit, manual edits for titles/code/plot/date/runtime/director/studio/series/tags/Genre, actor add/delete/search/manual profile edit, display/custom/second title fields, and standalone watched toggle.
+- Retained user-data scope: rating, favorite, custom tags, actor display ordering, poster/image adjustment, manual crop, future image SetAs, playback history, and future Human-approved notes.
+- Development order is now fixed: retained Feature Parity first, Legacy Cleanup second, Human-experience-driven optimization/new features third.
+
 ### Added
 
 - MovieWall Display Optimization：影片墙新增统一海报方向（竖版 2:3 / 横版 16:9）、海报大小（小 / 中 / 大）设置，并经 Unified Settings 持久化。

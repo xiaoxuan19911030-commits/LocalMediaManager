@@ -148,3 +148,12 @@ Acceptance: 发布验证记录或独立验收文档
 - Build: `pnpm build:web` and `dotnet build backend/LocalMediaManager.Bridge/LocalMediaManager.Bridge.csproj` pass.
 - Human acceptance: installed app launch, UI smoke, and final interaction acceptance are reserved for developer verification per `AI_RULES.md` Human Acceptance.
 - Status: batch tooling remains Sprint-local evidence until developer UI acceptance is recorded; no feature is marked fully migrated by this note alone.
+
+## 2026-07-19 Metadata Ownership Evidence Note
+
+- Decision: DEC-013 makes scraping, NFO import, and metadata sync the authoritative owners of movie metadata.
+- Product-cancelled legacy expectations: full Movie Editor / full-field movie edit, manual edits for title/original title/code/plot/release date/year/runtime/director/studio/series/movie tags/Genre, actor add/delete/search/manual profile edit, display title/custom title/second title, and standalone watched toggle.
+- Status override: these cancelled items move from "not migrated / pending" to "product decision cancelled / no longer developed" and do not count against retained Feature Parity.
+- Retained user-data features: rating, favorite, custom tags, actor display ordering, poster/image adjustment, manual crop, future image SetAs, playback count, last played time, recent playback, and future Human-approved user notes.
+- Retained Feature Parity order: complete all retained legacy features first and update this matrix after each feature; run Legacy Cleanup only after retained Feature Parity reaches 100% and is stable; start Human-experience-driven product optimization only after Legacy Cleanup.
+- Do not mark custom tags, rating, favorite, actor display order, or image adjustment as cancelled.

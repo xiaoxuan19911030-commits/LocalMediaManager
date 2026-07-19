@@ -119,6 +119,47 @@ Planning → Design → Develop → Self Test → Smoke Test → Freeze → Rele
 
 **状态：Planning / Sprint 0.5.0-01 Audit complete**
 
+### 2026-07-19 Scope Update — Metadata Ownership
+
+Local Media Manager no longer plans a full Movie Editor or manual metadata editing parity track. Metadata fields are owned by scraping, NFO import, and metadata sync. The following legacy expectations are product-cancelled and do not count as remaining Feature Parity gaps:
+
+- 完整影片编辑器 / 全字段影片编辑
+- 手动编辑标题、原始标题、番号、简介、上映日期、年份、时长
+- 手动修改导演、厂商、系列、影片标签 / Genre
+- 添加演员、删除演员、搜索演员、手动修改演员资料
+- 显示标题、自定义标题、第二标题
+- 独立“已观看”开关
+
+Retained user-data features remain in scope: scoring, favorite, custom tags, actor display ordering, poster/image adjustment, manual crop, future image SetAs, playback history, and future explicit user notes.
+
+### Retained Feature Parity Priority
+
+**P0**
+
+1. 厂商分类浏览
+2. MovieWall 随机影片
+3. 图片 SetAs
+4. 复制影片信息
+
+**P1**
+
+5. 查重处理流程
+6. 批量整理入口
+7. 日志清理
+
+**P2**
+
+8. 语言设置
+9. 托盘与关闭行为
+10. 快捷键管理
+11. 检查更新
+
+### Fixed Development Order
+
+1. Finish all retained legacy feature migration and update `docs/migration/FEATURE_PARITY_MATRIX.md` after each feature.
+2. After retained Feature Parity reaches 100% and the new implementation is stable, run a dedicated Legacy Cleanup Sprint.
+3. After Legacy Cleanup, move into product optimization, UI redesign, and new feature development driven by Human experience needs rather than legacy UI parity.
+
 - 对 0.4.1–0.4.3 的媒体管理功能执行最终等价验收；审计结论见 [`audits/FEATURE_PARITY_AUDIT_0.5.0-01.md`](audits/FEATURE_PARITY_AUDIT_0.5.0-01.md)。
 - 首先关闭 P0 的任务生命周期、安装版扫描导入、受保护元数据写入、查重安全工作流和文件操作故障恢复。
 - 统一 Bridge DTO、错误、日志、超时、重试和任务状态；数据库、Bridge、性能审计分别记录在 `docs/audits/`。

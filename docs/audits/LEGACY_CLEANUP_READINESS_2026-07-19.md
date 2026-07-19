@@ -70,6 +70,16 @@ These should no longer be treated as "unmigrated" in future parity summaries:
 | 旧多数据库 UI | `WindowStartUp`, `Window_DataBase` | 不再保留 / 产品决策取消 | Next uses one writable runtime DB plus media libraries. Migration compatibility remains. |
 | 端口监听配置 | `ServerConfig`, `ServerManager` | 不再保留 / 产品决策取消 | Bridge fixed loopback/session model remains; do not expose old server port UI. |
 
+Additional product decisions confirmed on 2026-07-19 by DEC-013:
+
+| Feature | Old expectation | New status | Cleanup meaning |
+|---|---|---|---|
+| 完整影片编辑器 / 全字段影片编辑 | Legacy edit windows and metadata forms | 不再保留 / 产品决策取消 | Do not build a full Movie Editor. Metadata is owned by scraping, NFO import, and metadata sync. |
+| 手动编辑影片元数据 | Title, original title, code, plot, date, runtime, director, studio, series, Genre/movie tags | 不再保留 / 产品决策取消 | Incorrect metadata is fixed by re-scrape or NFO re-import, not manual DB edits. |
+| 添加演员 / 删除演员 / 搜索演员 / 手动修改演员资料 | Legacy actor relation/editor functions | 不再保留 / 产品决策取消 | Actor entities and movie actor sets are metadata-owned. LMM only keeps display order. |
+| 显示标题 / 自定义标题 / 第二标题 | Potential replacement/custom title fields | 不再保留 / 产品决策取消 | Do not add extra title fields; MovieWall/details display scraped/NFO/synced title data. |
+| 已观看开关 | Separate watched boolean | 不再保留 / 产品决策取消 | Watched state is represented by play count, last played time, and recent playback. |
+
 Do not delete migration/config compatibility merely because these UI concepts are cancelled.
 
 ## 4. Current Migration Completion Snapshot
@@ -87,16 +97,16 @@ Items updated from the 2026-07-18 audit based on real code:
 
 | Feature | Previous status | Current status | Evidence |
 |---|---|---|---|
-| 页码输入跳转 | ❌ 未迁移 | ✅ 已迁移 locally | `MovieWall.tsx` `FloatingPagination`, current-page click input, Enter/Esc behavior. |
-| 左右方向键翻页 | ❌ 未迁移 | ✅ 已迁移 locally | `MovieWall.tsx` handles `ArrowLeft` / `ArrowRight` and ignores text inputs. |
-| `Ctrl+G` page input focus | Not listed separately | ✅ 已迁移 locally | `MovieWall.tsx` `pageInputFocusSignal`. |
-| 横版/竖版海报、小/中/大尺寸 | Partial/readonly in matrix | ✅ 已迁移 locally | `UnifiedSettings.movieWallDisplay`, `MediaCard`, Settings appearance section, DEC-012. |
-| 悬浮分页 | Partial | ✅ 已迁移 locally | `MovieWall.tsx` floating pagination. |
-| 人工裁切卡图 | ❌ 未迁移 | 🟡 部分迁移 | `POST /api/videos/{movieId}/images/crop-card`, details crop dialog, media/favorites card context menu. Auto smart-card recognition remains incomplete. |
-| 收藏页卡片右键图片菜单 | Missing before local changes | ✅ 已添加 locally | `CollectionPage.tsx` context menu routes to `cropMovieCard` and image generation. |
-| 详情页大海报 | Small poster | ✅ 已调整 locally | `MovieDetailPage.tsx` uses `Poster` resource and larger grid column. |
+| 页码输入跳转 | ❌ 未迁移 | ✅ 已迁移 | `MovieWall.tsx` `FloatingPagination`, current-page click input, Enter/Esc behavior. Commit `bbed780`. |
+| 左右方向键翻页 | ❌ 未迁移 | ✅ 已迁移 | `MovieWall.tsx` handles `ArrowLeft` / `ArrowRight` and ignores text inputs. Commit `bbed780`. |
+| `Ctrl+G` page input focus | Not listed separately | ✅ 已迁移 | `MovieWall.tsx` `pageInputFocusSignal`. Commit `bbed780`. |
+| 横版/竖版海报、小/中/大尺寸 | Partial/readonly in matrix | ✅ 已迁移 | `UnifiedSettings.movieWallDisplay`, `MediaCard`, Settings appearance section, DEC-012. Commit `bbed780`. |
+| 悬浮分页 | Partial | ✅ 已迁移 | `MovieWall.tsx` floating pagination. Commit `bbed780`. |
+| 人工裁切卡图 | ❌ 未迁移 | 🟡 部分迁移 | `POST /api/videos/{movieId}/images/crop-card`, details crop dialog, media/favorites card context menu. Auto smart-card recognition remains incomplete. Commit `93d9a11`. |
+| 收藏页卡片右键图片菜单 | Missing before local changes | ✅ 已添加 | `CollectionPage.tsx` context menu routes to `cropMovieCard` and image generation. Commit `7ba4e20`. |
+| 详情页大海报 | Small poster | ✅ 已调整 | `MovieDetailPage.tsx` uses `Poster` resource and larger grid column. Commit `93d9a11`. |
 
-Because these local changes are not committed/pushed, future reports should cite the commit only after Human approves commit/push.
+These implementation commits were pushed in Repository Stabilization on branch `sprint/0.5.0-20-moviewall-display`.
 
 ## 5. Old Reference Classification
 
@@ -137,7 +147,7 @@ No item currently qualifies for immediate deletion under the user's eight deleti
 
 | # | Feature | Current entry | Current code | Usable? | Migration status | Missing | Legacy dependency |
 |---:|---|---|---|---|---|---|---|
-| 1 | 完整影片编辑 | Detail page has tag/actor/rating/favorite only | `MovieDetailPage.tsx`, `ProductWriter` lacks full movie update DTO | Partially | ❌ Not migrated | Full title/code/date/runtime/description/studio/director/genre/series/path edit workflow | No old code dependency; legacy audit evidence only |
+| 1 | 完整影片编辑 | Detail page has user-state and metadata workflow actions only | `MovieDetailPage.tsx`, `ProductWriter` intentionally has no full movie update DTO | Not planned | 不再保留 / 产品决策取消 | None. DEC-013 cancels full metadata editor, display/custom title fields, actor add/delete/search, and watched toggle. | Keep legacy evidence only; do not develop. |
 | 2 | 厂商分类浏览 | Dashboard shows top studios; detail relation shows studio | `HomePage.tsx`, `MovieDetailPage.tsx`; no `/tags/studios`; entity API whitelist excludes studios | Partially readable | ❌ Not migrated | Add studio category under Tags and MovieWall default filter | DB has `Studios/MovieStudios`; no legacy code needed |
 | 3 | 随机影片 | No toolbar action found | no `random` route/API/action | No | ❌ Not migrated | Random from current MovieWall query result range | No legacy code dependency |
 | 4 | 复制影片信息 | No button/action found | no clipboard/copy movie info command | No | ❌ Not migrated | Detail/right-click copy formatted info | No legacy code dependency |
@@ -156,7 +166,7 @@ No item currently qualifies for immediate deletion under the user's eight deleti
 | 17 | 扫描详情 | Task logs and library scan exist | `TasksPage`, `LibraryWorkflowService` | Partially | 🟡 Partial | Old categorized scan result detail page | No old code dependency |
 | 18 | 播放器安装版验证 | Play endpoint and settings exist | `Program.cs` play route, `PlaybackSettingsService` | Code exists | 🟡 Partial | Default/custom player installed-app smoke | Legacy config fallback still used |
 | 19 | Genre 分类 | Detail and Smart Search have genres | `ProductReader`, `MovieDetailPage`; no entity route | Partially | 🟡 Partial | Genre category route/list/filter if product keeps it | DB has `Genres/MovieGenres` |
-| 20 | 演员资料完整度 | Actor list/edit basic fields + image endpoint | `EntityPage`, `ProductWriter.UpdateActorAsync`, `/api/actors/{id}/image` | Partially | 🟡 Partial | Full old actor fields and image management parity | Legacy actor portrait import still useful |
+| 20 | 演员资料完整度 | Actor list/basic image endpoint exist | `EntityPage`, `/api/actors/{id}/image` | Limited by design | 不再保留 / 产品决策取消 for manual actor profile editing | Manual actor profile edits/add/delete/search are cancelled by DEC-013. Actor display ordering remains a retained user-data feature. | Legacy actor portrait import still useful. |
 
 ## 7. Running Legacy Compatibility Logic
 
@@ -211,11 +221,11 @@ Reason: no candidate satisfies all required proof conditions plus Web/Bridge/Tau
 
 1. Finish uncommitted local feature work: commit/push MovieWall Display, detail poster, manual crop, and collection context-menu changes after Human review.
 2. Update `FEATURE_PARITY_MATRIX.md` only after committed evidence exists.
-3. Complete P0/P1 parity gaps: full movie edit, studio category, random movie, image SetAs, duplicate workflow, batch organizer.
-4. Run installed smoke for player, NFO, image crop, and MovieWall state restoration.
-5. Only then start a dedicated `Legacy Compatibility Retirement` design if Human wants to remove read fallbacks.
-6. Start with non-runtime transitional docs only if Human explicitly approves.
-7. Never remove migrations, audit evidence, or user-data compatibility in the same batch as UI feature cleanup.
+3. Complete retained P0/P1 parity gaps in this order: studio category, MovieWall random movie, image SetAs, copy movie info, duplicate workflow, batch organizer, and log cleanup.
+4. Run installed smoke for player, NFO, image crop, MovieWall state restoration, and each retained parity gap.
+5. When retained Feature Parity reaches 100% and the new implementation is stable, start a dedicated Legacy Cleanup Sprint.
+6. Only during Legacy Cleanup should fully replaced, unreferenced old code/pages/resources be deleted. Keep database migrations, upgrade compatibility, scoring/favorite/tag/image-path compatibility, `docs/migration`, `docs/audits`, and source evidence unless Human explicitly approves retirement.
+7. After Legacy Cleanup is complete, enter product optimization/new-feature phase where Human experience needs take priority over legacy UI parity.
 
 ## 10. Deletion Verification Method
 
@@ -256,7 +266,7 @@ Recommended next feature sprint:
 2. **Studio Category + Random Movie**: small high-value MovieWall reuse tasks once editing scope is not active.
 3. **Image Operations Parity**: image SetAs, image-list batch delete, and complete smart-card task workflow.
 
-Do not start cleanup deletion until the uncommitted local changes are committed/pushed or intentionally reverted by Human.
+Do not start cleanup deletion until retained Feature Parity reaches 100%, the new implementation is stable, and Human explicitly approves the Legacy Cleanup Sprint.
 
 ## 13. Confidence
 
