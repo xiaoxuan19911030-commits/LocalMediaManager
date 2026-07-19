@@ -30,7 +30,7 @@ public sealed class MetadataProviderSettingsService(string databasePath)
             NormalizeBaseUrl(Text(values, "metadata.metatube.baseUrl", defaults.BaseUrl)),
             Math.Clamp(Int(values, "metadata.metatube.timeoutSeconds", defaults.TimeoutSeconds), 15, 180),
             Bool(values, "metadata.metatube.downloadImages", defaults.DownloadImages),
-            Bool(values, "metadata.metatube.writeNfo", defaults.WriteNfo),
+            true,
             Bool(values, "metadata.metatube.autoExecute", defaults.AutoExecute),
             Bool(values, "metadata.metatube.nonDestructive", defaults.NonDestructive));
     }
@@ -42,6 +42,7 @@ public sealed class MetadataProviderSettingsService(string databasePath)
         var clean = input with {
             BaseUrl = NormalizeBaseUrl(uri.ToString()),
             TimeoutSeconds = Math.Clamp(input.TimeoutSeconds, 15, 180),
+            WriteNfo = true,
             NonDestructive = true,
         };
         await using var connection = await OpenAsync(SqliteOpenMode.ReadWrite);

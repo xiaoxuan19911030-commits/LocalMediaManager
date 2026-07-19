@@ -14,7 +14,6 @@ import MetadataPage from '@/pages/MetadataPage'
 import DiagnosticsPage from '@/pages/DiagnosticsPage'
 import OrganizerPage from '@/pages/OrganizerPage'
 import MaintenancePage from '@/pages/MaintenancePage'
-import PluginsPage from '@/pages/PluginsPage'
 import AiProvidersPage from '@/pages/AiProvidersPage'
 
 export const router = createHashRouter([{ path: '/', Component: AppShell, children: [
@@ -35,11 +34,11 @@ export const router = createHashRouter([{ path: '/', Component: AppShell, childr
   { path: 'history', element: <CollectionPage kind="history" /> },
   { path: 'metadata', Component: MetadataPage },
   { path: 'diagnostics', Component: DiagnosticsPage },
-  { path: 'organizer', Component: OrganizerPage },
-  { path: 'duplicates', element: <Navigate to="/organizer" replace /> },
+  { path: 'organizer', element: <Navigate to="/duplicates" replace /> },
+  { path: 'duplicates', Component: OrganizerPage },
   { path: 'maintenance', Component: MaintenancePage },
   { path: 'tasks', Component: TasksPage },
-  { path: 'plugins', Component: PluginsPage },
+  { path: 'plugins', element: <Navigate to="/settings" replace /> },
   { path: 'ai-providers', Component: AiProvidersPage },
   { path: 'settings', Component: SettingsPage },
 ]}])

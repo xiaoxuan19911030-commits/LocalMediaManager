@@ -33,8 +33,16 @@ export interface NfoSettings { exportPolicy: 'SkipExisting' | 'SeparateFile'; ou
 export interface PlaybackSettings { playerPath: string; useSystemDefault: boolean }
 export interface RatingRetentionSettings { enabled: boolean }
 export interface AppearanceSettings { themeMode: 'light' | 'dark' }
-export interface MovieWallDisplaySettings { posterOrientation: 'portrait' | 'landscape'; posterSize: 'small' | 'medium' | 'large' }
+export interface MovieWallDisplaySettings {
+  posterOrientation: 'portrait' | 'landscape'
+  posterSize: 'small' | 'medium' | 'large'
+  wallImageSource: 'poster' | 'thumbnail' | 'fanart'
+  detailImageSource: 'poster' | 'thumbnail' | 'fanart'
+  defaultViewMode: 'grid' | 'list'
+}
 export interface ScanSettings { minFileSizeMb: number }
+export interface SearchSettings { defaultSort: string; defaultFilter: 'all' }
+export interface DataBackupSettings { enabled: boolean; frequencyDays: 1 | 3 | 7; retentionCount: 5 | 10 | 20 }
 export interface SystemSettings {
   language: 'system' | 'zh-CN'
   closeBehavior: 'exit' | 'minimizeToTray'
@@ -66,6 +74,8 @@ export interface UnifiedSettings {
   appearance: AppearanceSettings
   mediaStorage: MediaStorageSettings
   movieWallDisplay: MovieWallDisplaySettings
+  search: SearchSettings
+  dataBackup: DataBackupSettings
   scan: ScanSettings
   system: SystemSettings
 }
@@ -97,4 +107,14 @@ export interface LogCleanupResult { deletedFiles: number; freedBytes: number; fa
 export interface UpdateCheckResult {
   currentVersion: string; status: 'up-to-date' | 'update-available' | 'network-error' | 'invalid-response' | 'current-newer'
   message: string; latestVersion?: string; releaseUrl?: string; releaseNotes?: string; checkedAt: string
+}
+export interface FfmpegToolStatus {
+  found: boolean
+  path?: string
+  probePath?: string
+  source: string
+  version?: string
+  probeVersion?: string
+  pluginDirectory: string
+  message: string
 }

@@ -23,7 +23,7 @@ public sealed class DataSafetyService(string databasePath, string configDatabase
     private string DataRoot => Path.GetDirectoryName(databasePath) ?? AppContext.BaseDirectory;
     private string BackupRoot => Path.Combine(DataRoot, "backups");
     private string CacheRoot => Path.Combine(imageRoot, ".lmm-cache");
-    private string LogRoot => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LocalMediaManager", "logs");
+    private string LogRoot => Path.Combine(Path.GetDirectoryName(DataRoot) ?? DataRoot, "logs");
 
     public Task<DataSafetyOverviewDto> OverviewAsync()
     {
@@ -56,7 +56,7 @@ public sealed class DataSafetyService(string databasePath, string configDatabase
                 }
                 var manifest = new {
                     product = "Local Media Manager",
-                    version = "0.4.3",
+                    version = "0.6.0",
                     createdAt = DateTime.UtcNow,
                     includes = included,
                     excludes = new[] { "original media files", "original images", "cookies", "tokens" },
@@ -64,6 +64,7 @@ public sealed class DataSafetyService(string databasePath, string configDatabase
                 await AddTextAsync(archive, "manifest.json", JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }), token);
             }
             File.Move(temp, final, true);
+            await PruneBackupsAsync(await ReadRetentionCountAsync(token), token);
             return new(final, Size(final), DateTime.UtcNow.ToString("O"), included, warnings);
         } catch {
             if (File.Exists(temp)) File.Delete(temp);
@@ -124,7 +125,7 @@ public sealed class DataSafetyService(string databasePath, string configDatabase
             fields = snapshot.Fields.Where(field => !field.Sensitive).Select(field => new { field.Key, field.Category, field.ValueType, field.Value, field.DefaultValue, field.Mapped }),
             metaTube = metaTube with { BaseUrl = metaTube.BaseUrl },
         };
-        return new(DateTime.UtcNow.ToString("O"), "Local Media Manager", "0.4.3", JsonSerializer.SerializeToElement(safe));
+        return new(DateTime.UtcNow.ToString("O"), "Local Media Manager", "0.6.0", JsonSerializer.SerializeToElement(safe));
     }
 
     public Task<SettingsImportPreviewDto> PreviewSettingsImportAsync(JsonElement payload)
@@ -146,7 +147,7 @@ public sealed class DataSafetyService(string databasePath, string configDatabase
         }
         if (JsonSerializer.Serialize(payload).Contains("token", StringComparison.OrdinalIgnoreCase))
             warnings.Add("导入内容疑似包含敏感字段，预览不会应用这些内容。");
-        return Task.FromResult(new SettingsImportPreviewDto(changes.Count > 0, "0.4.3", categories.Order().ToList(), changes.Take(100).ToList(), warnings));
+        return Task.FromResult(new SettingsImportPreviewDto(changes.Count > 0, "0.6.0", categories.Order().ToList(), changes.Take(100).ToList(), warnings));
     }
 
     public async Task<SystemDiagnosticDto> DiagnosticsAsync(CancellationToken token = default)
@@ -207,6 +208,33 @@ public sealed class DataSafetyService(string databasePath, string configDatabase
     }
 
     private static long Size(string path) => File.Exists(path) ? new FileInfo(path).Length : 0;
+    private async Task<int> ReadRetentionCountAsync(CancellationToken token)
+    {
+        if (!File.Exists(configDatabasePath)) return 10;
+        try {
+            await using var connection = new SqliteConnection($"Data Source={configDatabasePath}");
+            await connection.OpenAsync(token);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT ValueJson FROM AppSettings WHERE Key='dataBackup.retentionCount'";
+            string? raw = Convert.ToString(await command.ExecuteScalarAsync(token));
+            int count = JsonSerializer.Deserialize<int?>(raw ?? "10") ?? 10;
+            return count is 5 or 10 or 20 ? count : 10;
+        } catch {
+            return 10;
+        }
+    }
+    private Task PruneBackupsAsync(int retentionCount, CancellationToken token)
+    {
+        Directory.CreateDirectory(BackupRoot);
+        foreach (FileInfo backup in new DirectoryInfo(BackupRoot)
+            .EnumerateFiles("lmm-backup-*.zip", SearchOption.TopDirectoryOnly)
+            .OrderByDescending(file => file.LastWriteTimeUtc)
+            .Skip(Math.Max(1, retentionCount))) {
+            token.ThrowIfCancellationRequested();
+            try { backup.Delete(); } catch { }
+        }
+        return Task.CompletedTask;
+    }
     private static DiagnosticCheckDto Check(string key, string label, bool ok, string detail) => new(key, label, ok ? "success" : "error", detail);
     private static bool CanWriteDirectory(string path)
     {

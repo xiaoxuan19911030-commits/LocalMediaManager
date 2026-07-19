@@ -222,7 +222,7 @@ export default function MovieDetailPage() {
         <Stack spacing={2.25}>
           <SurfaceSection title="影片信息" description="整理后的媒体关联与元数据">
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,minmax(0,1fr))' }, gap: 2.25 }}>
-              <Relation label="演员" items={movie.actors}/><Relation label="导演" items={movie.directors}/><Relation label="类型" items={movie.genres}/><Relation label="制作商" items={movie.studios}/><Relation label="系列" items={movie.series}/><Relation label="标签" items={movie.tags}/>
+              <Relation label="演员" items={movie.actors}/><Relation label="导演" items={movie.directors}/><Relation label="标签" items={movie.genres}/><Relation label="制作商" items={movie.studios}/><Relation label="系列" items={movie.series}/><Relation label="自定义标签" items={movie.tags}/>
               <Box><Typography variant="overline" color="text.secondary" sx={{ fontWeight: 750 }}>导入日期</Typography><Typography sx={{ mt: .5 }}>{date(movie.importedAt)}</Typography></Box>
             </Box>
             {movie.description && <><Divider sx={{ my: 2.25 }}/><Typography variant="subtitle2" sx={{ fontWeight: 800, mb: .75 }}>内容简介</Typography><Typography color="text.secondary" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.85 }}>{movie.description}</Typography></>}

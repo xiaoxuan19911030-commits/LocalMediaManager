@@ -153,7 +153,17 @@ export function MovieWall({
   useEffect(load, [load, reloadSignal])
   useEffect(() => () => { loadSeq.current += 1 }, [])
   useEffect(() => { bridge.libraries().then(setLibraries).catch(() => undefined) }, [])
-  useEffect(() => { bridge.allSettings().then(settings => { setMovieWallDisplay(normalizeMovieWallDisplay(settings.movieWallDisplay)); setShortcutsEnabled(settings.system?.globalShortcutsEnabled ?? true) }).catch(() => undefined) }, [])
+  useEffect(() => {
+    bridge.allSettings().then(settings => {
+      const display = normalizeMovieWallDisplay(settings.movieWallDisplay)
+      setMovieWallDisplay(display)
+      setShortcutsEnabled(settings.system?.globalShortcutsEnabled ?? true)
+      if (!canReuseSavedState) {
+        setView(display.defaultViewMode)
+        if (settings.search?.defaultSort) setSort(settings.search.defaultSort)
+      }
+    }).catch(() => undefined)
+  }, [canReuseSavedState])
   useEffect(() => {
     if (!loading && total > 0 && page > totalPages) setPage(totalPages)
   }, [loading, page, total, totalPages])

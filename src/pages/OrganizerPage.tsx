@@ -25,11 +25,7 @@ type DuplicateRule = 'all' | 'code' | 'path' | 'hash'
 type BatchOrganizerKind = 'move' | 'rename'
 
 export default function OrganizerPage() {
-  const [mode, setMode] = useState<OrganizerMode>(readOrganizerMode)
-  useEffect(() => { window.sessionStorage.setItem('lmm.organizer.mode', mode) }, [mode])
-  return <OrganizerShell mode={mode} onModeChange={setMode}>
-    {mode === 'batch' ? <BatchOrganizerView/> : <DuplicateOrganizerView/>}
-  </OrganizerShell>
+  return <DuplicateOrganizerView/>
 }
 
 function OrganizerShell({ mode, onModeChange, children }: { mode: OrganizerMode; onModeChange: (mode: OrganizerMode) => void; children: ReactNode }) {
@@ -90,12 +86,12 @@ function DuplicateOrganizerView() {
   useEffect(load, [load])
 
   const groupsByKey = useMemo(() => new Map((data?.groups ?? []).map((group) => [groupKey(group), group])), [data])
-  const buildPlan = () => selectedGroups.map((key) => {
+  const buildPlan = (keys = selectedGroups) => keys.map((key) => {
     const group = groupsByKey.get(key)
     return group ? { groupKey: key, keepMovieId: keepByGroup[key] ?? 0, candidateMovieIds: group.items.map((item) => item.movieId) } : undefined
   }).filter(Boolean) as DuplicateDeleteGroupCommand[]
-  const previewDuplicateDelete = () => {
-    const plan = buildPlan()
+  const previewDuplicateDelete = (keys = selectedGroups) => {
+    const plan = buildPlan(keys)
     if (!plan.length) { setNotice('请选择至少一个重复组'); return }
     if (plan.some((item) => !item.keepMovieId)) { setNotice('每个重复组必须选择一个保留版本'); return }
     setBusy('duplicate-preview')
@@ -105,6 +101,11 @@ function DuplicateOrganizerView() {
       setConfirmOriginal(false)
       setCountText('')
     }).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(''))
+  }
+  const previewAllUnkept = () => {
+    const keys = (data?.groups ?? []).map(groupKey)
+    setSelectedGroups(keys)
+    previewDuplicateDelete(keys)
   }
   const executeDuplicateDelete = () => {
     if (!deletePreview || busy) return
@@ -139,7 +140,11 @@ function DuplicateOrganizerView() {
     <WorkspacePage title="重复影片" description="按真实规则处理重复候选。每组先选择一个保留版本，其余候选进入 Safe Delete 预览；不会自动删除。"
       stats={stats} filters={filters} activeFilterCount={rule === 'all' ? 0 : 1} onClearFilters={() => setRule('all')}
       loading={!data && !error} error={error}
-      primaryActions={[{ key: 'preview-delete', label: '预览 Safe Delete', icon: <DeleteOutlineRoundedIcon/>, variant: 'contained', color: 'error', disabled: selectedGroups.length === 0 || Boolean(busy), onClick: previewDuplicateDelete }, refreshAction(load, '重新扫描')]}>
+      primaryActions={[
+        { key: 'delete-all-unkept', label: '删除所有未保留影片', icon: <DeleteOutlineRoundedIcon/>, variant: 'contained', color: 'error', disabled: !data?.groups.length || Boolean(busy), onClick: previewAllUnkept },
+        { key: 'preview-delete', label: '预览所选', icon: <DeleteOutlineRoundedIcon/>, variant: 'outlined', color: 'error', disabled: selectedGroups.length === 0 || Boolean(busy), onClick: () => previewDuplicateDelete() },
+        refreshAction(load, '重新扫描')
+      ]}>
       {data && (data.groups.length === 0 ? <EmptyState title="未发现重复影片" description="当前规则下没有重复编号、重复文件路径或重复 Hash。"/> :
         <Stack spacing={1.5}>{data.groups.map(group => {
           const key = groupKey(group)
@@ -166,8 +171,8 @@ function DuplicateGroupCard({ group, expanded, keepId, selectedForProcessing, on
   onOpen: (id: number) => void
 }) {
   const recommended = group.items.find((item) => item.recommendation === '建议保留')
-  return <Card variant="outlined" sx={{ borderRadius: 3 }}>
-    <CardContent>
+  return <Card variant="outlined" sx={{ borderRadius: 2 }}>
+    <CardContent sx={{ py: 1.25, '&:last-child': { pb: 1.25 } }}>
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} useFlexGap sx={{ alignItems: { xs: 'stretch', md: 'center' }, justifyContent: 'space-between' }}>
         <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
           <Checkbox checked={selectedForProcessing} onChange={(event) => onProcessingChange(event.target.checked)} slotProps={{ input: { 'aria-label': `纳入处理 ${group.key}` } }}/>
@@ -182,14 +187,10 @@ function DuplicateGroupCard({ group, expanded, keepId, selectedForProcessing, on
           <Button size="small" color="inherit" variant="outlined" disabled={!selectedForProcessing} onClick={() => onProcessingChange(false)}>取消</Button>
         </Stack>
       </Stack>
-      {recommended && <Alert severity="info" icon={<CheckCircleRoundedIcon/>} sx={{ mt: 1.25 }}>
-        <Stack spacing={.75}>
-          <Typography sx={{ fontWeight: 850 }}>建议保留：{recommended.code || recommended.title || `ID ${recommended.movieId}`}</Typography>
-          <Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap' }}>
-            {recommended.recommendationReasons.map((reason) => <Chip key={reason} size="small" label={`✓ ${reason}`}/>)}
-          </Stack>
-        </Stack>
-      </Alert>}
+      {recommended && <Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center', mt: .75 }}>
+        <Chip size="small" icon={<CheckCircleRoundedIcon/>} color="info" label={`建议保留：${recommended.code || recommended.title || `ID ${recommended.movieId}`}`}/>
+        {recommended.recommendationReasons.map((reason) => <Chip key={reason} size="small" variant="outlined" label={`✓ ${reason}`}/>)}
+      </Stack>}
       <Collapse in={expanded} unmountOnExit>
         <Stack spacing={1} sx={{ mt: 1.25 }}>{group.items.map((item) => <DuplicateMovieRow key={item.movieId} item={item} rule={group.rule} keep={keepId === item.movieId}
           onKeep={() => onKeepChange(item.movieId)} onOpen={() => onOpen(item.movieId)}/>)}</Stack>
@@ -244,9 +245,9 @@ function DuplicateDeleteDialog({ preview, busy, confirmOriginal, countText, onCo
         {preview.blockers.map((blocker) => <Alert key={blocker} severity="error">{blocker}</Alert>)}
         {preview.warnings.map((warning) => <Alert key={warning} severity="info">{warning}</Alert>)}
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(3,minmax(0,1fr))' }, gap: 1.25 }}>
-          <Summary label="将处理影片" value={`${safe.movieCount}`}/>
-          <Summary label="文件数量" value={`${safe.items.reduce((sum, item) => sum + item.files.filter((file) => file.willDelete).length, 0)}`}/>
-          <Summary label="总大小" value={formatFileSize(safe.estimatedBytes)}/>
+          <Summary label="删除数量" value={`${safe.movieCount}`}/>
+          <Summary label="保留数量" value={`${preview.merges.length}`}/>
+          <Summary label="释放空间" value={formatFileSize(safe.estimatedBytes)}/>
         </Box>
         <Typography sx={{ fontWeight: 900 }}>用户数据合并</Typography>
         {preview.merges.map((merge) => <Paper key={merge.groupKey} variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
@@ -277,7 +278,7 @@ function DuplicateDeleteDialog({ preview, busy, confirmOriginal, countText, onCo
 function DuplicatePoster({ movieId, title }: { movieId: number; title: string }) {
   const [failed, setFailed] = useState(false)
   const src = `${BRIDGE_ORIGIN}/api/images/${movieId}/primary`
-  return <Box sx={{ width: 88, aspectRatio: '2 / 3', borderRadius: 1.5, overflow: 'hidden', bgcolor: 'action.hover', display: 'grid', placeItems: 'center' }}>
+  return <Box sx={{ width: 64, aspectRatio: '2 / 3', borderRadius: 1.25, overflow: 'hidden', bgcolor: 'action.hover', display: 'grid', placeItems: 'center' }}>
     {failed ? <Typography variant="caption" color="text.disabled">暂无海报</Typography> : <SmartImage src={src} alt={title} onError={() => setFailed(true)}/>}
   </Box>
 }

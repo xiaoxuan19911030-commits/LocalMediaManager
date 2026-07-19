@@ -7,6 +7,7 @@ import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
 import StorageRoundedIcon from '@mui/icons-material/StorageRounded'
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded'
 import { Alert, Autocomplete, Box, Button, Card, CardContent, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, IconButton, MenuItem, Stack, TextField, Tooltip, Typography } from '@mui/material'
+import { invoke } from '@tauri-apps/api/core'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { EmptyState, HealthMeter, StatCard } from '@/components/ProductComponents'
@@ -17,6 +18,7 @@ import type { LibraryDeletePreview, LibraryFolderInput, LibraryInput, MediaLibra
 
 const blankFolder = (): LibraryFolderInput => ({ path: '', includeSubfolders: true, enabled: true, scanMode: 'normal', excludePatterns: [] })
 const blankLibrary = (): LibraryInput => ({ name: '', description: '', enabled: true, folders: [blankFolder()] })
+const maxSourceFolders = 3
 
 export default function LibrariesPage() {
   const navigate = useNavigate()
@@ -41,7 +43,7 @@ export default function LibrariesPage() {
     name: library.name,
     description: library.description || '',
     enabled: library.enabled,
-    folders: library.folders.map(folder => ({ path: folder.path, enabled: folder.enabled, includeSubfolders: folder.includeSubfolders, scanMode: folder.scanMode as LibraryFolderInput['scanMode'], excludePatterns: folder.excludePatterns || [] })),
+    folders: library.folders.slice(0, maxSourceFolders).map(folder => ({ path: folder.path, enabled: true, includeSubfolders: folder.includeSubfolders, scanMode: 'normal', excludePatterns: folder.excludePatterns || [] })),
   } })
   const updateEditor = (value: Partial<LibraryInput>) => setEditor(current => current ? ({ ...current, value: { ...current.value, ...value } }) : current)
   const updateFolder = (index: number, value: Partial<LibraryFolderInput>) => setEditor(current => current ? ({ ...current, value: { ...current.value, folders: current.value.folders.map((folder, folderIndex) => folderIndex === index ? { ...folder, ...value } : folder) } }) : current)
@@ -73,12 +75,11 @@ export default function LibrariesPage() {
 
   const stats = libraries && <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 1.5 }}>
     <StatCard label="媒体库" value={libraries.length} icon={<StorageRoundedIcon/>}/>
-    <StatCard label="来源文件夹" value={totals.folders} icon={<FolderRoundedIcon/>}/>
     <StatCard label="关联影片" value={totals.movies} icon={<StorageRoundedIcon/>} tone="success.main"/>
     <StatCard label="文件缺失" value={totals.missing} icon={<WarningAmberRoundedIcon/>} tone="warning.main"/>
   </Box>
 
-  return <WorkspacePage title="媒体库" description="管理来源文件夹、排除规则，并通过任务中心执行增量或全量扫描。" stats={stats} loading={!libraries && !error} error={error}
+  return <WorkspacePage title="媒体库" description="管理媒体库状态，并通过任务中心执行标准扫描。" stats={stats} loading={!libraries && !error} error={error}
     primaryActions={[{ key: 'new', label: '新建媒体库', icon: <AddRoundedIcon/>, variant: 'contained', onClick: () => setEditor({ value: blankLibrary() }) }, refreshAction(() => void load())]}>
     {notice && <Alert severity="success" onClose={() => setNotice('')} sx={{ mb: 2 }}>{notice}</Alert>}
     {libraries && (libraries.length ? <Stack spacing={1.5}>{libraries.map(library => {
@@ -89,16 +90,12 @@ export default function LibrariesPage() {
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
             <StatusBadge tone={library.enabled ? 'success' : 'neutral'} label={library.enabled ? '已启用' : '已停用'}/>
             <Button size="small" variant="outlined" onClick={() => navigate(`/media?libraryId=${library.id}&libraryName=${encodeURIComponent(library.name)}`)}>查看影片</Button>
-            <Button size="small" variant="outlined" startIcon={<RefreshRoundedIcon/>} disabled={!library.enabled || scanning !== undefined} onClick={() => void scan(library.id, false)}>增量扫描</Button>
-            <Button size="small" variant="outlined" disabled={!library.enabled || scanning !== undefined} onClick={() => void scan(library.id, true)}>全量扫描</Button>
+            <Button size="small" variant="outlined" startIcon={<RefreshRoundedIcon/>} disabled={!library.enabled || scanning !== undefined} onClick={() => void scan(library.id, true)}>扫描影片</Button>
             <Tooltip title="编辑媒体库"><IconButton aria-label="编辑媒体库" onClick={() => openEdit(library)}><EditRoundedIcon/></IconButton></Tooltip>
             <Tooltip title="删除媒体库定义"><IconButton aria-label="删除媒体库定义" color="error" onClick={() => void previewDelete(library.id)}><DeleteOutlineRoundedIcon/></IconButton></Tooltip>
           </Stack>
         </Box>
         <HealthMeter label="文件可用率" value={health} detail={`${library.missingCount} 个缺失`} tone={health > 95 ? 'success' : health > 80 ? 'warning' : 'error'}/>
-        <Stack spacing={1} sx={{ mt: 2 }}>{library.folders.map(folder => <Box key={folder.id} sx={{ display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr) auto', alignItems: 'center', gap: 1.5, p: 1.5, borderRadius: 2, bgcolor: 'action.hover' }}>
-          <FolderRoundedIcon color="action"/><Box sx={{ minWidth: 0 }}><Typography noWrap title={folder.path}>{folder.path}</Typography><Typography variant="caption" color="text.secondary">{folder.includeSubfolders ? '包含子目录' : '仅当前目录'} · {folder.scanMode} · {folder.excludePatterns.length ? `排除 ${folder.excludePatterns.length} 条规则` : '无排除规则'} · {folder.lastScannedAt ? `上次扫描 ${folder.lastScannedAt.slice(0, 19).replace('T', ' ')}` : '尚未扫描'}</Typography></Box><StatusBadge label={folder.enabled ? '启用' : '停用'} tone={folder.enabled ? 'success' : 'neutral'}/>
-        </Box>)}</Stack>
       </CardContent></Card>
     })}</Stack> : <EmptyState title="没有媒体库" description="新建媒体库并添加至少一个绝对路径来源文件夹，即可开始扫描。"/>)}
     <LibraryEditor editor={editor} busy={busy} setEditor={setEditor} updateEditor={updateEditor} updateFolder={updateFolder} save={save}/>
@@ -113,9 +110,11 @@ export default function LibrariesPage() {
 function normalizeLibraryInput(input: LibraryInput): LibraryInput {
   const name = input.name.trim()
   if (!name) throw new Error('媒体库名称不能为空。')
-  const folders = input.folders
+      const folders = input.folders.slice(0, maxSourceFolders)
     .map(folder => ({
       ...folder,
+      enabled: true,
+      scanMode: 'normal' as const,
       path: folder.path.trim(),
       excludePatterns: (folder.excludePatterns || []).map(pattern => pattern.trim()).filter(Boolean),
     }))
@@ -131,6 +130,17 @@ function normalizeLibraryInput(input: LibraryInput): LibraryInput {
 }
 
 function LibraryEditor({ editor, busy, setEditor, updateEditor, updateFolder, save }: { editor?: { id?: number; value: LibraryInput }; busy: boolean; setEditor: (value?: { id?: number; value: LibraryInput }) => void; updateEditor: (value: Partial<LibraryInput>) => void; updateFolder: (index: number, value: Partial<LibraryFolderInput>) => void; save: () => void }) {
+  const chooseFolder = async (index?: number) => {
+    if (!editor) return
+    if (index === undefined && editor.value.folders.length >= maxSourceFolders) {
+      window.alert('一个媒体库最多只能添加 3 个来源文件夹。')
+      return
+    }
+    const selected = await invoke<string | null>('choose_directory')
+    if (!selected) return
+    if (index === undefined) updateEditor({ folders: [...editor.value.folders, { ...blankFolder(), path: selected }] })
+    else updateFolder(index, { path: selected })
+  }
   return <Dialog open={Boolean(editor)} onClose={busy ? undefined : () => setEditor(undefined)} fullWidth maxWidth="md">
     <DialogTitle>{editor?.id ? '编辑媒体库' : '新建媒体库'}</DialogTitle>
     {editor && <DialogContent dividers><Stack spacing={2}>
@@ -140,14 +150,15 @@ function LibraryEditor({ editor, busy, setEditor, updateEditor, updateFolder, sa
       <Typography variant="h6">来源文件夹</Typography>
       {editor.value.folders.map((folder, index) => <Card key={index} variant="outlined" sx={{ p: 2 }}><Stack spacing={1.5}>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(0,1fr) 150px auto' }, gap: 1.5 }}>
-          <TextField label="绝对路径" value={folder.path} onChange={event => updateFolder(index, { path: event.target.value })} placeholder="D:\Media" required/>
-          <TextField select label="扫描模式" value={folder.scanMode} onChange={event => updateFolder(index, { scanMode: event.target.value as LibraryFolderInput['scanMode'] })}><MenuItem value="normal">普通</MenuItem><MenuItem value="watch">监控</MenuItem><MenuItem value="manual">仅手动</MenuItem></TextField>
+          <TextField label="来源文件夹" value={folder.path} slotProps={{ input: { readOnly: true } }} placeholder="点击浏览选择文件夹" required/>
+          <Button variant="outlined" onClick={() => void chooseFolder(index)}>浏览...</Button>
           <Tooltip title="删除来源"><span><IconButton aria-label="删除来源文件夹" color="error" disabled={editor.value.folders.length === 1} onClick={() => updateEditor({ folders: editor.value.folders.filter((_, folderIndex) => folderIndex !== index) })}><DeleteOutlineRoundedIcon/></IconButton></span></Tooltip>
         </Box>
         <Autocomplete multiple freeSolo options={[]} value={folder.excludePatterns} onChange={(_, value) => updateFolder(index, { excludePatterns: value })} renderInput={(params) => <TextField {...params} label="排除规则" helperText="例如 sample*、*.txt 或 trailers/*"/>}/>
-        <Stack direction="row" spacing={2}><FormControlLabel control={<Checkbox checked={folder.enabled} onChange={event => updateFolder(index, { enabled: event.target.checked })}/>} label="启用来源"/><FormControlLabel control={<Checkbox checked={folder.includeSubfolders} onChange={event => updateFolder(index, { includeSubfolders: event.target.checked })}/>} label="包含子目录"/></Stack>
+        <FormControlLabel control={<Checkbox checked={folder.includeSubfolders} onChange={event => updateFolder(index, { includeSubfolders: event.target.checked })}/>} label="包含子目录"/>
       </Stack></Card>)}
-      <Button variant="outlined" startIcon={<PlaylistAddRoundedIcon/>} onClick={() => updateEditor({ folders: [...editor.value.folders, blankFolder()] })}>添加来源文件夹</Button>
+      <Button variant="outlined" startIcon={<PlaylistAddRoundedIcon/>} disabled={editor.value.folders.length >= maxSourceFolders} onClick={() => void chooseFolder()}>添加来源</Button>
+      {editor.value.folders.length >= maxSourceFolders && <Alert severity="info">一个媒体库最多只能添加 3 个来源文件夹。</Alert>}
     </Stack></DialogContent>}
     <DialogActions><Button onClick={() => setEditor(undefined)} disabled={busy}>取消</Button><Button variant="contained" onClick={() => void save()} disabled={busy}>{busy ? '保存中…' : '保存'}</Button></DialogActions>
   </Dialog>

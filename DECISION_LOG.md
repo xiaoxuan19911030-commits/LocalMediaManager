@@ -1419,3 +1419,53 @@ DECISION_LOG.md（索引）
 **好处：** 文件不膨胀 · 单决策 Git Diff · AI 按需读一条 · 修改不牵动全书
 
 详见 **PROJECT.md §24.4** · **§25 Definition of Done ⑥**
+
+---
+
+### DEC-018: Release Polish V1 Settings And Navigation
+
+| Field | Value |
+|------|-----|
+| **Decision ID** | DEC-018 |
+| **Module** | Settings / Navigation / Release |
+| **Sprint** | Release Polish V1 |
+| **Date** | 2026-07-20 |
+| **Status** | Accepted |
+
+#### Decision
+
+Settings must expose only user-facing configuration. The final 0.6.0 Settings sections are 常规, 外观, 搜索与筛选, 元数据, 插件中心, 媒体资源, 快捷键, 数据与备份, 关于.
+
+Plugin Center moves into Settings. MetaTube provider configuration and FFmpeg tool detection belong there. NFO no longer has a standalone Settings page or user toggle because NFO output is fixed metadata behavior.
+
+Duplicate Movies remains a dedicated navigation entry. Organizer and Batch Organizer are removed as standalone navigation concepts; future batch management belongs in MovieWall batch actions.
+
+#### Prohibited
+
+- Do not reintroduce standalone Settings pages for 扫描和导入 or NFO.
+- Do not expose internal paths, Commit, Bridge implementation details, legacy keys, or developer field names to ordinary users.
+- Do not add separate Organizer or Batch Organizer navigation entries.
+
+---
+
+### DEC-019: Trunk-Based Development And Release Tags
+
+| Field | Value |
+|------|-----|
+| **Decision ID** | DEC-019 |
+| **Module** | Git / Release |
+| **Sprint** | 0.6.0 |
+| **Date** | 2026-07-20 |
+| **Status** | Accepted |
+
+#### Decision
+
+Starting with 0.6.0, Local Media Manager uses trunk-based development. `main` is the only long-lived development branch. Temporary branches are allowed only for high-risk work and must be merged, verified, and deleted promptly.
+
+Official version recovery uses Git release tags. Every stable release must update the single product version, update the changelog, commit, create an immutable tag such as `v0.6.0`, and push commits plus tags.
+
+#### Prohibited
+
+- Do not keep long-lived `feature/*`, `ui/*`, `migration/*`, `temp/*`, `debug/*`, `test/*`, `experiment/*`, `sprint/*`, or rollback branches after their work is merged and verified.
+- Do not delete release tags.
+- Do not use rollback branches as the long-term release restore mechanism.

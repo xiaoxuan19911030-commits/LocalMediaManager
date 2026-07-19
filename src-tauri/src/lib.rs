@@ -60,6 +60,31 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     Ok(if selected.is_empty() { None } else { Some(selected) })
 }
 
+#[tauri::command]
+fn choose_file() -> Result<Option<String>, String> {
+    let script = r#"
+Add-Type -AssemblyName System.Windows.Forms
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Filter = 'Local Media Manager backup (*.zip)|*.zip|All files (*.*)|*.*'
+$dialog.Multiselect = $false
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+    Write-Output $dialog.FileName
+}
+"#;
+    let mut command = Command::new("powershell.exe");
+    command.args(["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
+    let output = command.output().map_err(|error| format!("文件选择器启动失败：{error}"))?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if detail.is_empty() { "文件选择器已取消或启动失败。".to_string() } else { detail });
+    }
+    let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(if selected.is_empty() { None } else { Some(selected) })
+}
+
 fn bridge_candidates(app: &tauri::App) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(path) = std::env::var_os("LMM_BRIDGE_PATH") {
@@ -127,11 +152,11 @@ fn bridge_port_is_in_use() -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![bridge_session_token, close_local_media_manager, hide_main_window, show_main_window, choose_directory])
+        .invoke_handler(tauri::generate_handler![bridge_session_token, close_local_media_manager, hide_main_window, show_main_window, choose_directory, choose_file])
         .setup(|app| {
             let token = Uuid::new_v4().simple().to_string();
             let bridge_already_running = bridge_port_is_in_use();
-            let log_dir = app.path().app_log_dir()?;
+            let log_dir = PathBuf::from(r"D:\Local Media Manager Next Data\logs");
             if !bridge_already_running {
                 if let Some(path) = migration_candidates(app).into_iter().find(|path| path.is_file()) {
                     let mut command = Command::new(path);

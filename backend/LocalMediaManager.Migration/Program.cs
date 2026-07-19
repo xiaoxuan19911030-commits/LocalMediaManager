@@ -1,7 +1,8 @@
 using Microsoft.Data.Sqlite;
 using System.Text.Json;
 
-string legacyRoot = Environment.GetEnvironmentVariable("LMM_LEGACY_ROOT") ?? @"D:\Jvedio\Jvedio5.0";
+string dataRoot = Environment.GetEnvironmentVariable("LMM_NEXT_DATA_ROOT") ?? @"D:\Local Media Manager Next Data";
+string legacyRoot = Environment.GetEnvironmentVariable("LMM_LEGACY_ROOT") ?? dataRoot;
 string userRoot = Path.Combine(legacyRoot, "data", Environment.UserName);
 string businessDb = Environment.GetEnvironmentVariable("LMM_LEGACY_DATABASE_PATH") ?? Path.Combine(userRoot, "app_datas.sqlite");
 string configDb = Environment.GetEnvironmentVariable("LMM_LEGACY_CONFIG_DATABASE_PATH") ?? Path.Combine(userRoot, "app_configs.sqlite");
@@ -10,8 +11,7 @@ string command = args.FirstOrDefault()?.ToLowerInvariant() ?? "analyze";
 
 if (command == "migrate") {
     bool confirmSwitch = args.Contains("--confirm-switch", StringComparer.OrdinalIgnoreCase);
-    string imageRoot = Environment.GetEnvironmentVariable("LMM_IMAGE_ROOT") ?? @"Z:\bcbcbcbc\ca-ES\JVDIO";
-    string dataRoot = Environment.GetEnvironmentVariable("LMM_NEXT_DATA_ROOT") ?? @"D:\Local Media Manager Next Data";
+    string imageRoot = Environment.GetEnvironmentVariable("LMM_IMAGE_ROOT") ?? Path.Combine(dataRoot, "MediaStorage");
     try {
         MigrationReport migration = await MigrationRunner.RunAsync(businessDb, configDb, imageRoot, dataRoot, confirmSwitch);
         Console.WriteLine(JsonSerializer.Serialize(migration, new JsonSerializerOptions { WriteIndented = true }));
@@ -22,7 +22,7 @@ if (command == "migrate") {
         Directory.CreateDirectory(reportDirectory);
         string officialDatabase = Path.Combine(dataRoot, "data", "LocalMediaManager.db");
         var failure = new {
-            ToolVersion = "0.4.3",
+            ToolVersion = "0.6.0",
             Status = "Failed",
             FailedAt = DateTimeOffset.Now,
             LegacyBusinessDatabase = businessDb,
@@ -43,7 +43,6 @@ if (command == "migrate") {
 }
 if (command == "upgrade") {
     bool confirm = args.Contains("--confirm", StringComparer.OrdinalIgnoreCase);
-    string dataRoot = Environment.GetEnvironmentVariable("LMM_NEXT_DATA_ROOT") ?? @"D:\Local Media Manager Next Data";
     DatabaseUpgradeReport upgrade = await DatabaseUpgradeRunner.UpgradeAsync(dataRoot, confirm);
     Console.WriteLine(JsonSerializer.Serialize(upgrade, new JsonSerializerOptions { WriteIndented = true }));
     return upgrade.Status == "Completed" ? 0 : 3;
@@ -55,7 +54,7 @@ if (command != "analyze") {
 
 Directory.CreateDirectory(output);
 var report = new LegacyAnalysisReport(
-    ToolVersion: "0.4.3",
+    ToolVersion: "0.6.0",
     GeneratedAt: DateTimeOffset.Now,
     Databases: [await AnalyzeAsync("business", businessDb), await AnalyzeAsync("configuration", configDb)]);
 

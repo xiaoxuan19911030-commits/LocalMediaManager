@@ -1,11 +1,13 @@
 import BackupRoundedIcon from '@mui/icons-material/BackupRounded'
+import CloudDownloadRoundedIcon from '@mui/icons-material/CloudDownloadRounded'
+import CloudOffRoundedIcon from '@mui/icons-material/CloudOffRounded'
 import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded'
+import ExtensionRoundedIcon from '@mui/icons-material/ExtensionRounded'
 import FolderRoundedIcon from '@mui/icons-material/FolderRounded'
 import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded'
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
 import RestoreRoundedIcon from '@mui/icons-material/RestoreRounded'
-import SettingsBackupRestoreRoundedIcon from '@mui/icons-material/SettingsBackupRestoreRounded'
-import UploadFileRoundedIcon from '@mui/icons-material/UploadFileRounded'
+import VerifiedRoundedIcon from '@mui/icons-material/VerifiedRounded'
 import { Alert, Box, Button, ButtonBase, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, FormControlLabel, List, ListItemButton, ListItemText, MenuItem, Paper, Snackbar, Stack, Switch, TextField, Typography } from '@mui/material'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -21,13 +23,12 @@ import { defaultMovieWallDisplay, normalizeMovieWallDisplay } from '@/components
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
 import type { BridgeHealth, TaskItem } from '@/types/media'
-import type { BackupValidation, DataSafetyOverview, DiagnosticCheck, LogCleanupPreview, LogCleanupResult, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, NfoSettings, PlaybackSettings, RatingRetentionSettings, ScanSettings, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult } from '@/types/settings'
+import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegToolStatus, LogCleanupPreview, LogCleanupResult, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, PlaybackSettings, RatingRetentionSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 
 const categories = [
-  ['general', '常规'], ['library', '媒体库'], ['scan', '扫描与导入'], ['metadata', '元数据与同步'],
-  ['images', '图片与缓存'], ['mediaStorage', '媒体存储'], ['playback', '播放器'], ['search', '搜索与筛选'], ['shortcuts', '快捷键'],
-  ['appearance', '外观'], ['data', '数据与备份'], ['logs', '日志与诊断'], ['about', '关于'],
+  ['general', '常规'], ['appearance', '外观'], ['search', '搜索与筛选'], ['metadata', '元数据'],
+  ['plugins', '插件中心'], ['mediaStorage', '媒体资源'], ['shortcuts', '快捷键'], ['data', '数据与备份'], ['about', '关于'],
 ] as const
 
 type Category = (typeof categories)[number][0]
@@ -37,6 +38,7 @@ const size = (bytes?: number) => bytes ? `${(bytes / 1024 / 1024).toFixed(1)} MB
 const stable = (value: unknown) => JSON.stringify(value)
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 const mediaStorageFallbackNoticeKey = 'lmm.mediaStorageFallbackNotice.v1'
+const pluginDisplayName = (id: string) => ({ private: 'Private', bus: 'BUS', javbus: 'JavBus' }[id.toLowerCase()] || id || '兼容服务')
 
 async function confirmExitIfTasksRunning() {
   try {
@@ -67,8 +69,6 @@ export default function SettingsPage() {
   const [backupPath, setBackupPath] = useState('')
   const [restoreMode, setRestoreMode] = useState('all')
   const [backupValidation, setBackupValidation] = useState<BackupValidation>()
-  const [importJson, setImportJson] = useState('')
-  const [importPreview, setImportPreview] = useState<SettingsImportPreview>()
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -188,7 +188,7 @@ export default function SettingsPage() {
       }
       if (!mediaStorageError && message.includes('MetaTube')) setCategory('metadata')
       else if (!mediaStorageError && message.includes('NFO')) setCategory('metadata')
-      else if (!mediaStorageError && message.includes('播放器')) setCategory('playback')
+      else if (!mediaStorageError && message.includes('播放器')) setCategory('general')
       return false
     } finally {
       setBusy(false)
@@ -218,11 +218,6 @@ export default function SettingsPage() {
     await load()
   }, '更新检查完成')
   const testMetaTube = () => draft && run(async () => { const result = await bridge.testMetaTube(draft.metaTube); if (!result.success) throw new Error(result.message); setNotice(`${result.message}（${result.elapsedMilliseconds} ms）`) }, 'MetaTube 连接正常')
-  const previewImport = () => {
-    try { bridge.previewSettingsImport(JSON.parse(importJson)).then(setImportPreview).catch((reason: Error) => setError(reason.message)) }
-    catch (reason) { setError((reason as Error).message) }
-  }
-
   const restoreDefaultsToDraft = () => {
     if (!defaults) return
     setDraft(clone(defaults))
@@ -266,10 +261,10 @@ export default function SettingsPage() {
   }
 
   if (!snapshot || !overview || !draft || !original || !defaults) {
-    return <WorkspacePage title="Settings Center" description="设置与数据安全中心" error={error} loading={!error}/>
+    return <WorkspacePage title="设置" description="设置与数据安全中心" error={error} loading={!error}/>
   }
 
-  return <WorkspacePage title="Settings Center" description="统一管理设置、数据安全、备份恢复、缓存维护、日志诊断与任务相关入口。" error={error}
+  return <WorkspacePage title="设置" description="统一管理常规、外观、搜索、元数据、插件、媒体资源、快捷键、数据备份和关于信息。" error={error}
     primaryActions={[refreshAction(() => void load())]}>
     <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '230px minmax(0,1fr)' }, gap: 2, pb: 10 }}>
       <Paper variant="outlined" sx={{ borderRadius: 3, p: 1, alignSelf: 'start', position: { lg: 'sticky' }, top: 16 }}>
@@ -285,20 +280,16 @@ export default function SettingsPage() {
           </Stack>
         </Paper>
         {category === 'general' && <GeneralSection snapshot={snapshot} system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
-        {category === 'library' && <LibrarySection onOpen={() => navigate('/libraries')}/>}
-        {category === 'scan' && <ScanSection scan={draft.scan} setScan={(value) => updateDraft('scan', value)}/>}
-        {category === 'metadata' && <MetadataSection metaTube={draft.metaTube} setMetaTube={(value) => updateDraft('metaTube', value)} nfo={draft.nfo} setNfo={(value) => updateDraft('nfo', value)} busy={busy} testMetaTube={testMetaTube}/>}
-        {category === 'images' && <ImagesSection cachePreview={cachePreview} setCachePreview={setCachePreview} onClean={() => setConfirm('cache')} onThumbs={() => setConfirm('thumbs')}/>}
+        {category === 'metadata' && <MetadataSection/>}
+        {category === 'plugins' && <PluginsSection snapshot={snapshot} metaTube={draft.metaTube} setMetaTube={(value) => updateDraft('metaTube', value)} busy={busy} testMetaTube={testMetaTube} setNotice={setNotice}/>}
         {category === 'mediaStorage' && <MediaStorageSection mediaStorage={draft.mediaStorage} defaults={defaults.mediaStorage} setMediaStorage={(value) => updateDraft('mediaStorage', value)} setNotice={setNotice}/>}
-        {category === 'playback' && <PlaybackSection playback={draft.playback} setPlayback={(value) => updateDraft('playback', value)}/>}
-        {category === 'search' && <PlannedSection labels={['默认搜索范围', '默认排序', '默认卡片/列表模式', '保存页面筛选状态']}/>}
+        {category === 'search' && <SearchSection search={draft.search} setSearch={(value) => updateDraft('search', value)}/>}
         {category === 'shortcuts' && <ShortcutSection system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
         {category === 'appearance' && <Stack spacing={2}>
           <AppearanceSection mode={draft.appearance.themeMode} setMode={(value) => updateDraft('appearance', { themeMode: value })}/>
           <MovieWallSection value={normalizeMovieWallDisplay(draft.movieWallDisplay ?? defaultMovieWallDisplay)} setValue={(value) => updateDraft('movieWallDisplay', normalizeMovieWallDisplay(value))}/>
         </Stack>}
-        {category === 'data' && <DataSection overview={overview} ratingRetention={draft.ratingRetention} setRatingRetention={(value) => updateDraft('ratingRetention', value)} backupPath={backupPath} setBackupPath={setBackupPath} restoreMode={restoreMode} setRestoreMode={setRestoreMode} validation={backupValidation} setValidation={setBackupValidation} importJson={importJson} setImportJson={setImportJson} importPreview={importPreview} previewImport={previewImport} onBackup={() => setConfirm('backup')} onRestore={() => setConfirm('restore')}/>}
-        {category === 'logs' && <LogsSection system={draft.system} setSystem={(value) => updateDraft('system', value)} diagnostics={diagnostics} logPreview={logPreview} includeAll={logIncludeAll} setIncludeAll={setLogIncludeAll} runDiagnostics={() => bridge.settingsDiagnostics().then(setDiagnostics).catch((reason: Error) => setError(reason.message))} previewLogs={() => void previewLogs()}/>}
+        {category === 'data' && <DataSection overview={overview} ratingRetention={draft.ratingRetention} setRatingRetention={(value) => updateDraft('ratingRetention', value)} dataBackup={draft.dataBackup} setDataBackup={(value) => updateDraft('dataBackup', value)} backupPath={backupPath} setBackupPath={setBackupPath} restoreMode={restoreMode} setRestoreMode={setRestoreMode} validation={backupValidation} setValidation={setBackupValidation} setNotice={setNotice} onBackup={() => setConfirm('backup')} onRestore={() => setConfirm('restore')}/>}
         {category === 'about' && <AboutSection overview={overview} health={health} system={draft.system} setSystem={(value) => updateDraft('system', value)} updateResult={updateResult} checkUpdates={checkUpdates}/>}
       </Stack>
     </Box>
@@ -358,7 +349,6 @@ export default function SettingsPage() {
 
 function GeneralSection({ snapshot, system, setSystem }: { snapshot: SettingsSnapshot; system: SystemSettings; setSystem: (value: SystemSettings) => void }) {
   return <Stack spacing={2}>
-    <SurfaceSection title="常规状态" description="统一设置服务读取结果。"><Stack spacing={1}><StatusBadge tone="success" label={`${snapshot.mappedCount} 个已映射设置`}/><StatusBadge tone={snapshot.errors.length ? 'warning' : 'success'} label={`${snapshot.errors.length} 个读取问题`}/><Typography variant="body2" color="text.secondary">读取时间：{new Date(snapshot.readAt).toLocaleString()}</Typography></Stack></SurfaceSection>
     <SurfaceSection title="系统" description="应用界面语言与窗口关闭行为。语言设置只影响 Local Media Manager 界面，不影响刮削、元数据或字幕语言。">
       <Stack spacing={1.5}>
         <TextField select size="small" label="应用语言" value={system.language} onChange={event => setSystem({ ...system, language: event.target.value as SystemSettings['language'] })}>
@@ -376,11 +366,72 @@ function GeneralSection({ snapshot, system, setSystem }: { snapshot: SettingsSna
     </SurfaceSection>
   </Stack>
 }
-function LibrarySection({ onOpen }: { onOpen: () => void }) {
-  return <SurfaceSection title="媒体库设置" description="媒体库 CRUD 复用现有安全页面；删除只删除配置，不删除磁盘文件。"><Button variant="contained" startIcon={<FolderRoundedIcon/>} onClick={onOpen}>打开媒体库管理</Button></SurfaceSection>
+function MetadataSection() {
+  return <Stack spacing={2}>
+    <SurfaceSection title="同步行为" description="元数据由 MetaTube、NFO 和同步流程统一维护，普通设置页不暴露内部字段。">
+      <Stack spacing={1}>
+        <StatusBadge tone="info" label="同步元数据：只补缺"/>
+        <StatusBadge tone="warning" label="重新刮削：覆盖刮削元数据和刮削资源"/>
+        <StatusBadge tone="success" label="收藏、评分、自定义标签、播放记录受保护"/>
+        <Typography variant="body2" color="text.secondary">NFO 固定生成独立 .nfo 文件；若元数据错误，请重新刮削或重新导入 NFO。</Typography>
+      </Stack>
+    </SurfaceSection>
+  </Stack>
 }
-function MetadataSection({ metaTube, setMetaTube, nfo, setNfo, testMetaTube, busy }: { metaTube: MetaTubeSettings; setMetaTube: (v: MetaTubeSettings) => void; nfo: NfoSettings; setNfo: (v: NfoSettings) => void; testMetaTube: () => void; busy: boolean }) {
-  return <Stack spacing={2}><SurfaceSection title="MetaTube Provider" description="现有 MetaTube 同步设置，非破坏性写入。"><Stack spacing={1.5}><FormControlLabel control={<Switch checked={metaTube.enabled} onChange={event => setMetaTube({ ...metaTube, enabled: event.target.checked })}/>} label="启用 MetaTube"/><TextField label="服务地址" size="small" value={metaTube.baseUrl} onChange={event => setMetaTube({ ...metaTube, baseUrl: event.target.value })}/><TextField type="number" label="请求超时（秒）" size="small" value={metaTube.timeoutSeconds} onChange={event => setMetaTube({ ...metaTube, timeoutSeconds: Number(event.target.value) || 30 })}/><Button disabled={busy} variant="outlined" onClick={testMetaTube}>测试连接</Button></Stack></SurfaceSection><SurfaceSection title="NFO" description="导入只补空字段；导出遵守锁定与冲突策略。"><Stack spacing={1.5}><TextField size="small" label="NFO 输出目录" value={nfo.outputDirectory} onChange={event => setNfo({ ...nfo, outputDirectory: event.target.value })}/><FormControlLabel control={<Switch checked={nfo.exportPolicy === 'SeparateFile'} onChange={event => setNfo({ ...nfo, exportPolicy: event.target.checked ? 'SeparateFile' : 'SkipExisting' })}/>} label="冲突时另存为 .lmm.nfo"/><FormControlLabel control={<Switch checked={nfo.includeImages} onChange={event => setNfo({ ...nfo, includeImages: event.target.checked })}/>} label="导出图片引用"/></Stack></SurfaceSection></Stack>
+
+function PluginsSection({ snapshot, metaTube, setMetaTube, testMetaTube, busy, setNotice }: {
+  snapshot: SettingsSnapshot
+  metaTube: MetaTubeSettings
+  setMetaTube: (v: MetaTubeSettings) => void
+  testMetaTube: () => void
+  busy: boolean
+  setNotice: (value: string) => void
+}) {
+  const [ffmpeg, setFfmpeg] = useState<FfmpegToolStatus>()
+  const [ffmpegError, setFfmpegError] = useState('')
+  const refreshFfmpeg = () => bridge.ffmpegStatus().then(setFfmpeg).catch((reason: Error) => setFfmpegError(reason.message))
+  useEffect(() => { void refreshFfmpeg() }, [])
+  const groups = [...new Set(snapshot.servers.map(item => item.pluginId || 'legacy'))]
+    .map(id => ({ id, servers: snapshot.servers.filter(item => (item.pluginId || 'legacy') === id) }))
+  return <Stack spacing={2}>
+    <SurfaceSection title="MetaTube" description="插件中心负责元数据服务的启用、地址、API 与连接测试。">
+      <Stack spacing={1.25}>
+        <FormControlLabel control={<Switch checked={metaTube.enabled} onChange={event => setMetaTube({ ...metaTube, enabled: event.target.checked })}/>} label="启用 MetaTube"/>
+        <TextField label="服务地址" size="small" value={metaTube.baseUrl} onChange={event => setMetaTube({ ...metaTube, baseUrl: event.target.value })}/>
+        <TextField type="number" label="请求超时（秒）" size="small" value={metaTube.timeoutSeconds} onChange={event => setMetaTube({ ...metaTube, timeoutSeconds: Number(event.target.value) || 30 })}/>
+        <FormControlLabel control={<Switch checked={metaTube.downloadImages} onChange={event => setMetaTube({ ...metaTube, downloadImages: event.target.checked })}/>} label="同步图片资源"/>
+        <Button disabled={busy} variant="outlined" onClick={testMetaTube}>测试连接</Button>
+      </Stack>
+    </SurfaceSection>
+    <SurfaceSection title="FFmpeg 截图工具" description="用于截图、缩略图、预览图、GIF 和视频信息读取；软件默认不内置。">
+      <Stack spacing={1.25}>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+          {ffmpeg?.found ? <VerifiedRoundedIcon color="success"/> : <CloudOffRoundedIcon color="disabled"/>}
+          <StatusBadge tone={ffmpeg?.found ? 'success' : 'warning'} label={ffmpeg?.found ? '已检测到' : '未检测到'}/>
+          {ffmpeg?.version && <Chip size="small" label={ffmpeg.version}/>}
+          {ffmpeg?.probeVersion && <Chip size="small" label={ffmpeg.probeVersion}/>}
+        </Stack>
+        <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{ffmpeg?.message || ffmpegError || '正在检测 FFmpeg...'}</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>请将 ffmpeg.exe 与 ffprobe.exe 复制到：{ffmpeg?.pluginDirectory || 'plugins\\ffmpeg'}。升级软件不会删除该目录。</Typography>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+          <Button variant="outlined" startIcon={<FolderRoundedIcon/>} onClick={() => ffmpeg && bridge.openDirectory(ffmpeg.pluginDirectory).then(result => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))}>打开插件目录</Button>
+          <Button variant="outlined" startIcon={<CloudDownloadRoundedIcon/>} onClick={() => window.open('https://www.gyan.dev/ffmpeg/builds/', '_blank')}>下载</Button>
+          <Button variant="outlined" startIcon={<RefreshRoundedIcon/>} onClick={refreshFfmpeg}>刷新检测</Button>
+        </Stack>
+      </Stack>
+    </SurfaceSection>
+    <SurfaceSection title="兼容 Provider" description="旧配置中可识别的元数据服务。">
+      {groups.length ? <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 1 }}>
+        {groups.map(group => <Card key={group.id} variant="outlined"><CardContent sx={{ py: 1.25, '&:last-child': { pb: 1.25 } }}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+            <ExtensionRoundedIcon color="primary"/>
+            <Box sx={{ minWidth: 0, flex: 1 }}><Typography sx={{ fontWeight: 850 }}>{pluginDisplayName(group.id)}</Typography><Typography variant="caption" color="text.secondary">{group.servers.length} 个服务地址</Typography></Box>
+            <StatusBadge tone={group.servers.some(server => server.enabled) ? 'success' : 'neutral'} label={group.servers.some(server => server.enabled) ? '已启用' : '未启用'}/>
+          </Stack>
+        </CardContent></Card>)}
+      </Box> : <Alert severity="info">当前没有兼容 Provider 配置。</Alert>}
+    </SurfaceSection>
+  </Stack>
 }
 function ImagesSection({ cachePreview, setCachePreview, onClean, onThumbs }: { cachePreview?: ImageCachePreview; setCachePreview: (v: ImageCachePreview) => void; onClean: () => void; onThumbs: () => void }) {
   return <SurfaceSection title="图片与缓存" description="清理只影响 .lmm-cache 中可重建缩略图，不删除源图。"><Stack spacing={1.5}>{cachePreview && <Alert severity="warning">预计可清理 {cachePreview.entries} 条，{size(cachePreview.bytes)}，缺失记录 {cachePreview.missingEntries} 条。</Alert>}<Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}><Button variant="outlined" onClick={() => bridge.imageCachePreview().then(setCachePreview)}>检查缓存</Button><Button color="error" variant="outlined" disabled={!cachePreview} onClick={onClean}>清理缓存</Button><Button variant="outlined" onClick={onThumbs}>重建 Thumbnail</Button></Stack></Stack></SurfaceSection>
@@ -408,7 +459,6 @@ function MediaStorageSection({ mediaStorage, defaults, setMediaStorage, setNotic
     ['gifDirectory', 'GIF 目录'],
     ['nfoDirectory', 'NFO 目录'],
   ]
-  const previewRows = buildMediaStoragePreview(mediaStorage)
   return <Stack spacing={2}>
     {mediaStorage.usingFallbackDefault && <Alert severity="info">检测到默认数据目录不可写，当前默认使用“我的文档\Local Media Manager\MediaStorage”。</Alert>}
     <SurfaceSection title="媒体资源根目录" description="用于保存海报、缩略图、背景图、预览图、截图、GIF 和 NFO。修改后不会自动移动现有文件。">
@@ -426,16 +476,6 @@ function MediaStorageSection({ mediaStorage, defaults, setMediaStorage, setNotic
         {rows.map(([key, label]) => <TextField key={key} size="small" label={label} value={mediaStorage[key]} onChange={event => update(key, event.target.value)} />)}
       </Stack>
     </SurfaceSection>
-    <SurfaceSection title="文件命名规则" description="本轮只支持 {MovieCode} 和 {MovieTitle}，默认仅使用 {MovieCode}。">
-      <Stack spacing={1.5}>
-        <TextField size="small" label="影片资源文件夹规则" value={mediaStorage.movieFolderTemplate} onChange={event => update('movieFolderTemplate', event.target.value)} />
-        <TextField size="small" label="文件名规则" value={mediaStorage.fileNameTemplate} onChange={event => update('fileNameTemplate', event.target.value)} />
-        <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: 'action.hover' }}>
-          <Typography sx={{ fontWeight: 800, mb: 1 }}>路径预览</Typography>
-          <Stack spacing={0.75}>{previewRows.map(row => <Typography key={row.label} variant="body2" sx={{ overflowWrap: 'anywhere' }}><Box component="span" sx={{ fontWeight: 750 }}>{row.label}：</Box>{row.path}</Typography>)}</Stack>
-        </Paper>
-      </Stack>
-    </SurfaceSection>
   </Stack>
 }
 function PlaybackSection({ playback, setPlayback }: { playback: PlaybackSettings; setPlayback: (v: PlaybackSettings) => void }) {
@@ -451,11 +491,16 @@ function MovieWallSection({ value, setValue }: { value: MovieWallDisplaySettings
     { key: 'landscape', label: '横版海报', description: '显示横幅大图', width: 140, height: 78 },
     { key: 'portrait', label: '竖版海报', description: '显示竖向封面图', width: 66, height: 96 },
   ]
+  const imageSources: { key: MovieWallDisplaySettings['wallImageSource']; label: string }[] = [
+    { key: 'poster', label: '海报' },
+    { key: 'thumbnail', label: '缩略图' },
+    { key: 'fanart', label: '背景图' },
+  ]
   return <SurfaceSection title="影片墙显示" description="统一调整影片墙卡片密度和海报比例，所有复用 MovieWall 的页面同步生效。">
-    <Stack spacing={3}>
+    <Stack spacing={2}>
       <Box>
         <Typography sx={{ fontWeight: 850, mb: 0.5 }}>影片卡片大小</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>影响卡片视图的海报尺寸和每页可见密度；不会改变当前搜索、筛选、排序或页码。</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>影响卡片视图的海报尺寸和每页可见密度。</Typography>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' }, gap: 1.5 }}>
           {sizes.map(option => <VisualOptionCard key={option.key} selected={value.posterSize === option.key} label={option.label} onClick={() => setValue({ ...value, posterSize: option.key })}>
             <PreviewRail><PreviewPoster width={option.width} height={option.height}/></PreviewRail>
@@ -464,14 +509,26 @@ function MovieWallSection({ value, setValue }: { value: MovieWallDisplaySettings
       </Box>
       <Box>
         <Typography sx={{ fontWeight: 850, mb: 0.5 }}>海报方向</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>只影响卡片视图；列表视图保持现有布局。</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>只影响卡片视图；列表视图保持现有布局。</Typography>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, gap: 1.5 }}>
           {orientations.map(option => <VisualOptionCard key={option.key} selected={value.posterOrientation === option.key} label={option.label} description={option.description} onClick={() => setValue({ ...value, posterOrientation: option.key })}>
             <PreviewRail><PreviewPoster width={option.width} height={option.height}/></PreviewRail>
           </VisualOptionCard>)}
         </Box>
       </Box>
-      <Typography variant="body2" color="text.secondary">默认值：竖版海报 / 中。点击“保存设置”后持久化，重启后恢复。</Typography>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3,minmax(0,1fr))' }, gap: 1.5 }}>
+        <TextField select size="small" label="展示墙图片来源" value={value.wallImageSource} onChange={event => setValue({ ...value, wallImageSource: event.target.value as MovieWallDisplaySettings['wallImageSource'] })}>
+          {imageSources.map(option => <MenuItem key={option.key} value={option.key}>{option.label}</MenuItem>)}
+        </TextField>
+        <TextField select size="small" label="详情页图片来源" value={value.detailImageSource} onChange={event => setValue({ ...value, detailImageSource: event.target.value as MovieWallDisplaySettings['detailImageSource'] })}>
+          {imageSources.map(option => <MenuItem key={option.key} value={option.key}>{option.label}</MenuItem>)}
+        </TextField>
+        <TextField select size="small" label="默认视图" value={value.defaultViewMode} onChange={event => setValue({ ...value, defaultViewMode: event.target.value as MovieWallDisplaySettings['defaultViewMode'] })}>
+          <MenuItem value="grid">卡片</MenuItem>
+          <MenuItem value="list">列表</MenuItem>
+        </TextField>
+      </Box>
+      <Typography variant="body2" color="text.secondary">默认值：展示墙海报、详情页背景图、卡片视图。</Typography>
     </Stack>
   </SurfaceSection>
 }
@@ -480,7 +537,7 @@ function VisualOptionCard({ selected, label, description, onClick, children }: {
   return <ButtonBase onClick={onClick} sx={{ display: 'block', width: '100%', textAlign: 'inherit', borderRadius: 2 }}>
     <Paper variant="outlined" sx={{
       p: 1.5,
-      minHeight: 150,
+      minHeight: 124,
       borderRadius: 2,
       borderColor: selected ? 'primary.main' : 'divider',
       bgcolor: selected ? 'primary.main' : 'background.paper',
@@ -521,8 +578,24 @@ function ScanSection({ scan, setScan }: { scan: ScanSettings; setScan: (value: S
     </Stack>
   </SurfaceSection>
 }
-function PlannedSection({ labels }: { labels: string[] }) {
-  return <SurfaceSection title="规划项" description="这些偏好暂未形成正式设置；不会显示旧版内部配置字段。"><Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>{labels.map(label => <Chip key={label} label={label} variant="outlined"/>)}<StatusBadge tone="neutral" label="未启用"/></Stack></SurfaceSection>
+function SearchSection({ search, setSearch }: { search: SearchSettings; setSearch: (value: SearchSettings) => void }) {
+  return <Stack spacing={2}>
+    <SurfaceSection title="搜索与筛选" description="只保留影响影片墙初始体验的正式设置。">
+      <Stack spacing={1.5}>
+        <TextField select size="small" label="默认排序" value={search.defaultSort} onChange={event => setSearch({ ...search, defaultSort: event.target.value })}>
+          <MenuItem value="newest">最近加入</MenuItem>
+          <MenuItem value="oldest">最早加入</MenuItem>
+          <MenuItem value="release">发行日期</MenuItem>
+          <MenuItem value="rating">评分优先</MenuItem>
+          <MenuItem value="code">番号</MenuItem>
+          <MenuItem value="title">标题</MenuItem>
+        </TextField>
+        <TextField select size="small" label="默认筛选" value={search.defaultFilter} onChange={() => setSearch({ ...search, defaultFilter: 'all' })}>
+          <MenuItem value="all">全部</MenuItem>
+        </TextField>
+      </Stack>
+    </SurfaceSection>
+  </Stack>
 }
 function ShortcutSection({ system, setSystem }: { system: SystemSettings; setSystem: (value: SystemSettings) => void }) {
   const keys = [
@@ -545,8 +618,70 @@ function ShortcutSection({ system, setSystem }: { system: SystemSettings; setSys
 function AppearanceSection({ mode, setMode }: { mode: 'light' | 'dark'; setMode: (value: 'light' | 'dark') => void }) {
   return <SurfaceSection title="外观" description="主题预览立即生效，点击保存设置后持久化。"><Stack direction="row" spacing={1}><Button variant={mode === 'light' ? 'contained' : 'outlined'} startIcon={<LightModeRoundedIcon/>} onClick={() => setMode('light')}>浅色</Button><Button variant={mode === 'dark' ? 'contained' : 'outlined'} startIcon={<DarkModeRoundedIcon/>} onClick={() => setMode('dark')}>深色</Button></Stack></SurfaceSection>
 }
-function DataSection({ overview, ratingRetention, setRatingRetention, backupPath, setBackupPath, restoreMode, setRestoreMode, validation, setValidation, importJson, setImportJson, importPreview, previewImport, onBackup, onRestore }: { overview: DataSafetyOverview; ratingRetention: RatingRetentionSettings; setRatingRetention: (v: RatingRetentionSettings) => void; backupPath: string; setBackupPath: (v: string) => void; restoreMode: string; setRestoreMode: (v: string) => void; validation?: BackupValidation; setValidation: (v: BackupValidation) => void; importJson: string; setImportJson: (v: string) => void; importPreview?: SettingsImportPreview; previewImport: () => void; onBackup: () => void; onRestore: () => void }) {
-  return <Stack spacing={2}><SurfaceSection title="数据位置" description="不会把原始影片和原始图片打包进备份。"><Stack spacing={1}><Typography>数据库：{overview.databasePath}</Typography><Typography>数据库大小：{size(overview.databaseBytes)}</Typography><Typography>配置库：{overview.configDatabasePath}</Typography><Typography>备份目录：{overview.backupDirectory}</Typography><Typography>缓存目录：{overview.cacheDirectory}</Typography><Typography>日志目录：{overview.logDirectory}</Typography><Typography>最近备份：{overview.lastBackupAt ? new Date(overview.lastBackupAt).toLocaleString() : '暂无'}</Typography></Stack></SurfaceSection><SurfaceSection title="评分保留" description="删除已评分影片时保存番号与评分；以后重新导入相同番号时自动恢复。"><FormControlLabel control={<Switch checked={ratingRetention.enabled} onChange={event => setRatingRetention({ enabled: event.target.checked })}/>} label="自动保留并恢复已删除影片评分"/></SurfaceSection><SurfaceSection title="备份与恢复计划" description="恢复采用计划文件，避免运行中热替换数据库。"><Stack spacing={1.5}><Button variant="contained" startIcon={<BackupRoundedIcon/>} onClick={onBackup}>创建手动备份</Button><TextField size="small" label="备份路径" value={backupPath} onChange={event => setBackupPath(event.target.value)}/><Stack direction="row" spacing={1}><Button variant="outlined" onClick={() => bridge.validateBackup(backupPath).then(setValidation)}>校验备份</Button><TextField select size="small" label="恢复模式" value={restoreMode} onChange={event => setRestoreMode(event.target.value)} sx={{ width: 150 }}><MenuItem value="all">全部</MenuItem><MenuItem value="database">仅数据库</MenuItem><MenuItem value="settings">仅设置</MenuItem></TextField><Button color="error" variant="outlined" startIcon={<RestoreRoundedIcon/>} disabled={!validation?.valid} onClick={onRestore}>创建恢复计划</Button></Stack>{validation && <Alert severity={validation.valid ? 'success' : 'error'}>{validation.valid ? '备份校验通过' : validation.errors.join('；')}</Alert>}</Stack></SurfaceSection><SurfaceSection title="配置导入导出" description="导出会剔除敏感字段；导入先预览差异，不直接覆盖。"><Stack spacing={1.5}><Button startIcon={<SettingsBackupRestoreRoundedIcon/>} onClick={() => bridge.exportSettings().then(result => setImportJson(JSON.stringify(result, null, 2)))}>导出当前设置</Button><TextField multiline minRows={6} label="导入 JSON / 导出预览" value={importJson} onChange={event => setImportJson(event.target.value)}/><Button startIcon={<UploadFileRoundedIcon/>} variant="outlined" onClick={previewImport}>预览导入差异</Button>{importPreview && <Alert severity={importPreview.valid ? 'info' : 'warning'}>{importPreview.valid ? `可识别 ${importPreview.changes.length} 项：${importPreview.categories.join('、')}` : importPreview.warnings.join('；')}</Alert>}</Stack></SurfaceSection></Stack>
+function DataSection({ overview, ratingRetention, setRatingRetention, dataBackup, setDataBackup, backupPath, setBackupPath, restoreMode, setRestoreMode, validation, setValidation, setNotice, onBackup, onRestore }: {
+  overview: DataSafetyOverview
+  ratingRetention: RatingRetentionSettings
+  setRatingRetention: (v: RatingRetentionSettings) => void
+  dataBackup: DataBackupSettings
+  setDataBackup: (v: DataBackupSettings) => void
+  backupPath: string
+  setBackupPath: (v: string) => void
+  restoreMode: string
+  setRestoreMode: (v: string) => void
+  validation?: BackupValidation
+  setValidation: (v?: BackupValidation) => void
+  setNotice: (v: string) => void
+  onBackup: () => void
+  onRestore: () => void
+}) {
+  const chooseBackup = async () => {
+    try {
+      const selected = await invoke<string | null>('choose_file')
+      if (!selected) return
+      setBackupPath(selected)
+      const result = await bridge.validateBackup(selected)
+      setValidation(result)
+    } catch (reason) {
+      setNotice((reason as Error).message)
+    }
+  }
+  return <Stack spacing={2}>
+    <SurfaceSection title="自动备份" description="软件退出时判断是否到期，到期后自动备份数据库与配置。">
+      <Stack spacing={1.5}>
+        <FormControlLabel control={<Switch checked={dataBackup.enabled} onChange={event => setDataBackup({ ...dataBackup, enabled: event.target.checked })}/>} label="启用自动备份"/>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2,minmax(0,1fr))' }, gap: 1.5 }}>
+          <TextField select size="small" label="备份频率" value={dataBackup.frequencyDays} onChange={event => setDataBackup({ ...dataBackup, frequencyDays: Number(event.target.value) as DataBackupSettings['frequencyDays'] })}>
+            <MenuItem value={1}>每天</MenuItem>
+            <MenuItem value={3}>每 3 天</MenuItem>
+            <MenuItem value={7}>每 7 天</MenuItem>
+          </TextField>
+          <TextField select size="small" label="保留数量" value={dataBackup.retentionCount} onChange={event => setDataBackup({ ...dataBackup, retentionCount: Number(event.target.value) as DataBackupSettings['retentionCount'] })}>
+            <MenuItem value={5}>5</MenuItem>
+            <MenuItem value={10}>10</MenuItem>
+            <MenuItem value={20}>20</MenuItem>
+          </TextField>
+        </Box>
+        <Typography variant="body2" color="text.secondary">最近备份：{overview.lastBackupAt ? new Date(overview.lastBackupAt).toLocaleString() : '暂无'}</Typography>
+      </Stack>
+    </SurfaceSection>
+    <SurfaceSection title="备份与恢复" description="立即备份会保存数据库和配置；恢复备份会先生成恢复计划，避免运行中替换数据库。">
+      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+        <Button variant="contained" startIcon={<BackupRoundedIcon/>} onClick={onBackup}>立即备份</Button>
+        <Button variant="outlined" onClick={chooseBackup}>选择备份文件</Button>
+        <TextField select size="small" label="恢复范围" value={restoreMode} onChange={event => setRestoreMode(event.target.value)} sx={{ width: 140 }}>
+          <MenuItem value="all">全部</MenuItem>
+          <MenuItem value="database">仅数据库</MenuItem>
+          <MenuItem value="settings">仅设置</MenuItem>
+        </TextField>
+        <Button color="error" variant="outlined" startIcon={<RestoreRoundedIcon/>} disabled={!validation?.valid} onClick={onRestore}>恢复备份</Button>
+      </Stack>
+      {backupPath && <Typography variant="body2" color="text.secondary" sx={{ mt: 1, overflowWrap: 'anywhere' }}>已选择：{backupPath}</Typography>}
+      {validation && <Alert severity={validation.valid ? 'success' : 'error'} sx={{ mt: 1 }}>{validation.valid ? '备份校验通过' : validation.errors.join('；')}</Alert>}
+    </SurfaceSection>
+    <SurfaceSection title="个人数据保护" description="评分和收藏属于用户个人数据，不会被重新刮削覆盖。">
+      <FormControlLabel control={<Switch checked={ratingRetention.enabled} onChange={event => setRatingRetention({ enabled: event.target.checked })}/>} label="自动保留并恢复已删除影片评分"/>
+    </SurfaceSection>
+  </Stack>
 }
 function LogsSection({ system, setSystem, diagnostics, logPreview, includeAll, setIncludeAll, runDiagnostics, previewLogs }: {
   system: SystemSettings
@@ -592,7 +727,7 @@ function AboutSection({ overview, health, system, setSystem, updateResult, check
   checkUpdates: () => void
 }) {
   return <Stack spacing={2}>
-    <SurfaceSection title="关于" description="本地优先、可维护的现代媒体管理工具。"><Stack spacing={1}><BrandMark/><Typography>Version: {buildInfo.version}</Typography><Typography>Commit: {buildInfo.commit}</Typography><Typography>Build: {buildInfo.buildTime}</Typography><Typography>Bridge: {health?.version ?? 'unknown'} · {health?.writeEnabled ? '写入已启用' : '只读或会话未启用'}</Typography><Typography color="text.secondary">数据目录：{overview.databasePath}</Typography><HealthMeter label="数据安全中心" value={100} detail="已启用" tone="success"/></Stack></SurfaceSection>
+    <SurfaceSection title="关于" description="本地优先、可维护的现代媒体管理工具。"><Stack spacing={1}><BrandMark/><Typography>软件版本：{buildInfo.version}</Typography><Typography>构建时间：{buildInfo.buildTime}</Typography><HealthMeter label="数据库状态" value={overview.databaseBytes > 0 ? 100 : 0} detail={health?.writeEnabled ? '正常' : '只读'} tone={health?.writeEnabled ? 'success' : 'warning'}/></Stack></SurfaceSection>
     <SurfaceSection title="检查更新" description="当前仅检查 GitHub Release 并打开官方下载页面，不执行自动下载安装。网络失败不会影响应用启动。">
       <Stack spacing={1.5}>
         <FormControlLabel control={<Switch checked={system.autoCheckUpdates} onChange={event => setSystem({ ...system, autoCheckUpdates: event.target.checked })}/>} label="启动后自动检查更新"/>

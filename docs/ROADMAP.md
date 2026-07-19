@@ -1,5 +1,31 @@
 # Local Media Manager Roadmap
 
+## Current Release
+
+- **Version:** 0.6.0
+- **Release:** Release Polish V1
+- **Branch policy:** Trunk-based development. `main` is the only long-lived development branch after this release.
+- **Restore policy:** Official version recovery uses immutable release tags, starting with `v0.6.0`; rollback branches are no longer long-term restore points.
+
+## 0.6.0 — Release Polish V1
+
+**Status:** Release candidate / verification in progress
+**Date:** 2026-07-20
+
+Scope:
+
+- Settings is reduced to 常规、外观、搜索与筛选、元数据、插件中心、媒体资源、快捷键、数据与备份、关于.
+- Plugin Center moves into Settings; FFmpeg becomes a system tool entry under Plugin Center.
+- NFO is no longer a visible configuration page. It remains fixed automatic metadata output behavior.
+- Appearance owns MovieWall/detail image source, card/list default view, poster direction, and poster size.
+- Search & Filter keeps only default sort and default filter.
+- Data & Backup keeps backup/restore and adds automatic backup on exit with frequency and retention.
+- Duplicate Movies stays as a dedicated navigation entry; Organizer/Batch Organizer navigation is removed.
+- Tags page 全部 summarizes 导演、标签、系列、厂商、自定义标签; each concrete category still uses its own source table.
+- Library pages hide repeated source folder details; library editing uses a folder picker, standard scanning, and a maximum of three source folders.
+
+After 0.6.0, development continues on `main` by default. Temporary branches are allowed only for high-risk work and must be merged, verified, and deleted promptly.
+
 > 本文档是版本范围的唯一正式入口。范围调整必须同时更新 Roadmap、TODO 和 Changelog；聊天中的临时想法未进入本文档前不视为正式版本承诺。
 
 ## 版本生命周期
@@ -186,9 +212,9 @@ Retained user-data features remain in scope: scoring, favorite, custom tags, act
 - 扩充自动化测试、安装升级和回滚测试
 - 建立性能基准、长期运行和故障恢复报告
 
-0.5.5 不引入新的大型产品功能；通过 LTS 验收后才允许开始 0.6.0 AI。
+0.5.5 不引入新的大型产品功能；Release Polish V1 已占用 0.6.0，真实 AI 继续后移。
 
-## 0.6.0 — AI
+## 0.7.0 — AI
 
 **状态：Future**
 
@@ -198,7 +224,7 @@ Retained user-data features remain in scope: scoring, favorite, custom tags, act
 - 建议预览、用户确认、应用日志
 - 不在首个 AI 版本开放无人值守批处理
 
-## 0.7.0 — NAS
+## 0.8.0 — NAS
 
 **状态：Future**
 
@@ -206,14 +232,14 @@ Retained user-data features remain in scope: scoring, favorite, custom tags, act
 - 路径映射、断线恢复和只读扫描
 - 凭据安全存储
 
-## 0.8.0 — Plugin Marketplace
+## 0.9.0 — Plugin Marketplace
 
 **状态：Future**
 
 - 插件清单、安装、启停、更新与隔离
 - 权限声明、兼容版本和故障恢复
 
-## 0.9.0 — Beta
+## 1.0.0 — Beta
 
 **状态：Future**
 

@@ -129,7 +129,7 @@ Acceptance: 发布验证记录或独立验收文档
 - 按严格门槛，只有完成 UI、Bridge、持久化、错误处理、自动化测试、人工烟测、Commit 和验收记录的条目才标记为“已完整迁移”；其余保持部分迁移或未迁移。
 - 0.4.1 优先完成 P0 用户状态、标签、评分恢复、演员关系、播放记录与 Tasks 写入基础。
 - 0.4.2 集中处理扫描导入、自动同步和 MetaTube 执行器；0.4.3 完成图片、NFO、文件整理和 MetaTube 真实批量验收。
-- 0.5.0 完成主要媒体管理功能等价；0.5.5 建立 LTS 稳定基线；0.6.0 才开始真实 AI Provider 接入。
+- 0.6.0 完成 Release Polish V1；真实 AI Provider 接入不得早于 0.7.0。
 
 ## 0.5.0-02 Evidence Note
 
@@ -202,6 +202,16 @@ Acceptance: 发布验证记录或独立验收文档
 - Reason: image resources are owned by MetaTube scraping, NFO import, and metadata sync; adding manual SetAs would create a duplicate image ownership path.
 - Retained image abilities: 图片查看, 图片放大, 人工裁切, 图片刷新, and 刮削 / NFO / MetaTube 重新下载图片.
 - Code/database: no code, database, schema, or image workflow change is required for this product decision.
+
+## 2026-07-20 Release Polish V1 Evidence Note
+
+- Version 0.6.0 trims Settings and navigation while preserving retained Feature Parity behavior.
+- Plugin Center is now a Settings section. FFmpeg detection/configuration is tracked there as a system tool.
+- NFO remains retained fixed behavior, but its standalone Settings page and user toggle are removed from the ordinary UI.
+- Image SetAs remains Product Cancelled. MovieWall/detail image source selection is a display preference, not a manual SetAs workflow.
+- Duplicate Movies is the retained cleanup entry. Organizer/Batch Organizer standalone navigation is removed; future bulk operations belong in MovieWall batch actions.
+- Tags page 全部 now summarizes 导演、标签、系列、厂商、自定义标签 totals; concrete clicks still inject each entity's own MovieWall default condition.
+- Trunk-based development starts at 0.6.0; release recovery uses Git tags such as `v0.6.0`.
 
 ## 2026-07-19 Copy Movie Information Evidence Note
 

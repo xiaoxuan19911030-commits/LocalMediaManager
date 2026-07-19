@@ -142,23 +142,27 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
             assets.LongCount(item => item.Status == "Failed"), assets);
     }
 
-    public async Task<ImageAssetContent?> ResolveMovieAsync(long movieId, string variant,
+    public Task<ImageAssetContent?> ResolveMovieAsync(long movieId, string variant, CancellationToken cancellationToken = default) =>
+        ResolveMovieAsync(movieId, variant, null, cancellationToken);
+
+    public async Task<ImageAssetContent?> ResolveMovieAsync(long movieId, string variant, string? source,
         CancellationToken cancellationToken = default)
     {
         string normalized = variant.Equals("thumbnail", StringComparison.OrdinalIgnoreCase) ? "thumbnail" : "original";
+        string normalizedSource = NormalizeSource(source);
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, cancellationToken);
         if (normalized == "thumbnail") {
             ImageAssetContent? cached = await ReadCachedAsync(connection, movieId, cancellationToken);
-            if (cached is not null) return cached;
+            if (cached is not null && normalizedSource == "poster") return cached;
         }
 
-        (long Id, string Path, string? ContentType)? source = await ReadBestSourceAsync(connection, movieId, normalized, cancellationToken);
-        if (source is null) return null;
-        ImageValidationResult validation = await ImageFileValidator.ValidateAsync(source.Value.Path, null, cancellationToken);
-        await UpdateValidationAsync(connection, source.Value.Id, validation, cancellationToken);
+        (long Id, string Path, string? ContentType)? image = await ReadBestSourceAsync(connection, movieId, normalized, normalizedSource, cancellationToken);
+        if (image is null) return null;
+        ImageValidationResult validation = await ImageFileValidator.ValidateAsync(image.Value.Path, null, cancellationToken);
+        await UpdateValidationAsync(connection, image.Value.Id, validation, cancellationToken);
         if (!validation.Valid) return null;
-        if (normalized == "original") return new(source.Value.Path, validation.ContentType!);
-        return await CreateThumbnailAsync(connection, movieId, source.Value.Id, source.Value.Path, validation, cancellationToken);
+        if (normalized == "original") return new(image.Value.Path, validation.ContentType!);
+        return await CreateThumbnailAsync(connection, movieId, image.Value.Id, image.Value.Path, validation, cancellationToken);
     }
 
     public async Task<ImageAssetContent?> ResolveAssetAsync(long imageId, CancellationToken cancellationToken = default)
@@ -332,25 +336,39 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
     }
 
     private static async Task<(long Id, string Path, string? ContentType)?> ReadBestSourceAsync(SqliteConnection connection,
-        long movieId, string variant, CancellationToken token)
+        long movieId, string variant, string source, CancellationToken token)
     {
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
             SELECT Id,FilePath,ContentType FROM Images
              WHERE MovieId=$movie AND FilePath IS NOT NULL
                AND (IsDerived=0 OR ($variant='thumbnail' AND ImageType='GeneratedCard'))
-             ORDER BY IsLocked DESC,IsPrimary DESC,
-               CASE WHEN $variant='thumbnail' THEN
+               AND ($source<>'fanart' OR ImageType IN ('Fanart','BigPic'))
+               AND ($source<>'poster' OR ImageType IN ('Poster','GeneratedCard','Thumbnail'))
+             ORDER BY
+               CASE WHEN $source='thumbnail' THEN
                  CASE ImageType WHEN 'Thumbnail' THEN 0 WHEN 'GeneratedCard' THEN 1 WHEN 'Poster' THEN 2 WHEN 'Fanart' THEN 3 ELSE 9 END
+               WHEN $source='fanart' THEN
+                 CASE ImageType WHEN 'Fanart' THEN 0 WHEN 'BigPic' THEN 1 ELSE 9 END
                ELSE
-                 CASE ImageType WHEN 'BigPic' THEN 0 WHEN 'Fanart' THEN 1 WHEN 'Poster' THEN 2 WHEN 'GeneratedCard' THEN 3 ELSE 9 END
-               END, Id LIMIT 1
+                 CASE WHEN $variant='thumbnail' THEN
+                   CASE ImageType WHEN 'GeneratedCard' THEN 0 WHEN 'Poster' THEN 1 WHEN 'Thumbnail' THEN 2 ELSE 9 END
+                 ELSE
+                   CASE ImageType WHEN 'Poster' THEN 0 WHEN 'GeneratedCard' THEN 1 WHEN 'Thumbnail' THEN 2 ELSE 9 END
+                 END
+               END, IsLocked DESC,IsPrimary DESC, Id LIMIT 1
             """;
-        command.Parameters.AddWithValue("$movie", movieId); command.Parameters.AddWithValue("$variant", variant);
+        command.Parameters.AddWithValue("$movie", movieId); command.Parameters.AddWithValue("$variant", variant); command.Parameters.AddWithValue("$source", source);
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(token);
         if (!await reader.ReadAsync(token)) return null;
         return (reader.GetInt64(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2));
     }
+
+    private static string NormalizeSource(string? source) => source?.Trim().ToLowerInvariant() switch {
+        "thumbnail" => "thumbnail",
+        "fanart" or "background" or "backdrop" => "fanart",
+        _ => "poster"
+    };
 
     private async Task<ImageAssetContent> CreateThumbnailAsync(SqliteConnection connection, long movieId, long sourceId,
         string sourcePath, ImageValidationResult source, CancellationToken token)

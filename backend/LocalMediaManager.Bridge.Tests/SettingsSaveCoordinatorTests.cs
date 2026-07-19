@@ -65,7 +65,9 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
             RatingRetention = new(false),
             Appearance = new("light"),
             MediaStorage = current.MediaStorage with { PostersDirectory = "Covers" },
-            MovieWallDisplay = new("landscape", "large"),
+            MovieWallDisplay = new("landscape", "large", "fanart", "thumbnail", "list"),
+            Search = new("rating", "all"),
+            DataBackup = new(true, 7, 20),
             Scan = new(128),
         };
 
@@ -78,16 +80,26 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
         Assert.Contains("appearance", result.ChangedFields);
         Assert.Contains("mediaStorage", result.ChangedFields);
         Assert.Contains("movieWallDisplay", result.ChangedFields);
+        Assert.Contains("search", result.ChangedFields);
+        Assert.Contains("dataBackup", result.ChangedFields);
         Assert.Contains("scan", result.ChangedFields);
         Assert.False(saved.MetaTube.Enabled);
         Assert.Equal(180, saved.MetaTube.TimeoutSeconds);
         Assert.Equal(Path.GetFullPath(nfoDir), saved.Nfo.OutputDirectory);
-        Assert.False(saved.Nfo.IncludeImages);
+        Assert.True(saved.MetaTube.WriteNfo);
+        Assert.True(saved.Nfo.IncludeImages);
         Assert.False(saved.RatingRetention.Enabled);
         Assert.Equal("light", saved.Appearance.ThemeMode);
         Assert.Equal("Covers", saved.MediaStorage.PostersDirectory);
         Assert.Equal("landscape", saved.MovieWallDisplay.PosterOrientation);
         Assert.Equal("large", saved.MovieWallDisplay.PosterSize);
+        Assert.Equal("fanart", saved.MovieWallDisplay.WallImageSource);
+        Assert.Equal("thumbnail", saved.MovieWallDisplay.DetailImageSource);
+        Assert.Equal("list", saved.MovieWallDisplay.DefaultViewMode);
+        Assert.Equal("rating", saved.Search.DefaultSort);
+        Assert.Equal("all", saved.Search.DefaultFilter);
+        Assert.Equal(7, saved.DataBackup.FrequencyDays);
+        Assert.Equal(20, saved.DataBackup.RetentionCount);
         Assert.Equal(128, saved.Scan.MinFileSizeMb);
     }
 

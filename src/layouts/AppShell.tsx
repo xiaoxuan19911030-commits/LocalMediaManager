@@ -1,4 +1,3 @@
-import ExtensionRoundedIcon from '@mui/icons-material/ExtensionRounded'
 import FavoriteRoundedIcon from '@mui/icons-material/FavoriteRounded'
 import FolderRoundedIcon from '@mui/icons-material/FolderRounded'
 import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded'
@@ -11,8 +10,8 @@ import TaskRoundedIcon from '@mui/icons-material/TaskRounded'
 import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded'
 import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded'
 import TroubleshootRoundedIcon from '@mui/icons-material/TroubleshootRounded'
-import DriveFileMoveRoundedIcon from '@mui/icons-material/DriveFileMoveRounded'
 import BuildRoundedIcon from '@mui/icons-material/BuildRounded'
+import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
 import { Alert, Box, Divider, InputAdornment, List, ListItemButton, ListItemIcon, ListItemText, Paper, TextField, Typography } from '@mui/material'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
@@ -26,7 +25,7 @@ import type { BridgeHealth, TaskItem } from '@/types/media'
 
 type NavItem = readonly [string,string,ReactNode]
 const primary:NavItem[]=[['首页','/',<HomeRoundedIcon/>],['影片墙','/media',<MovieRoundedIcon/>],['媒体库','/libraries',<FolderRoundedIcon/>],['标签','/tags',<LocalOfferRoundedIcon/>],['收藏','/favorites',<FavoriteRoundedIcon/>],['最近播放','/history',<HistoryRoundedIcon/>]]
-const utility:NavItem[]=[['元数据中心','/metadata',<FactCheckRoundedIcon/>],['诊断中心','/diagnostics',<TroubleshootRoundedIcon/>],['整理工具','/organizer',<DriveFileMoveRoundedIcon/>],['Maintenance','/maintenance',<BuildRoundedIcon/>],['任务中心','/tasks',<TaskRoundedIcon/>],['插件中心','/plugins',<ExtensionRoundedIcon/>],['AI Provider','/ai-providers',<AutoAwesomeRoundedIcon/>],['设置','/settings',<SettingsRoundedIcon/>]]
+const utility:NavItem[]=[['元数据中心','/metadata',<FactCheckRoundedIcon/>],['诊断中心','/diagnostics',<TroubleshootRoundedIcon/>],['重复影片','/duplicates',<ContentCopyRoundedIcon/>],['Maintenance','/maintenance',<BuildRoundedIcon/>],['任务中心','/tasks',<TaskRoundedIcon/>],['AI Provider','/ai-providers',<AutoAwesomeRoundedIcon/>],['设置','/settings',<SettingsRoundedIcon/>]]
 
 export default function AppShell(){
   const navigate=useNavigate();const{pathname}=useLocation();const[search,setSearch]=useState('');const[bridgeOnline,setBridgeOnline]=useState<boolean>();const[health,setHealth]=useState<BridgeHealth>()
@@ -34,7 +33,7 @@ export default function AppShell(){
   useEffect(()=>{let active=true;const check=()=>bridge.health().then((value)=>{if(active){setHealth(value);setBridgeOnline(true)}}).catch(()=>{if(active)setBridgeOnline(false)});void check();const timer=window.setInterval(check,5000);return()=>{active=false;window.clearInterval(timer)}},[])
   useEffect(()=>{pathRef.current=pathname},[pathname])
   useEffect(()=>{bridge.allSettings().then(settings=>{shortcutsEnabled.current=settings.system?.globalShortcutsEnabled??true;closeBehavior.current=settings.system?.closeBehavior??'exit';if(settings.system?.startMinimizedToTray&&!minimizedAtStartup.current){minimizedAtStartup.current=true;void invoke('hide_main_window')}}).catch(()=>undefined)},[])
-  useEffect(()=>{let unlistenClose:(()=>void)|undefined;let unlistenTray:(()=>void)|undefined;const quit=async()=>{if(await confirmExitIfTasksRunning())void invoke('close_local_media_manager')};getCurrentWindow().onCloseRequested(async event=>{if(pathRef.current.startsWith('/settings'))return;event.preventDefault();if(closeBehavior.current==='minimizeToTray'){void invoke('hide_main_window');return}await quit()}).then(value=>{unlistenClose=value}).catch(()=>undefined);listen('lmm-tray-quit',()=>{void quit()}).then(value=>{unlistenTray=value}).catch(()=>undefined);return()=>{unlistenClose?.();unlistenTray?.()}},[])
+  useEffect(()=>{let unlistenClose:(()=>void)|undefined;let unlistenTray:(()=>void)|undefined;const quit=async()=>{if(await confirmExitIfTasksRunning()){await runAutoBackupIfDue();void invoke('close_local_media_manager')}};getCurrentWindow().onCloseRequested(async event=>{if(pathRef.current.startsWith('/settings'))return;event.preventDefault();if(closeBehavior.current==='minimizeToTray'){void invoke('hide_main_window');return}await quit()}).then(value=>{unlistenClose=value}).catch(()=>undefined);listen('lmm-tray-quit',()=>{void quit()}).then(value=>{unlistenTray=value}).catch(()=>undefined);return()=>{unlistenClose?.();unlistenTray?.()}},[])
   useEffect(()=>{const handle=(event:KeyboardEvent)=>{if(!shortcutsEnabled.current||event.defaultPrevented||!event.ctrlKey||event.key.toLowerCase()!=='f')return;if(isShortcutBlocked(event))return;event.preventDefault();searchRef.current?.focus();searchRef.current?.select()};window.addEventListener('keydown',handle);return()=>window.removeEventListener('keydown',handle)},[])
   const submit=(event:FormEvent)=>{event.preventDefault();const value=search.trim();if(value)navigate(`/search?q=${encodeURIComponent(value)}`)}
   const nav=(items:NavItem[])=>items.map(([label,path,icon])=><ListItemButton key={path} selected={path==='/'?pathname===path:pathname.startsWith(path)} onClick={()=>navigate(path)} sx={{borderRadius:1.75,mb:.4}}><ListItemIcon sx={{minWidth:38}}>{icon}</ListItemIcon><ListItemText primary={label}/></ListItemButton>)
@@ -68,4 +67,18 @@ async function confirmExitIfTasksRunning() {
   }
   if (running.length === 0) return true
   return window.confirm(`仍有 ${running.length} 个任务未完成，退出后会中断当前任务。确定退出吗？`)
+}
+
+async function runAutoBackupIfDue() {
+  try {
+    const [settings, overview] = await Promise.all([bridge.allSettings(), bridge.dataSafetyOverview()])
+    if (!settings.dataBackup?.enabled) return
+    const last = overview.lastBackupAt ? new Date(overview.lastBackupAt).getTime() : 0
+    const interval = Math.max(1, settings.dataBackup.frequencyDays) * 24 * 60 * 60 * 1000
+    if (!last || Date.now() - last >= interval) {
+      await bridge.createBackup({ includeConfig: true, includeGeneratedCache: false })
+    }
+  } catch {
+    // 退出备份失败不能阻塞用户关闭应用；失败详情保留在 Bridge 日志中。
+  }
 }

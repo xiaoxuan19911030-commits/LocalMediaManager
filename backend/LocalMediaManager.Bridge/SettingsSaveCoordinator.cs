@@ -6,8 +6,11 @@ using Microsoft.Data.Sqlite;
 namespace LocalMediaManager.Bridge;
 
 public sealed record AppearanceSettingsDto(string ThemeMode);
-public sealed record MovieWallDisplaySettingsDto(string PosterOrientation, string PosterSize);
+public sealed record MovieWallDisplaySettingsDto(string PosterOrientation, string PosterSize,
+    string WallImageSource = "poster", string DetailImageSource = "fanart", string DefaultViewMode = "grid");
 public sealed record ScanSettingsDto(double MinFileSizeMb);
+public sealed record SearchSettingsDto(string DefaultSort, string DefaultFilter);
+public sealed record DataBackupSettingsDto(bool Enabled, int FrequencyDays, int RetentionCount);
 public sealed record SystemSettingsDto(string Language, string CloseBehavior, bool StartMinimizedToTray, int LogRetentionDays,
     bool GlobalShortcutsEnabled, bool AutoCheckUpdates, string? LastUpdateCheckAt = null);
 
@@ -33,6 +36,8 @@ public sealed record UnifiedSettingsDto(
     AppearanceSettingsDto Appearance,
     MediaStorageSettingsDto MediaStorage,
     MovieWallDisplaySettingsDto MovieWallDisplay,
+    SearchSettingsDto Search,
+    DataBackupSettingsDto DataBackup,
     ScanSettingsDto Scan,
     SystemSettingsDto System);
 
@@ -55,6 +60,8 @@ public sealed class SettingsSaveCoordinator(
         AppearanceSettingsDto appearance = await ReadAppearanceAsync(token);
         MovieWallDisplaySettingsDto movieWallDisplay = await ReadMovieWallDisplayAsync(token);
         MediaStorageSettingsDto mediaStorage = await ReadMediaStorageAsync(token);
+        SearchSettingsDto search = await ReadSearchAsync(token);
+        DataBackupSettingsDto dataBackup = await ReadDataBackupAsync(token);
         ScanSettingsDto scan = await ReadScanAsync(token);
         SystemSettingsDto system = await ReadSystemAsync(token);
         return new(
@@ -65,6 +72,8 @@ public sealed class SettingsSaveCoordinator(
             appearance,
             mediaStorage,
             movieWallDisplay,
+            search,
+            dataBackup,
             scan,
             system);
     }
@@ -97,6 +106,14 @@ public sealed class SettingsSaveCoordinator(
         await StoreAsync(connection, transaction, "appearance.themeMode", clean.Appearance.ThemeMode, "string", token);
         await StoreAsync(connection, transaction, "movieWall.posterOrientation", clean.MovieWallDisplay.PosterOrientation, "string", token);
         await StoreAsync(connection, transaction, "movieWall.posterSize", clean.MovieWallDisplay.PosterSize, "string", token);
+        await StoreAsync(connection, transaction, "movieWall.wallImageSource", clean.MovieWallDisplay.WallImageSource, "string", token);
+        await StoreAsync(connection, transaction, "movieWall.detailImageSource", clean.MovieWallDisplay.DetailImageSource, "string", token);
+        await StoreAsync(connection, transaction, "movieWall.defaultViewMode", clean.MovieWallDisplay.DefaultViewMode, "string", token);
+        await StoreAsync(connection, transaction, "search.defaultSort", clean.Search.DefaultSort, "string", token);
+        await StoreAsync(connection, transaction, "search.defaultFilter", clean.Search.DefaultFilter, "string", token);
+        await StoreAsync(connection, transaction, "dataBackup.enabled", clean.DataBackup.Enabled, "boolean", token);
+        await StoreAsync(connection, transaction, "dataBackup.frequencyDays", clean.DataBackup.FrequencyDays, "integer", token);
+        await StoreAsync(connection, transaction, "dataBackup.retentionCount", clean.DataBackup.RetentionCount, "integer", token);
         await StoreAsync(connection, transaction, "scan.minFileSizeMb", clean.Scan.MinFileSizeMb, "number", token);
         await StoreAsync(connection, transaction, "system.language", clean.System.Language, "string", token);
         await StoreAsync(connection, transaction, "system.closeBehavior", clean.System.CloseBehavior, "string", token);
@@ -143,14 +160,17 @@ public sealed class SettingsSaveCoordinator(
             {
                 BaseUrl = uri.ToString().Trim().TrimEnd('/') + "/",
                 TimeoutSeconds = Math.Clamp(input.MetaTube.TimeoutSeconds, 15, 180),
+                WriteNfo = true,
                 NonDestructive = true,
             },
-            new(nfoPolicy, nfoOutput, true, input.Nfo.IncludeImages),
+            new(nfoPolicy, nfoOutput, true, true),
             new(player, useSystemDefault),
             new(input.RatingRetention.Enabled),
             new(theme),
             mediaStorage,
-            new(posterOrientation, posterSize),
+            NormalizeMovieWallDisplay(new(posterOrientation, posterSize, movieWallInput.WallImageSource, movieWallInput.DetailImageSource, movieWallInput.DefaultViewMode)),
+            NormalizeSearch(input.Search),
+            NormalizeDataBackup(input.DataBackup),
             NormalizeScan(input.Scan),
             NormalizeSystem(input.System));
     }
@@ -183,8 +203,14 @@ public sealed class SettingsSaveCoordinator(
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadOnly, token);
         string orientation = SettingsDefaults.Unified.MovieWallDisplay.PosterOrientation;
         string size = SettingsDefaults.Unified.MovieWallDisplay.PosterSize;
+        string wallImageSource = SettingsDefaults.Unified.MovieWallDisplay.WallImageSource;
+        string detailImageSource = SettingsDefaults.Unified.MovieWallDisplay.DetailImageSource;
+        string defaultViewMode = SettingsDefaults.Unified.MovieWallDisplay.DefaultViewMode;
         string? rawOrientation = await ScalarTextAsync(connection, "SELECT ValueJson FROM AppSettings WHERE Key='movieWall.posterOrientation'", token);
         string? rawSize = await ScalarTextAsync(connection, "SELECT ValueJson FROM AppSettings WHERE Key='movieWall.posterSize'", token);
+        string? rawWallImageSource = await ScalarTextAsync(connection, "SELECT ValueJson FROM AppSettings WHERE Key='movieWall.wallImageSource'", token);
+        string? rawDetailImageSource = await ScalarTextAsync(connection, "SELECT ValueJson FROM AppSettings WHERE Key='movieWall.detailImageSource'", token);
+        string? rawDefaultViewMode = await ScalarTextAsync(connection, "SELECT ValueJson FROM AppSettings WHERE Key='movieWall.defaultViewMode'", token);
         if (!string.IsNullOrWhiteSpace(rawOrientation))
         {
             try { orientation = JsonSerializer.Deserialize<string>(rawOrientation) ?? orientation; }
@@ -195,9 +221,70 @@ public sealed class SettingsSaveCoordinator(
             try { size = JsonSerializer.Deserialize<string>(rawSize) ?? size; }
             catch (JsonException) { }
         }
-        orientation = string.Equals(orientation, "landscape", StringComparison.OrdinalIgnoreCase) ? "landscape" : "portrait";
-        size = size.ToLowerInvariant() is "small" or "large" ? size.ToLowerInvariant() : "medium";
-        return new(orientation, size);
+        if (!string.IsNullOrWhiteSpace(rawWallImageSource))
+        {
+            try { wallImageSource = JsonSerializer.Deserialize<string>(rawWallImageSource) ?? wallImageSource; }
+            catch (JsonException) { }
+        }
+        if (!string.IsNullOrWhiteSpace(rawDetailImageSource))
+        {
+            try { detailImageSource = JsonSerializer.Deserialize<string>(rawDetailImageSource) ?? detailImageSource; }
+            catch (JsonException) { }
+        }
+        if (!string.IsNullOrWhiteSpace(rawDefaultViewMode))
+        {
+            try { defaultViewMode = JsonSerializer.Deserialize<string>(rawDefaultViewMode) ?? defaultViewMode; }
+            catch (JsonException) { }
+        }
+        return NormalizeMovieWallDisplay(new(orientation, size, wallImageSource, detailImageSource, defaultViewMode));
+    }
+
+    private async Task<SearchSettingsDto> ReadSearchAsync(CancellationToken token)
+    {
+        await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadOnly, token);
+        string defaultSort = SettingsDefaults.Unified.Search.DefaultSort;
+        string defaultFilter = SettingsDefaults.Unified.Search.DefaultFilter;
+        string? rawSort = await ScalarTextAsync(connection, "SELECT ValueJson FROM AppSettings WHERE Key='search.defaultSort'", token);
+        string? rawFilter = await ScalarTextAsync(connection, "SELECT ValueJson FROM AppSettings WHERE Key='search.defaultFilter'", token);
+        if (!string.IsNullOrWhiteSpace(rawSort))
+        {
+            try { defaultSort = JsonSerializer.Deserialize<string>(rawSort) ?? defaultSort; }
+            catch (JsonException) { }
+        }
+        if (!string.IsNullOrWhiteSpace(rawFilter))
+        {
+            try { defaultFilter = JsonSerializer.Deserialize<string>(rawFilter) ?? defaultFilter; }
+            catch (JsonException) { }
+        }
+        return NormalizeSearch(new(defaultSort, defaultFilter));
+    }
+
+    private async Task<DataBackupSettingsDto> ReadDataBackupAsync(CancellationToken token)
+    {
+        await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadOnly, token);
+        DataBackupSettingsDto defaults = SettingsDefaults.Unified.DataBackup;
+        bool enabled = defaults.Enabled;
+        int frequencyDays = defaults.FrequencyDays;
+        int retentionCount = defaults.RetentionCount;
+        string? rawEnabled = await ScalarTextAsync(connection, "SELECT ValueJson FROM AppSettings WHERE Key='dataBackup.enabled'", token);
+        string? rawFrequency = await ScalarTextAsync(connection, "SELECT ValueJson FROM AppSettings WHERE Key='dataBackup.frequencyDays'", token);
+        string? rawRetention = await ScalarTextAsync(connection, "SELECT ValueJson FROM AppSettings WHERE Key='dataBackup.retentionCount'", token);
+        if (!string.IsNullOrWhiteSpace(rawEnabled))
+        {
+            try { enabled = JsonSerializer.Deserialize<bool>(rawEnabled); }
+            catch (JsonException) { }
+        }
+        if (!string.IsNullOrWhiteSpace(rawFrequency))
+        {
+            try { frequencyDays = JsonSerializer.Deserialize<int>(rawFrequency); }
+            catch (JsonException) { }
+        }
+        if (!string.IsNullOrWhiteSpace(rawRetention))
+        {
+            try { retentionCount = JsonSerializer.Deserialize<int>(rawRetention); }
+            catch (JsonException) { }
+        }
+        return NormalizeDataBackup(new(enabled, frequencyDays, retentionCount));
     }
 
     private async Task<ScanSettingsDto> ReadScanAsync(CancellationToken token)
@@ -258,6 +345,40 @@ public sealed class SettingsSaveCoordinator(
         string fileName = NormalizeTemplate(input.FileNameTemplate, "文件名规则");
         return new(root, directories[1], directories[2], directories[3], directories[4], directories[5], directories[0], directories[6], directories[7], movieFolder, fileName);
     }
+
+    private static MovieWallDisplaySettingsDto NormalizeMovieWallDisplay(MovieWallDisplaySettingsDto? input)
+    {
+        input ??= SettingsDefaults.Unified.MovieWallDisplay;
+        string orientation = string.Equals(input.PosterOrientation, "landscape", StringComparison.OrdinalIgnoreCase) ? "landscape" : "portrait";
+        string size = input.PosterSize?.ToLowerInvariant() is "small" or "large" ? input.PosterSize.ToLowerInvariant() : "medium";
+        string wallSource = NormalizeImageSource(input.WallImageSource, "poster");
+        string detailSource = NormalizeImageSource(input.DetailImageSource, "fanart");
+        string viewMode = string.Equals(input.DefaultViewMode, "list", StringComparison.OrdinalIgnoreCase) ? "list" : "grid";
+        return new(orientation, size, wallSource, detailSource, viewMode);
+    }
+
+    private static SearchSettingsDto NormalizeSearch(SearchSettingsDto? input)
+    {
+        input ??= SettingsDefaults.Unified.Search;
+        string sort = input.DefaultSort?.ToLowerInvariant() switch {
+            "code" or "title" or "release" or "rating" or "oldest" => input.DefaultSort.ToLowerInvariant(),
+            _ => "newest"
+        };
+        return new(sort, "all");
+    }
+
+    private static DataBackupSettingsDto NormalizeDataBackup(DataBackupSettingsDto? input)
+    {
+        input ??= SettingsDefaults.Unified.DataBackup;
+        int frequency = input.FrequencyDays is 1 or 7 ? input.FrequencyDays : 3;
+        int retention = input.RetentionCount is 5 or 20 ? input.RetentionCount : 10;
+        return new(input.Enabled, frequency, retention);
+    }
+
+    private static string NormalizeImageSource(string? value, string fallback) => value?.ToLowerInvariant() switch {
+        "poster" or "thumbnail" or "fanart" => value.ToLowerInvariant(),
+        _ => fallback
+    };
 
     private static string NormalizeMediaStorageRoot(string value, bool createMissingRoot)
     {
@@ -417,6 +538,8 @@ public sealed class SettingsSaveCoordinator(
         if (before.Appearance != after.Appearance) changed.Add("appearance");
         if (before.MediaStorage != after.MediaStorage) changed.Add("mediaStorage");
         if (before.MovieWallDisplay != after.MovieWallDisplay) changed.Add("movieWallDisplay");
+        if (before.Search != after.Search) changed.Add("search");
+        if (before.DataBackup != after.DataBackup) changed.Add("dataBackup");
         if (before.Scan != after.Scan) changed.Add("scan");
         if (before.System != after.System) changed.Add("system");
         return changed;
@@ -613,13 +736,15 @@ public static class SettingsDefaults
     public static UnifiedSettingsDto Unified => UnifiedForEnvironment(null, null);
 
     public static UnifiedSettingsDto UnifiedForEnvironment(string? installRoot, string? databasePath) => new(
-        new(true, "http://127.0.0.1:8080/", 30, true, false, true, true),
+        new(true, "http://127.0.0.1:8080/", 30, true, true, true, true),
         new("SkipExisting", "", true, true),
         new("", true),
         new(true),
         new("dark"),
         MediaStorageForEnvironment(installRoot, databasePath),
-        new("portrait", "medium"),
+        new("portrait", "medium", "poster", "fanart", "grid"),
+        new("newest", "all"),
+        new(true, 3, 10),
         new(0),
         new("system", "exit", false, 30, true, false, null));
 

@@ -187,7 +187,7 @@ export default function HomePage() {
             <ActionButton icon={<FolderRoundedIcon/>} label="扫描与管理媒体库" onClick={() => navigate('/libraries')}/>
             <ActionButton icon={<SyncRoundedIcon/>} label="同步与任务中心" onClick={() => navigate('/tasks')}/>
             <ActionButton icon={<BuildRoundedIcon/>} label="维护中心" onClick={() => navigate('/maintenance')}/>
-            <ActionButton icon={<DriveFileMoveRoundedIcon/>} label="整理工具" onClick={() => navigate('/organizer')}/>
+            <ActionButton icon={<DriveFileMoveRoundedIcon/>} label="重复影片" onClick={() => navigate('/duplicates')}/>
             <ActionButton icon={<SettingsRoundedIcon/>} label="设置" onClick={() => navigate('/settings')}/>
           </Box>
         </SurfaceSection>

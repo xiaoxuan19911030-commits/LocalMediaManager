@@ -1,4 +1,4 @@
-using LocalMediaManager.Bridge;
+﻿using LocalMediaManager.Bridge;
 using Microsoft.Data.Sqlite;
 using Xunit;
 
@@ -148,7 +148,7 @@ public sealed class SafeDeleteWorkflowTests : IAsyncLifetime
     [Fact]
     public void FfmpegLocatorUsesBundledBeforeConfiguredPath()
     {
-        string bundled = Path.Combine(root, "tools", "ffmpeg", "ffmpeg.exe");
+        string bundled = Path.Combine(root, "plugins", "ffmpeg", "ffmpeg.exe");
         Directory.CreateDirectory(Path.GetDirectoryName(bundled)!);
         File.WriteAllText(bundled, "");
         var locator = new FfmpegLocator(Database, root);
@@ -156,7 +156,7 @@ public sealed class SafeDeleteWorkflowTests : IAsyncLifetime
         FfmpegLookupResult result = locator.Locate();
 
         Assert.True(result.Found);
-        Assert.Equal("Bundled", result.Source);
+        Assert.Equal("插件目录", result.Source);
         Assert.Equal(bundled, result.Path);
     }
 

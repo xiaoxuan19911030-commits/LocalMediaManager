@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-20
+
+### Release Polish V1
+
+- Settings navigation is slimmed to 常规、外观、搜索与筛选、元数据、插件中心、媒体资源、快捷键、数据与备份、关于.
+- Plugin Center is moved from the left navigation into Settings, and FFmpeg is exposed there as a system tool with detection, version display, plugin directory access, download link, and refresh.
+- Removed ordinary-user Settings pages for 扫描和导入 and NFO. NFO generation is fixed product behavior and remains handled by scraping/NFO/metadata sync code, not by a visible toggle.
+- Appearance now owns MovieWall image source, detail image source, poster orientation, poster size, and default card/list view. User-facing image terms are 海报、缩略图、背景图.
+- Search & Filter settings now only keep default sort and default filter.
+- Data & Backup now keeps immediate backup and restore backup, and adds automatic backup on exit with frequency and retention settings.
+- About now shows only software version, build time, and database status; internal Commit, Bridge, and data directory details are no longer shown to ordinary users.
+- Duplicate Movies remains a dedicated navigation item. Organizer/Batch Organizer navigation is removed; future batch management belongs in MovieWall 批量操作.
+- Duplicate groups are more compact, keep recommendations are shown as small tags, and the page adds 删除所有未保留影片 via the existing Safe Delete confirmation flow.
+- Tags page 全部 now summarizes 导演、标签、系列、厂商、自定义标签 totals while each category keeps its own query semantics.
+- Library cards no longer repeat source folder lists; edit-library source folders use the Windows folder picker, use standard scan behavior, and are limited to three source folders.
+
+### Versioning
+
+- The official product version is 0.6.0 across package metadata, Tauri config, Bridge/Migration assemblies, runtime health/update checks, About, installer metadata, and documentation.
+- Development strategy changes to trunk-based development: `main` is the long-lived branch, official restore points are release tags such as `v0.6.0`.
+
 ### Product Decisions
 
 - Metadata Ownership Decision (DEC-013): LMM no longer plans a full Movie Editor or manual movie metadata editing. Movie metadata is owned by scraping, NFO import, and metadata sync; incorrect metadata should be fixed by re-scrape/re-sync/NFO re-import.

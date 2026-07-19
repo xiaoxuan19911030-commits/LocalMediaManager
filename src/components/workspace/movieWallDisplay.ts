@@ -1,14 +1,22 @@
 export type MovieWallPosterOrientation = 'portrait' | 'landscape'
 export type MovieWallPosterSize = 'small' | 'medium' | 'large'
+export type MovieImageSource = 'poster' | 'thumbnail' | 'fanart'
+export type MovieWallDefaultViewMode = 'grid' | 'list'
 
 export interface MovieWallDisplaySettings {
   posterOrientation: MovieWallPosterOrientation
   posterSize: MovieWallPosterSize
+  wallImageSource: MovieImageSource
+  detailImageSource: MovieImageSource
+  defaultViewMode: MovieWallDefaultViewMode
 }
 
 export const defaultMovieWallDisplay: MovieWallDisplaySettings = {
   posterOrientation: 'portrait',
   posterSize: 'medium',
+  wallImageSource: 'poster',
+  detailImageSource: 'fanart',
+  defaultViewMode: 'grid',
 }
 
 export const movieWallAspectRatio: Record<MovieWallPosterOrientation, string> = {
@@ -32,5 +40,8 @@ export const movieWallMinWidth: Record<MovieWallPosterOrientation, Record<MovieW
 export function normalizeMovieWallDisplay(value?: Partial<MovieWallDisplaySettings>): MovieWallDisplaySettings {
   const posterOrientation = value?.posterOrientation === 'landscape' ? 'landscape' : 'portrait'
   const posterSize = value?.posterSize === 'small' || value?.posterSize === 'large' ? value.posterSize : 'medium'
-  return { posterOrientation, posterSize }
+  const wallImageSource = value?.wallImageSource === 'thumbnail' || value?.wallImageSource === 'fanart' ? value.wallImageSource : 'poster'
+  const detailImageSource = value?.detailImageSource === 'poster' || value?.detailImageSource === 'thumbnail' ? value.detailImageSource : 'fanart'
+  const defaultViewMode = value?.defaultViewMode === 'list' ? 'list' : 'grid'
+  return { posterOrientation, posterSize, wallImageSource, detailImageSource, defaultViewMode }
 }

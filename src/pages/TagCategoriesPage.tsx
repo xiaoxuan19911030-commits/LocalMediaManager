@@ -19,6 +19,7 @@ const stateKey = 'lmm.tags.categoryPage'
 type CategoryKey = 'all' | 'directors' | 'genres' | 'series' | 'studios' | 'tags'
 type SortKey = 'count' | 'count-asc' | 'name' | 'name-desc'
 type EntityType = 'directors' | 'genres' | 'series' | 'studios' | 'tags'
+type DisplayEntityCard = EntityCard & { categoryKey?: CategoryKey }
 
 interface CategoryMeta {
   label: string
@@ -41,7 +42,6 @@ interface SavedState {
 }
 
 const categories: Record<CategoryKey, CategoryMeta> = {
-  // “全部”目前复用标签（Genre）数据，避免为异构实体新增复杂聚合 DTO。
   all: { label: '全部', apiType: 'genres', mediaParam: 'genreId', mediaNameParam: 'genreName', noun: '标签', icon: <CategoryRoundedIcon/> },
   directors: { label: '导演', apiType: 'directors', mediaParam: 'directorId', mediaNameParam: 'directorName', noun: '导演', icon: <GroupsRoundedIcon/> },
   genres: { label: '标签', apiType: 'genres', mediaParam: 'genreId', mediaNameParam: 'genreName', noun: '标签', icon: <CategoryRoundedIcon/> },
@@ -55,7 +55,7 @@ const readable = (value: string) => value && !value.includes('\uFFFD') ? value :
 export default function TagCategoriesPage() {
   const saved = useMemo(readSavedState, [])
   const navigate = useNavigate()
-  const [items, setItems] = useState<EntityCard[]>([])
+  const [items, setItems] = useState<DisplayEntityCard[]>([])
   const [total, setTotal] = useState(0)
   const [libraries, setLibraries] = useState<MediaLibrary[]>([])
   const [category, setCategory] = useState<CategoryKey>(saved.category ?? 'all')
@@ -73,6 +73,19 @@ export default function TagCategoriesPage() {
   const load = useCallback(() => {
     setLoading(true)
     setError('')
+    if (category === 'all') {
+      const keys: CategoryKey[] = ['directors', 'genres', 'series', 'studios', 'tags']
+      Promise.all(keys.map(key => bridge.entities(categories[key].apiType, query, sort, 500, 0, libraryId || undefined)
+        .then(result => ({ key, result }))))
+        .then(results => {
+          const merged = sortAllCategory(results.flatMap(({ key, result }) => result.items.map(item => ({ ...item, categoryKey: key }))), sort)
+          setTotal(results.reduce((sum, item) => sum + item.result.total, 0))
+          setItems(merged.slice((page - 1) * pageSize, page * pageSize))
+        })
+        .catch((reason: Error) => setError(reason.message))
+        .finally(() => setLoading(false))
+      return
+    }
     bridge.entities(meta.apiType, query, sort, pageSize, (page - 1) * pageSize, libraryId || undefined)
       .then((result) => { setItems(result.items); setTotal(result.total) })
       .catch((reason: Error) => setError(reason.message))
@@ -94,8 +107,9 @@ export default function TagCategoriesPage() {
   const selectCategory = (next: CategoryKey) => { setCategory(next); setPage(1) }
   const submit = (event: FormEvent) => { event.preventDefault(); setPage(1); setQuery(input.trim()) }
   const clearFilters = () => { setLibraryId(0); setCategory('all'); setSort('count'); setInput(''); setQuery(''); setPage(1) }
-  const open = (item: EntityCard) => {
-    const target = new URLSearchParams({ [meta.mediaParam]: String(item.id), [meta.mediaNameParam]: readable(item.name) })
+  const open = (item: DisplayEntityCard) => {
+    const itemMeta = categories[item.categoryKey ?? category]
+    const target = new URLSearchParams({ [itemMeta.mediaParam]: String(item.id), [itemMeta.mediaNameParam]: readable(item.name) })
     const library = libraries.find((value) => value.id === libraryId)
     if (library) {
       target.set('libraryId', String(library.id))
@@ -125,7 +139,7 @@ export default function TagCategoriesPage() {
   </Stack>
 
   const stats = <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
-    <StatusBadge tone="info" label={`${total} 个${meta.noun}`}/>
+    <StatusBadge tone="info" label={category === 'all' ? `${total} 个分类项` : `${total} 个${meta.noun}`}/>
     <StatusBadge tone={libraryId ? 'warning' : 'neutral'} label={libraries.find((library) => library.id === libraryId)?.name ?? '全部标准库'}/>
   </Stack>
 
@@ -136,10 +150,10 @@ export default function TagCategoriesPage() {
       {items.map((item) => <Card key={item.id} variant="outlined" sx={{ minWidth: 0 }}>
         <CardActionArea onClick={() => open(item)}>
           <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
-            <Box sx={{ width: 38, height: 38, flex: '0 0 auto', borderRadius: 1.5, bgcolor: 'action.hover', color: 'primary.main', display: 'grid', placeItems: 'center' }}>{meta.icon}</Box>
+            <Box sx={{ width: 38, height: 38, flex: '0 0 auto', borderRadius: 1.5, bgcolor: 'action.hover', color: 'primary.main', display: 'grid', placeItems: 'center' }}>{categories[item.categoryKey ?? category].icon}</Box>
             <Box sx={{ minWidth: 0, flex: 1 }}>
               <Typography sx={{ fontWeight: 850, overflowWrap: 'anywhere' }}>{readable(item.name)}</Typography>
-              <Typography variant="body2" color="text.secondary">{item.movieCount} 部影片</Typography>
+              <Typography variant="body2" color="text.secondary">{category === 'all' ? `${categories[item.categoryKey ?? category].noun} · ` : ''}{item.movieCount} 部影片</Typography>
             </Box>
           </CardContent>
         </CardActionArea>
@@ -147,6 +161,15 @@ export default function TagCategoriesPage() {
     </Box> : <EmptyState title="没有匹配内容" description="当前范围下没有可展示的分类项。"/>}
     {total > pageSize && <Stack sx={{ pt: 3, alignItems: 'center' }}><Pagination count={Math.ceil(total / pageSize)} page={page} onChange={(_, value) => setPage(value)} color="primary"/></Stack>}
   </WorkspacePage>
+}
+
+function sortAllCategory(items: DisplayEntityCard[], sort: SortKey) {
+  const byName = (a: DisplayEntityCard, b: DisplayEntityCard) => readable(a.name).localeCompare(readable(b.name), 'zh-Hans-CN')
+  const byCount = (a: DisplayEntityCard, b: DisplayEntityCard) => b.movieCount - a.movieCount || byName(a, b)
+  if (sort === 'count-asc') return [...items].sort((a, b) => a.movieCount - b.movieCount || byName(a, b))
+  if (sort === 'name') return [...items].sort(byName)
+  if (sort === 'name-desc') return [...items].sort((a, b) => byName(b, a))
+  return [...items].sort(byCount)
 }
 
 function readSavedState(): SavedState {

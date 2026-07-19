@@ -5,17 +5,17 @@ using Microsoft.Data.Sqlite;
 
 string bridgeUrl = Environment.GetEnvironmentVariable("LMM_BRIDGE_URL")
     ?? "http://127.0.0.1:47831";
+string nextDataRoot = Environment.GetEnvironmentVariable("LMM_DATA_ROOT")
+    ?? @"D:\Local Media Manager Next Data";
 string installedRoot = Environment.GetEnvironmentVariable("LMM_LEGACY_ROOT")
-    ?? @"D:\Jvedio\Jvedio5.0";
+    ?? nextDataRoot;
 string databasePath = Environment.GetEnvironmentVariable("LMM_DATABASE_PATH")
-    ?? @"D:\Local Media Manager Next Data\data\LocalMediaManager.db";
+    ?? Path.Combine(nextDataRoot, "data", "LocalMediaManager.db");
 string installRoot = ResolveInstallRoot(AppContext.BaseDirectory);
 string configDatabasePath = Environment.GetEnvironmentVariable("LMM_CONFIG_DATABASE_PATH")
-    ?? Path.Combine(installedRoot, "data", Environment.UserName, "app_configs.sqlite");
+    ?? Path.Combine(nextDataRoot, "config", "app_configs.sqlite");
 string imageRoot = Environment.GetEnvironmentVariable("LMM_IMAGE_ROOT")
-    ?? (Directory.Exists(@"Z:\bcbcbcbc\ca-ES\JVDIO")
-        ? @"Z:\bcbcbcbc\ca-ES\JVDIO"
-        : Path.Combine(installedRoot, "data", Environment.UserName, "pic"));
+    ?? Path.Combine(nextDataRoot, "MediaStorage");
 string? sessionToken = Environment.GetEnvironmentVariable("LMM_BRIDGE_TOKEN");
 
 var builder = WebApplication.CreateBuilder(args);
@@ -136,7 +136,7 @@ app.Use(async (context, next) => {
 app.MapGet("/health", () => Results.Ok(new {
     product = "Local Media Manager",
     abbreviation = "LMM",
-    version = "0.4.3",
+    version = "0.6.0",
     status = "ok",
     databaseAvailable = File.Exists(databasePath),
     databasePath,
@@ -161,6 +161,8 @@ app.MapPut("/api/settings/providers/metatube", async (MetaTubeSettingsDto input,
     Results.Ok(await settings.SaveMetaTubeAsync(input)));
 app.MapPost("/api/settings/providers/metatube/test", async (MetaTubeSettingsDto input, IMetadataProvider provider) =>
     Results.Ok(await provider.TestConnectionAsync(input with { BaseUrl = input.BaseUrl.Trim().TrimEnd('/') + "/" }, CancellationToken.None)));
+app.MapGet("/api/plugins/ffmpeg/status", (FfmpegLocator ffmpeg) =>
+    Results.Ok(ffmpeg.Status()));
 app.MapGet("/api/settings/data-safety/overview", async (DataSafetyService safety) =>
     Results.Ok(await safety.OverviewAsync()));
 app.MapPost("/api/settings/data-safety/backup", async (BackupCreateCommand command, DataSafetyService safety, CancellationToken token) =>
@@ -369,8 +371,8 @@ app.MapGet("/api/covers/{code}", (string code) => {
         : Results.File(path, ContentType(path), enableRangeProcessing: true);
 });
 
-app.MapGet("/api/images/{movieId:long}/primary", async (long movieId, string? variant, ImageAssetService images, CancellationToken token) => {
-    ImageAssetContent? content = await images.ResolveMovieAsync(movieId, variant ?? "original", token);
+app.MapGet("/api/images/{movieId:long}/primary", async (long movieId, string? variant, string? source, ImageAssetService images, CancellationToken token) => {
+    ImageAssetContent? content = await images.ResolveMovieAsync(movieId, variant ?? "original", source, token);
     return content is null ? Results.NotFound() : Results.File(content.Path, content.ContentType, enableRangeProcessing: true);
 });
 

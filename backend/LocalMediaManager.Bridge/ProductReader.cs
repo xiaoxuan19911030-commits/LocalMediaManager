@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 
 namespace LocalMediaManager.Bridge;
@@ -143,7 +144,7 @@ public static class ProductReader
             command.Parameters.AddWithValue("$like", like); command.Parameters.AddWithValue("$exact", query.Trim());
             command.Parameters.AddWithValue("$prefix", EscapeLike(query.Trim()) + "%"); command.Parameters.AddWithValue("$limit", limit);
             await using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync()) movies.Add(Card(reader, bridgeUrl));
+            while (await reader.ReadAsync()) movies.Add(Card(reader, bridgeUrl, "poster"));
         }
         var actors = await ReadEntitiesAsync(connection, "Actors", "MovieActors", "ActorId", like, limit);
         var tags = await ReadEntitiesAsync(connection, "Tags", "MovieTags", "TagId", like, limit);
@@ -522,11 +523,11 @@ public static class ProductReader
         if (normalizedRule is not ("all" or "code" or "path" or "hash")) normalizedRule = "all";
         var groups = new List<DuplicateGroupDto>();
         if (normalizedRule is "all" or "code")
-            groups.AddRange(await ReadDuplicateGroupsAsync(connection, "code", "upper(trim(m.Code))", "Movies m", "trim(COALESCE(m.Code,''))<>''", "m.Id", limit));
+            groups.AddRange(await ReadDuplicateGroupsAsync(connection, "code", "upper(trim(m.Code))", "Movies m", "trim(COALESCE(m.Code,''))<>'' AND EXISTS(SELECT 1 FROM MediaFiles vf WHERE vf.MovieId=m.Id AND vf.IsPrimary=1 AND vf.MediaType='Video' AND vf.ExistsState<>'Missing')", "m.Id", limit));
         if (normalizedRule is "all" or "path")
-            groups.AddRange(await ReadDuplicateGroupsAsync(connection, "path", "lower(trim(f.NormalizedPath))", "MediaFiles f JOIN Movies m ON m.Id=f.MovieId", "trim(COALESCE(f.NormalizedPath,''))<>''", "f.MovieId", limit));
+            groups.AddRange(await ReadDuplicateGroupsAsync(connection, "path", "lower(trim(f.NormalizedPath))", "MediaFiles f JOIN Movies m ON m.Id=f.MovieId", "f.MediaType='Video' AND f.ExistsState<>'Missing' AND trim(COALESCE(f.NormalizedPath,''))<>''", "f.MovieId", limit));
         if (normalizedRule is "all" or "hash")
-            groups.AddRange(await ReadDuplicateGroupsAsync(connection, "hash", "lower(trim(f.FileHash))", "MediaFiles f JOIN Movies m ON m.Id=f.MovieId", "trim(COALESCE(f.FileHash,''))<>''", "f.MovieId", limit));
+            groups.AddRange(await ReadDuplicateGroupsAsync(connection, "hash", "lower(trim(f.FileHash))", "MediaFiles f JOIN Movies m ON m.Id=f.MovieId", "f.MediaType='Video' AND f.ExistsState<>'Missing' AND trim(COALESCE(f.FileHash,''))<>''", "f.MovieId", limit));
         groups = groups.OrderBy(item => item.Rule).ThenBy(item => item.Key, StringComparer.OrdinalIgnoreCase).Take(limit).ToList();
         long totalMovies = groups.SelectMany(group => group.Items.Select(item => item.MovieId)).Distinct().LongCount();
         return new(groups.Count, totalMovies,
@@ -561,7 +562,7 @@ public static class ProductReader
     private static async Task<IReadOnlyList<DuplicateMovieDto>> ReadDuplicateItemsAsync(SqliteConnection connection, string rule, string key)
     {
         string condition = rule switch {
-            "code" => "upper(trim(m.Code))=$key",
+            "code" => "upper(trim(m.Code))=$key AND EXISTS(SELECT 1 FROM MediaFiles vf WHERE vf.MovieId=m.Id AND vf.IsPrimary=1 AND vf.MediaType='Video' AND vf.ExistsState<>'Missing')",
             "path" => "lower(trim(f.NormalizedPath))=$key",
             _ => "lower(trim(f.FileHash))=$key",
         };
@@ -578,7 +579,7 @@ public static class ProductReader
                     CASE WHEN EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id) THEN 1 ELSE 0 END+
                     CASE WHEN EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id) THEN 1 ELSE 0 END) AS MetadataScore
               FROM Movies m
-              LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND (f.IsPrimary=1 OR $rule<>'code')
+              LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.MediaType='Video' AND f.ExistsState<>'Missing' AND (f.IsPrimary=1 OR $rule<>'code')
               LEFT JOIN Libraries l ON l.Id=f.LibraryId
               LEFT JOIN UserMovieState s ON s.MovieId=m.Id
              WHERE {condition}
@@ -635,6 +636,7 @@ public static class ProductReader
     public static async Task<MovieDetailDto?> ReadMovieAsync(string databasePath, string bridgeUrl, long movieId)
     {
         await using var connection = await OpenAsync(databasePath);
+        string detailImageSource = await ReadImageSourceSettingAsync(connection, "movieWall.detailImageSource", "fanart");
         (long Id,string? Code,string? Title,string? Original,string? Release,long Duration,string? Description,double Provider,bool Scraped,string Status,string? Nfo,string? Imported,string Updated,bool Favorite,double Rating,bool RatingSet,long Plays,string? LastPlayed,long Position,string? Notes,bool HasCover)? movie = null;
         await using (var command = connection.CreateCommand()) {
             command.CommandText = """
@@ -655,7 +657,7 @@ public static class ProductReader
             command.CommandText="SELECT Id,FilePath,FileName,Extension,FileSize,SourceType,ExistsState,IsPrimary FROM MediaFiles WHERE MovieId=$id ORDER BY IsPrimary DESC,Id"; command.Parameters.AddWithValue("$id",movieId);
             await using var reader=await command.ExecuteReaderAsync(); while(await reader.ReadAsync()) files.Add(new(reader.GetInt64(0),reader.GetString(1),reader.GetString(2),Text(reader,3),reader.GetInt64(4),reader.GetString(5),reader.GetString(6),reader.GetInt64(7)==1));
         }
-        return new(value.Id,value.Code,value.Title,value.Original,value.Release,value.Duration,value.Description,value.Provider,value.Scraped,value.Status,value.Nfo,value.Imported,value.Updated,value.Favorite,value.Rating,value.RatingSet,value.Plays,value.LastPlayed,value.Position,value.Notes,value.HasCover?$"{bridgeUrl}/api/images/{movieId}/primary":null,
+        return new(value.Id,value.Code,value.Title,value.Original,value.Release,value.Duration,value.Description,value.Provider,value.Scraped,value.Status,value.Nfo,value.Imported,value.Updated,value.Favorite,value.Rating,value.RatingSet,value.Plays,value.LastPlayed,value.Position,value.Notes,value.HasCover?$"{bridgeUrl}/api/images/{movieId}/primary?source={detailImageSource}":null,
             metadataStatus,files,await ReadNamesAsync(connection,"Actors","MovieActors","ActorId",movieId),await ReadNamesIfExistsAsync(connection,"Directors","MovieDirectors","DirectorId",movieId),await ReadNamesAsync(connection,"Tags","MovieTags","TagId",movieId),
             await ReadNamesAsync(connection,"Genres","MovieGenres","GenreId",movieId),await ReadNamesAsync(connection,"Studios","MovieStudios","StudioId",movieId),await ReadNamesAsync(connection,"Series","MovieSeries","SeriesId",movieId));
     }
@@ -712,12 +714,13 @@ public static class ProductReader
               FROM Movies m LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video' LEFT JOIN UserMovieState s ON s.MovieId=m.Id
              WHERE f.ExistsState<>'Missing' AND {(playedOnly ? "COALESCE(s.PlayCount,0)>0" : "1=1")} ORDER BY {orderBy} LIMIT $limit
             """; command.Parameters.AddWithValue("$limit",limit);
-        var items=new List<MediaCardDto>(); await using var reader=await command.ExecuteReaderAsync(); while(await reader.ReadAsync()) items.Add(Card(reader,bridgeUrl)); return items;
+        var items=new List<MediaCardDto>(); await using var reader=await command.ExecuteReaderAsync(); while(await reader.ReadAsync()) items.Add(Card(reader,bridgeUrl,"poster")); return items;
     }
     private static async Task<MediaPageDto> ReadFilteredCardsAsync(string databasePath, string bridgeUrl,
         string condition, IReadOnlyList<(string Name,object Value)> parameters, string orderBy, int limit, int offset)
     {
         await using var connection = await OpenAsync(databasePath);
+        string cardImageSource = await ReadImageSourceSettingAsync(connection, "movieWall.wallImageSource", "poster");
         string metadataColumns = MetadataColumnsSql(await HasDirectorsAsync(connection));
         await using var count = connection.CreateCommand();
         count.CommandText = $"SELECT COUNT(DISTINCT m.Id) FROM Movies m LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video' LEFT JOIN UserMovieState s ON s.MovieId=m.Id WHERE {condition}";
@@ -734,7 +737,7 @@ public static class ProductReader
         foreach (var parameter in parameters) command.Parameters.AddWithValue(parameter.Name, parameter.Value);
         command.Parameters.AddWithValue("$limit", limit); command.Parameters.AddWithValue("$offset", offset);
         var items = new List<MediaCardDto>(); await using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync()) items.Add(Card(reader, bridgeUrl));
+        while (await reader.ReadAsync()) items.Add(Card(reader, bridgeUrl, cardImageSource));
         return new(items, total, limit, offset);
     }
     private static async Task<long> CountFilteredMoviesAsync(string databasePath, string condition, IReadOnlyList<(string Name,object Value)> parameters)
@@ -745,7 +748,7 @@ public static class ProductReader
         foreach (var parameter in parameters) count.Parameters.AddWithValue(parameter.Name, parameter.Value);
         return Convert.ToInt64(await count.ExecuteScalarAsync() ?? 0L);
     }
-    private static MediaCardDto Card(SqliteDataReader reader,string bridgeUrl)=>new(reader.GetInt64(0),reader.GetString(1),reader.GetString(2),reader.GetString(3),reader.GetDouble(4),reader.GetInt64(5)==1,reader.GetString(6),reader.GetString(7),reader.GetInt64(8)==1?$"{bridgeUrl}/api/images/{reader.GetInt64(0)}/primary?variant=thumbnail":null,MetadataStatusFromReader(reader,9));
+    private static MediaCardDto Card(SqliteDataReader reader,string bridgeUrl,string imageSource)=>new(reader.GetInt64(0),reader.GetString(1),reader.GetString(2),reader.GetString(3),reader.GetDouble(4),reader.GetInt64(5)==1,reader.GetString(6),reader.GetString(7),reader.GetInt64(8)==1?$"{bridgeUrl}/api/images/{reader.GetInt64(0)}/primary?variant=thumbnail&source={imageSource}":null,MetadataStatusFromReader(reader,9));
     private static async Task<IReadOnlyList<SearchEntityDto>> ReadEntitiesAsync(SqliteConnection connection,string table,string relation,string key,string like,int limit){
         await using var command=connection.CreateCommand();command.CommandText=$"SELECT e.Id,e.Name,COUNT(r.MovieId) FROM {table} e LEFT JOIN {relation} r ON r.{key}=e.Id WHERE e.Name LIKE $like ESCAPE '\\' GROUP BY e.Id ORDER BY COUNT(r.MovieId) DESC,e.Name LIMIT $limit";command.Parameters.AddWithValue("$like",like);command.Parameters.AddWithValue("$limit",limit);
         var result=new List<SearchEntityDto>();await using var reader=await command.ExecuteReaderAsync();while(await reader.ReadAsync())result.Add(new(reader.GetInt64(0),reader.GetString(1),reader.GetInt64(2)));return result;
@@ -912,6 +915,27 @@ public static class ProductReader
         if (missing.Count == 0) return new("complete","✓","已完整",missing,checks);
         return new("partial","⚠","待完善",missing,checks);
     }
+    private static async Task<string> ReadImageSourceSettingAsync(SqliteConnection connection, string key, string fallback)
+    {
+        if (!await TableExistsAsync(connection, "AppSettings")) return fallback;
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT ValueJson FROM AppSettings WHERE Key=$key";
+        command.Parameters.AddWithValue("$key", key);
+        string? raw = Convert.ToString(await command.ExecuteScalarAsync());
+        if (string.IsNullOrWhiteSpace(raw)) return fallback;
+        try {
+            string? parsed = JsonSerializer.Deserialize<string>(raw);
+            return parsed?.Trim().ToLowerInvariant() switch {
+                "thumbnail" => "thumbnail",
+                "fanart" or "background" or "backdrop" => "fanart",
+                "poster" => "poster",
+                _ => fallback
+            };
+        } catch (JsonException) {
+            return fallback;
+        }
+    }
+
     private static async Task<MetadataStatusDto> ReadMetadataStatusAsync(SqliteConnection connection, long movieId)
     {
         await using var command = connection.CreateCommand();

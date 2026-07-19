@@ -536,8 +536,8 @@ Impact Preview → User Confirmation → Backup/Audit → Execute → Verify →
 |------|--------|
 | `LMM_BRIDGE_URL` | `http://127.0.0.1:47831` |
 | `LMM_DATABASE_PATH` | `D:\Local Media Manager Next Data\data\LocalMediaManager.db` |
-| `LMM_LEGACY_ROOT` | `D:\Jvedio\Jvedio5.0` |
-| `LMM_CONFIG_DATABASE_PATH` | `{legacyRoot}\data\{UserName}\app_configs.sqlite` |
+| `LMM_LEGACY_ROOT` | `D:\Local Media Manager Next Data` unless explicitly set for one-time legacy migration |
+| `LMM_CONFIG_DATABASE_PATH` | `D:\Local Media Manager Next Data\config\app_configs.sqlite` |
 | `LMM_IMAGE_ROOT` | `{legacyRoot}\data\{UserName}\pic`（或探测到的替代路径） |
 
 ### 4.6 数据库层
@@ -1307,7 +1307,7 @@ Bridge 以 `SqliteOpenMode.ReadOnly` 打开 Legacy 库（迁移工具除外）�
 
 | 资源 | 环境变量 / 路径 | 用途 |
 |------|----------------|------|
-| Legacy 安装根 | `LMM_LEGACY_ROOT` | 默认 `D:\Jvedio\Jvedio5.0` |
+| Legacy 安装根 | `LMM_LEGACY_ROOT` | 默认不指向旧品牌路径；旧库迁移时显式设置 |
 | 业务库 | `{legacy}\data\{User}\app_datas.sqlite` | 迁移源、只读对照 |
 | 配置库 | `LMM_CONFIG_DATABASE_PATH` | Playback 等 fallback 读取 |
 | 图片根 | `LMM_IMAGE_ROOT` | 封面查找、Legacy 缓存 |
@@ -2169,3 +2169,14 @@ Feature Parity 项另须矩阵证据行更新（见 §12.5）。
 | 未授权 Push main / Release Tag | AGENTS §06 Git |
 
 ---
+
+---
+
+## 0.6.0 Current Product State Note
+
+- Official version: 0.6.0.
+- Settings sections: 常规, 外观, 搜索与筛选, 元数据, 插件中心, 媒体资源, 快捷键, 数据与备份, 关于.
+- Plugin Center lives inside Settings and is not a left-navigation entry.
+- Duplicate Movies remains a dedicated navigation entry. Organizer and Batch Organizer are no longer standalone navigation entries; future batch management belongs in MovieWall batch actions.
+- NFO generation is fixed metadata behavior and does not expose a standalone Settings page or off switch.
+- Development is trunk-based from 0.6.0 onward: `main` is the only long-lived branch, and official restore points are Git release tags such as `v0.6.0`.
