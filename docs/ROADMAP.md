@@ -140,22 +140,22 @@ Retained user-data features remain in scope: scoring, favorite, custom tags, act
 
 **P1**
 
-1. 查重处理流程
-2. 批量整理入口
-3. 日志清理
+1. 查重与批量整理
+2. 日志清理
 
 **P2**
 
-4. 语言设置
-5. 托盘与关闭行为
-6. 快捷键管理
-7. 检查更新
+3. 语言设置
+4. 托盘与关闭行为
+5. 快捷键管理
+6. 检查更新
 
 ### Completed Retained Parity
 
 - 厂商分类浏览：`/tags` 横向工具栏接入 `Studios/MovieStudios`，并通过统一 MovieWall 的 `studioId` 默认条件进入厂商影片集合。
 - MovieWall 随机影片：所有 MovieWall 页面工具栏提供随机按钮，随机范围复用当前默认条件、Smart Search、FilterBar 和媒体库范围。
 - 复制影片信息：详情页更多菜单可将当前详情模型中的标题、番号、演员、厂商、系列、发行日期、评分、文件路径、媒体库和简介复制到系统剪贴板。
+- 查重与批量整理第一阶段：新增 `/organizer` 整理工具统一入口，合并重复影片与批量整理架构；旧 `/duplicates` 仅保留兼容重定向。
 
 ### Product-Cancelled Parity
 

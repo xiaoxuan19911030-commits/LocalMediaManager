@@ -47,6 +47,7 @@ docs/               → 证据、Release 验收、字段映射、矩阵
 | [DEC-012](#dec-012-moviewall-display-preferences-and-floating-pagination) | MovieWall 显示偏好与悬浮分页 | MovieWall / Settings | 0.5.0-20 | `bbed780` |
 | [DEC-013](#dec-013-metadata-ownership-and-user-data-boundary) | 元数据归属与用户数据边界 | Metadata / User Data | Repository Stabilization | `docs(product)` |
 | [DEC-014](#dec-014-image-setas-product-cancelled) | Image SetAs 产品取消 | Images / Feature Parity | Feature Parity | `docs(product)` |
+| [DEC-015](#dec-015-duplicate-management-and-batch-organizer-convergence) | 查重与批量整理统一入口 | Organizer / Feature Parity | Feature Parity | `refactor(organizer)` |
 
 ---
 
@@ -1230,6 +1231,57 @@ Image SetAs 功能不再迁移，标记为 Product Cancelled。不开发以下�
 
 ---
 
+### DEC-015: Duplicate Management and Batch Organizer Convergence
+
+| 字段 | 值 |
+|------|-----|
+| **Decision ID** | DEC-015 |
+| **模块** | Organizer / Feature Parity |
+| **Sprint** | Duplicate Management & Batch Organizer |
+| **日期** | 2026-07-19 |
+
+#### 背景
+
+旧版功能把查重、删除、移动、重命名、刮削和同步分散在不同菜单、页面和命令中。Local Media Manager 已经有只读查重结果、Safe Delete、File Organizer、MovieWall 批量状态和 Tasks，但入口仍然分散，容易让“查重”和“批量整理”被误解为两个独立产品功能。
+
+#### 最终方案
+
+查重与批量整理合并为同一个 Feature Parity Sprint：Duplicate Management & Batch Organizer。左侧工具区只提供统一入口：
+
+- 整理工具
+
+整理工具内部按流程承载：
+
+- 重复影片
+- 批量整理
+- 后续批量删除 / 移动 / 重命名 / 刮削 / 同步 / 标签 / 收藏 / 评分
+
+#### 架构边界
+
+- 整理工具不是新数据库，不新增媒体类型，不修改 Schema。
+- 重复影片继续使用当前 `GET /api/duplicates` 只读结果。
+- 批量整理继续使用 `POST /api/organizer/dry-run` → preview → execute → Tasks。
+- 影片范围必须复用统一 MovieWall、Smart Search、FilterBar、分页、排序、媒体库范围和状态恢复。
+- 后续批量删除、移动、标签、收藏、评分等操作必须基于当前 MovieWall 查询范围或用户明确选择集，不复制第二套查询逻辑。
+
+#### 第一阶段
+
+第一阶段仅完成架构迁移：
+
+- `/organizer` 成为统一整理工具入口。
+- 旧 `/duplicates` 只作为兼容重定向，不再作为主导航入口。
+- 重复影片和批量整理在同一页面内切换。
+- 批量整理阶段复用 MovieWall 选择影片，并走现有 File Organizer Dry Run / Preview / Execute 链路。
+
+#### 禁止
+
+- 不开发 AI 整理、AI 分类、AI 评分。
+- 不新增数据库或 Schema。
+- 不复制第二套影片查询、筛选或列表。
+- 不把 Legacy Cleanup 混入本 Sprint。
+
+---
+
 ## PROJECT §21 Sprint History（摘要）
 
 | Sprint | 摘要 | 决策 |
@@ -1241,6 +1293,7 @@ Image SetAs 功能不再迁移，标记为 Product Cancelled。不开发以下�
 | 0.5.0-20 | MovieWall 显示偏好、响应式卡片尺寸和悬浮分页交互 | DEC-012 |
 | Repository Stabilization | 元数据归属规则：取消完整影片编辑器，只维护用户个人数据 | DEC-013 |
 | Feature Parity | Image SetAs 产品取消：图片资源由刮削、NFO 和 MetaTube 统一管理 | DEC-014 |
+| Feature Parity | 查重与批量整理合并为整理工具统一入口，第一阶段迁移架构 | DEC-015 |
 
 ---
 

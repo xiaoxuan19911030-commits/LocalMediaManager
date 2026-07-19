@@ -9,6 +9,7 @@
 - Metadata Ownership Decision (DEC-013): LMM no longer plans a full Movie Editor or manual movie metadata editing. Movie metadata is owned by scraping, NFO import, and metadata sync; incorrect metadata should be fixed by re-scrape/re-sync/NFO re-import.
 - Product-cancelled legacy expectations: full-field movie edit, manual edits for titles/code/plot/date/runtime/director/studio/series/tags/Genre, actor add/delete/search/manual profile edit, display/custom/second title fields, and standalone watched toggle.
 - Product-cancelled Image SetAs: LMM will not migrate manual "set as poster / thumbnail / banner" actions because image resources are managed by MetaTube scraping, NFO, and metadata sync.
+- Duplicate Management & Batch Organizer (DEC-015): duplicate review and batch organizer now share one Organizer Tools entry instead of separate product tracks.
 - Retained user-data scope: rating, favorite, custom tags, actor display ordering, poster/image adjustment, manual crop, playback history, and future Human-approved notes.
 - Development order is now fixed: retained Feature Parity first, Legacy Cleanup second, Human-experience-driven optimization/new features third.
 
@@ -19,11 +20,13 @@
 - 厂商分类浏览接入 `Studios/MovieStudios`，点击厂商通过统一 MovieWall 的 `studioId` 默认条件显示对应影片集合。
 - MovieWall 工具栏新增随机影片按钮，按当前默认条件、媒体库范围、Smart Search 和 FilterBar 随机进入详情页。
 - 详情页更多菜单新增“复制影片信息”，复用当前详情模型并写入系统剪贴板，不重新查询数据库。
+- 整理工具新增统一入口 `/organizer`，在同一页面内切换重复影片和批量整理；批量整理阶段复用 MovieWall 选择集与现有 Organizer Dry Run / Preview / Execute 链路。
 - MovieWall Display Optimization：影片墙新增统一海报方向（竖版 2:3 / 横版 16:9）、海报大小（小 / 中 / 大）设置，并经 Unified Settings 持久化。
 - MovieWall 分页改为右下角悬浮控件，支持点击页码输入、Enter 跳转、Esc 取消、左右方向键翻页和 Ctrl+G 聚焦页码。
 
 ### Changed
 
+- 左侧工具区将“查重结果”合并为“整理工具”；旧 `/duplicates` 路由仅作为兼容重定向保留。
 - 影片墙卡片网格改为基于显示偏好的响应式 CSS Grid，不写死列数；列表视图不受海报方向和大小设置影响。
 - 设置中心「外观」分区增加可视化影片墙显示选项卡，参考现有外观配置交互，不新增图片生成或资源来源设置。
 

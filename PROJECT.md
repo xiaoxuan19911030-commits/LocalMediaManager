@@ -236,7 +236,7 @@ LMM 使用**持久左侧导航**（不是顶部 Tab）：
 
 **一级模块（primary）：** 首页 · 影片墙 · 媒体库 · 标签 · 收藏 · 最近播放
 
-**工具模块（utility）：** 元数据中心 · 诊断中心 · 查重结果 · Maintenance · 任务中心 · 插件中心 · AI Provider · 设置
+**工具模块（utility）：** 元数据中心 · 诊断中心 · 整理工具 · Maintenance · 任务中心 · 插件中心 · AI Provider · 设置
 
 导航定义在 `src/layouts/AppShell.tsx`，路由在 `src/app/router.tsx`。
 
@@ -1682,7 +1682,7 @@ Local Media Manager
 │
 ├── 诊断与维护
 │   ├── Diagnostics Center
-│   ├── Duplicate Results（查重）
+│   ├── Organizer Tools（整理工具：查重 + 批量整理）
 │   └── System Diagnostics
 │
 ├── 播放
@@ -1766,6 +1766,8 @@ Local Media Manager
 
 **批量操作：** `POST /api/videos/batch/favorite`、`/batch/rating`、`/batch/tags`
 
+**整理工具：** `/organizer` 是查重与批量整理的统一入口。重复影片阶段复用 `GET /api/duplicates` 只读结果；批量整理阶段复用统一 MovieWall 的 Smart Search、FilterBar、排序、分页、媒体库范围和状态恢复，并把用户选择的影片传入现有 `POST /api/organizer/dry-run` → preview → execute → Tasks 链路。旧 `/duplicates` 仅保留为兼容重定向，不再作为主导航入口。整理工具不新增数据库、不新增媒体类型、不复制第二套影片查询逻辑；后续批量删除、移动、重命名、刮削、同步、标签、收藏和评分都应进入该统一入口。
+
 **标签二级页：** `/tags` 不再显示大卡片分类首页；页面内使用横向工具栏切换范围、分类和排序。范围可选全部标准库或具体媒体库，只影响当前分类统计和点击后 MovieWall 的默认媒体库条件。分类按钮包括全部、导演、标签、系列、厂商、自定义；当前“全部”按最稳妥实现复用“标签”（Genre）数据，不混合多种实体 DTO。返回 `/tags` 时恢复范围、分类、排序、搜索、页码和滚动位置。
 
 **实体来源：** 标签与自定义标签当前均基于历史 `Tags/MovieTags` 查询语义，不按 `Tags.Source` 强行拆分；真实库中 `LegacyLabel` 同时承载了用户维护标签（如“五星”“高颜值”）和状态标识（如“已收藏”），因此 `Source` 不能可靠区分标签来源。状态 Badge（如 `新加入`、`已收藏`）不是标签分类，不进入 `/tags` 二级分类与标签统计。用户界面中“标签”分类对应刮削元数据 Genre，内部仍使用 `Genres/MovieGenres` 和 `genreId`；厂商使用 `Studios/MovieStudios`，包括迁移和同步写入的 Studio/Publisher 关系。系列使用 `Series/MovieSeries`；导演使用 `Directors/MovieDirectors`（旧库可不存在，UI 显示空态）。实体列表数量使用 `COUNT(DISTINCT MovieId)`，点击实体后跳转影片墙并传递明确 ID 参数（如 `directorId`、`genreId`、`seriesId`、`studioId`、`movieTagId`、`customTagId`），不创建第二套影片列表。
@@ -1826,7 +1828,7 @@ Local Media Manager
 | 模块 | 路由 | Bridge 入口 |
 |------|------|------------|
 | **Diagnostics Center** | `/diagnostics` | `GET /api/diagnostics` |
-| **Duplicate Results** | `/duplicates` | `GET /api/duplicates` |
+| **Organizer Tools** | `/organizer` | `GET /api/duplicates` + `POST /api/organizer/dry-run` |
 | **System Diagnostics** | Settings → 日志与诊断 | `GET /api/settings/diagnostics` |
 | **Library Summary** | 首页/多处 | `GET /api/library/summary` |
 | **Data Safety Overview** | Settings | `GET /api/settings/data-safety/overview` |

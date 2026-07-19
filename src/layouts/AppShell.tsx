@@ -11,7 +11,7 @@ import TaskRoundedIcon from '@mui/icons-material/TaskRounded'
 import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded'
 import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded'
 import TroubleshootRoundedIcon from '@mui/icons-material/TroubleshootRounded'
-import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
+import DriveFileMoveRoundedIcon from '@mui/icons-material/DriveFileMoveRounded'
 import BuildRoundedIcon from '@mui/icons-material/BuildRounded'
 import { Alert, Box, Divider, InputAdornment, List, ListItemButton, ListItemIcon, ListItemText, Paper, TextField, Typography } from '@mui/material'
 import { FormEvent, ReactNode, useEffect, useState } from 'react'
@@ -23,7 +23,7 @@ import type { BridgeHealth } from '@/types/media'
 
 type NavItem = readonly [string,string,ReactNode]
 const primary:NavItem[]=[['首页','/',<HomeRoundedIcon/>],['影片墙','/media',<MovieRoundedIcon/>],['媒体库','/libraries',<FolderRoundedIcon/>],['标签','/tags',<LocalOfferRoundedIcon/>],['收藏','/favorites',<FavoriteRoundedIcon/>],['最近播放','/history',<HistoryRoundedIcon/>]]
-const utility:NavItem[]=[['元数据中心','/metadata',<FactCheckRoundedIcon/>],['诊断中心','/diagnostics',<TroubleshootRoundedIcon/>],['查重结果','/duplicates',<ContentCopyRoundedIcon/>],['Maintenance','/maintenance',<BuildRoundedIcon/>],['任务中心','/tasks',<TaskRoundedIcon/>],['插件中心','/plugins',<ExtensionRoundedIcon/>],['AI Provider','/ai-providers',<AutoAwesomeRoundedIcon/>],['设置','/settings',<SettingsRoundedIcon/>]]
+const utility:NavItem[]=[['元数据中心','/metadata',<FactCheckRoundedIcon/>],['诊断中心','/diagnostics',<TroubleshootRoundedIcon/>],['整理工具','/organizer',<DriveFileMoveRoundedIcon/>],['Maintenance','/maintenance',<BuildRoundedIcon/>],['任务中心','/tasks',<TaskRoundedIcon/>],['插件中心','/plugins',<ExtensionRoundedIcon/>],['AI Provider','/ai-providers',<AutoAwesomeRoundedIcon/>],['设置','/settings',<SettingsRoundedIcon/>]]
 
 export default function AppShell(){
   const navigate=useNavigate();const{pathname}=useLocation();const[search,setSearch]=useState('');const[bridgeOnline,setBridgeOnline]=useState<boolean>();const[health,setHealth]=useState<BridgeHealth>()

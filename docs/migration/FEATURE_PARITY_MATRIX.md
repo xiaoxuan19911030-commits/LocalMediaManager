@@ -87,10 +87,10 @@
 | 27 | 排序 | P1 | 必须保留 | 已部分迁移 | Bridge 查询；Sort DTO；稳定次排序；Settings | 低风险写入 | 更多旧排序项、默认值持久化、跨页测试 | 0.4.1 | 跨页无重复遗漏；重启保留默认排序 | 部分：newest/code/rating 等 Bridge 排序；无持久化/自动化证据 |
 | 28 | 媒体库、扫描与导入 | P1 | 必须保留 | 已部分迁移 | Library CRUD Migration；Bridge Library/Scan Service；DTO；Tasks；文件系统；Settings | 需要备份与回滚 | 仍缺安装版真实目录烟测、跨重启任务恢复和完整同步执行器 | 0.4.2 | 创建媒体库到扫描导入完整流程；失败可恢复 | Bridge: POST/PUT/DELETE `/api/libraries*`、POST `/api/libraries/{id}/scan`；Migration: `0004_LibraryScanWorkflow`；Automated: `ScanImportsOnlyVideosRestoresRatingAndQueuesSync`、`LibraryDeleteRequiresPreviewBacksUpAndKeepsMovies`；Commit: 本次 0.4.2 开发提交待记录；尚缺 Smoke/Acceptance，故不标完整 |
 | 29 | 元数据状态 | P1 | 重要 | 仅只读 | Metadata Service；Status DTO；Diagnostics；Tasks | 无写入 | 批量修复、筛选联动和任务入口 | 0.4.2 | 状态统计与抽样 SQL 一致；修复后即时刷新 | 部分：GET `/api/metadata/overview`；脱敏样本统计与 SQL 抽样一致；Commit `83c53b5` |
-| 30 | 智能查重 | P1 | 重要 | 仅只读 | Duplicate Service；候选 DTO；文件哈希/属性；Tasks；确认/回滚 | 删除风险 | 候选详情、忽略、合并预览与安全执行 | 0.5.0 | 不自动删除；用户确认后执行且可回滚 | 部分：Diagnostics 重复番号计数 25；无管理流程 |
+| 30 | 智能查重 | P1 | 重要 | 已部分迁移 | Duplicate Service；候选 DTO；文件哈希/属性；Organizer Tools；确认/回滚 | 删除风险 | 候选详情、忽略、合并预览与安全执行；进入 Duplicate Management & Batch Organizer 第二阶段 | 0.5.0 | 不自动删除；用户确认后执行且可回滚；与批量整理同属 `/organizer` 整理工具 | Bridge: `GET /api/duplicates`；UI: `/organizer` 重复影片阶段；Compatibility: `/duplicates` 重定向；Decision: DEC-015；仍未完成忽略/合并/安全执行 |
 | 31 | MetaTube | P1 | 重要 | 已部分迁移 | Plugin/Provider Service；Server Settings；Metadata DTO；Tasks；网络 | 数据库写入 | 敏感 Header/Cookie 安全凭据 | 0.5.0 | 单部同步与旧版结果对照；失败保留旧数据 | Bridge: Provider settings/test、POST `/api/videos/{id}/sync`、`IMetadataProvider`/`MetaTubeProvider`；Migration: `0005`；Automated: Provider 优先级/字段映射/设置持久化；Real smoke: 30 部中 22 完成、8 明确无结果、311 图片、22 NFO、用户状态 30/30 与锁定文件 5/5 保持，见 `releases/0.4.3-METATUBE-SMOKE.md`；Commit `bef490e`；因敏感凭据仍缺而保持部分迁移 |
 | 32 | NFO 导入导出 | P1 | 必须保留 | 已部分迁移 | NFO Service；DTO；Settings；Tasks；文件系统；覆盖预览 | 文件系统写入 | 安装版用户发起导入/导出及全部独立覆盖开关验收 | 0.5.0 | 样本往返；用户字段和图片选择不丢失 | Bridge: import/export/settings 接口 + Provider 自动写入；Migration: `0007_NfoWorkflow`；Automated: 往返、所有权、原子失败恢复；Real smoke: 22 份生成、用户 NFO 5/5 字节保持；Installed UI: 导入/导出入口；Commit `0d282f9` |
-| 33 | 重命名与整理 | P1 | 必须保留 | 已部分迁移 | Organizer Service；Preview DTO；Tasks；文件系统；冲突检测；回滚 | 需要备份与回滚 | 安装版真实文件整理与 NAS/权限故障验收 | 0.5.0 | 目标存在不覆盖；中途失败可回滚 | Bridge: Dry Run/Preview/Confirm/Execute/rollback；Migration: `0008_FileOrganizerWorkflow`；Automated: 冲突拒绝、文件/数据库补偿、启动恢复；Installed UI: 整理入口；Commit `6d8a6f4`；未对用户正式媒体执行危险写入，故保持部分迁移 |
+| 33 | 重命名与整理 | P1 | 必须保留 | 已部分迁移 | Organizer Service；Preview DTO；Tasks；文件系统；冲突检测；回滚；MovieWall 选择集 | 需要备份与回滚 | 安装版真实文件整理、NAS/权限故障验收、按当前筛选结果范围批量执行 | 0.5.0 | 目标存在不覆盖；中途失败可回滚；与查重同属 `/organizer` 整理工具 | Bridge: Dry Run/Preview/Confirm/Execute/rollback；Migration: `0008_FileOrganizerWorkflow`；Automated: 冲突拒绝、文件/数据库补偿、启动恢复；UI: `/organizer` 批量整理阶段复用 MovieWall 选择集；Commit `6d8a6f4` + DEC-015；未对用户正式媒体执行危险写入，故保持部分迁移 |
 | 34 | 缓存清理 | P2 | 重要 | 已部分迁移 | #17；Cache Service；空间估算；Tasks；确认 | 删除风险 | 分类/空间估算 UI 与安装版真实清理报告 | 0.5.0 | 只删除派生缓存；源图/卡图不受影响 | Bridge: inspect/clean/rebuild；Automated: 仅删除派生缓存且保留源图/锁定图；Commit `d98a6a5`；分类估算 UI 仍待完成 |
 | 35 | 老板键 | P3 | 一般 | 仅只读 | Shortcut Settings；Tauri global shortcut；冲突处理 | 低风险写入 | 注册、隐藏/恢复和错误提示 | 0.5.0 | 组合键可靠；冲突不覆盖旧值 | 部分：旧设置只读；无 Tauri 实现 |
 | 36 | 主题、语言、关闭行为 | P2 | 重要 | 已部分迁移 | Settings Service；Theme Context；i18n；Tauri tray/lifecycle | 低风险写入 | 语言、托盘和关闭行为写设置 | 0.4.3 | 两主题、重启项、托盘/关闭行为均通过 | 部分：深浅主题和缩放烟测；Commit `2d52dfc`/`83c53b5`；语言/关闭只读 |
@@ -103,6 +103,7 @@
 | 43 | MovieWall 随机影片 | P0 | 必须保留 | 已完整迁移 | MovieWall 统一状态；Advanced Search 条件构建；详情返回恢复 | 无写入 | 无 | 0.5.0 | 随机范围为页面默认条件 AND 媒体库范围 AND Smart Search AND FilterBar；空结果提示；点击进入详情后返回恢复 MovieWall | Bridge: `GET /api/search/random`；Migration: N/A；Automated: `RandomMovieUsesCurrentQueryScope`、`RandomMovieHandlesEmptyAndSingleResultScopes`；Smoke: 本 Sprint 安装版随机端点和启动验证；Commit: 本 Sprint `feat(moviewall): add scoped random movie action` |
 | 44 | Image SetAs（设为海报/缩略图/横幅） | P0 | Product Cancelled | Product Cancelled | DEC-014；MetaTube 刮削；NFO；元数据同步 | 不适用 | 不再迁移 | N/A | 图片资源统一由 MetaTube 刮削、NFO 和元数据同步维护；用户需要的图片查看、放大、人工裁切、刷新和重新下载图片继续保留 | Decision: DEC-014；Docs: Roadmap/Changelog/PROJECT 同步；Code: N/A（本决策不修改代码、不改数据库） |
 | 45 | 复制影片信息 | P0 | 必须保留 | 已完整迁移 | MovieDetail 当前详情模型；系统剪贴板；详情页更多菜单 | 无写入 | 无 | 0.5.0 | 详情页可复制标题、番号、演员、厂商、系列、发行日期、评分、文件路径、媒体库和简介；缺失字段有可读占位；不重新查询数据库 | Bridge: N/A（复用当前详情模型）；Migration: N/A；Automated: formatter + clipboard writer stubs cover complete/missing/long/multi-language/failure cases；Smoke: 本 Sprint 安装版详情页菜单验证；Commit: 本 Sprint `feat(details): add copy movie information` |
+| 46 | Duplicate Management & Batch Organizer 架构 | P1 | 必须保留 | 已部分迁移 | DEC-015；`/organizer`；MovieWall；Duplicate Service；FileOrganizerService；Tasks | 需要备份与回滚 | 第二阶段候选处理、当前筛选结果批量动作、安全删除组合验收 | 0.5.0 | 左侧只有“整理工具”统一入口；重复影片和批量整理在同一页内切换；旧 `/duplicates` 兼容重定向 | Bridge: 复用 `GET /api/duplicates` 与 `/api/organizer/*`；Migration: N/A；Automated: Web build type coverage；Smoke: 本 Sprint 安装版入口待验证；Commit: 本 Sprint `refactor(organizer): merge duplicate and batch organizer architecture` |
 
 ## 证据记录格式
 
@@ -203,3 +204,12 @@ Acceptance: 发布验证记录或独立验收文档
 - Copied fields: 标题, 番号, 演员, 厂商, 系列, 发行日期, 评分, 文件, 媒体库, 简介.
 - Empty handling: missing fields use readable placeholders such as 未知, 未评分, or 暂无.
 - Clipboard: success shows 已复制影片信息; failure shows 复制失败.
+
+## 2026-07-19 Duplicate Management & Batch Organizer Architecture Evidence Note
+
+- Decision: DEC-015 merges duplicate review and batch organizer into one Organizer Tools entry.
+- UI: `/organizer` contains 重复影片 and 批量整理 modes in one page; left utility navigation shows 整理工具.
+- Compatibility: old `/duplicates` route redirects to `/organizer`.
+- Query reuse: batch organizer mode reuses MovieWall, Smart Search, FilterBar, sorting, pagination, media-library range, and state restoration.
+- Backend reuse: no schema or new database; duplicate mode uses `GET /api/duplicates`; batch organizer mode uses existing organizer Dry Run / Preview / Execute endpoints and Tasks.
+- Remaining second phase: duplicate keep/delete decision workflow, ignore/merge handling, safe batch delete from duplicate candidates, and batch actions from current filtered result scope.
