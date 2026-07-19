@@ -1717,7 +1717,7 @@ Local Media Manager
 
 **Smart Search：** 影片墙与搜索页共用 `GET /api/search/advanced`。普通关键词以 AND 组合；每个关键词在番号、标题、原始标题、简介、文件路径/名、演员、导演、标签、自定义标签、Genre、厂商、系列、媒体库名之间 OR 匹配。结构化字段支持 `演员:`、`导演:`、`标签:`、`自定义标签:`、`系列:`、`厂商:`、`媒体库:`、年份与评分比较、收藏/观看布尔条件。当前数据不能可靠用 `Tags.Source` 区分标签来源，`标签:` 与 `自定义标签:` 均恢复历史 `Tags/MovieTags` 查询语义，并排除状态 Badge。分类入口参数、FilterBar 与 Smart Search 条件统一 AND。
 
-**MovieWall：** 所有本质属于影片列表的页面复用 `MovieWall`：全部影片、收藏、最近播放、搜索结果、导演/系列/标签/自定义标签/媒体库进入后的结果页。`MovieWall` 统一 Smart Search、FilterBar、排序、分页、卡片/列表视图和详情返回滚动恢复。影片墙卡片显示偏好通过 `UnifiedSettings.movieWallDisplay` 持久化并在所有 MovieWall 页面共享：竖版海报比例 `2:3`，横版海报比例 `16:9`，尺寸为 `small` / `medium` / `large`。卡片模式使用响应式 CSS Grid 自动计算列数；列表模式不受海报方向与大小影响。
+**MovieWall：** 所有本质属于影片列表的页面复用 `MovieWall`：全部影片、收藏、最近播放、搜索结果、导演/类型/系列/厂商/标签/自定义标签/媒体库进入后的结果页。`MovieWall` 统一 Smart Search、FilterBar、排序、分页、卡片/列表视图和详情返回滚动恢复。影片墙卡片显示偏好通过 `UnifiedSettings.movieWallDisplay` 持久化并在所有 MovieWall 页面共享：竖版海报比例 `2:3`，横版海报比例 `16:9`，尺寸为 `small` / `medium` / `large`。卡片模式使用响应式 CSS Grid 自动计算列数；列表模式不受海报方向与大小影响。
 
 **MovieWall 分页：** 分页由 `MovieWall` 统一管理为右下角半透明悬浮控件，显示上一页、当前页/总页数、下一页。点击当前页数字进入页码输入，`Enter` 跳转，`Esc` 取消，跳页后滚动回影片墙顶部并保留搜索、FilterBar、排序和视图状态。MovieWall 页面支持左/右方向键翻页和 `Ctrl+G` 聚焦页码输入；输入框、表单、下拉框或弹窗获得焦点时不抢占按键，详情页不使用这组快捷键。
 
@@ -1750,19 +1750,23 @@ Local Media Manager
 
 | 模块 | 路由 | Bridge 入口 |
 |------|------|------------|
-| **Tags Category** | `/tags` | 二级分类页：导演、标签、系列、自定义标签 |
+| **Tags Category** | `/tags` | 同页横向工具栏：范围、全部/类型/系列/厂商/自定义、排序 |
 | **Custom Tags** | `/tags/custom` | `GET /api/entities/tags`、CRUD `/api/tags` |
 | **Movie Tags** | `/tags/movie-tags` | `GET /api/entities/movie-tags` |
+| **Genres** | `/tags/genres` | `GET /api/entities/genres` |
 | **Actors** | `/actors` | `GET /api/entities/actors`、PUT `/api/actors/{id}` |
 | **Directors** | `/tags/directors` | `GET /api/entities/directors` |
 | **Series** | `/tags/series` | `GET /api/entities/series` |
+| **Studios** | `/tags/studios` | `GET /api/entities/studios` |
 | **Actor Repair** | Metadata/Maintenance | `GET/POST /api/actors/repair-*` |
 | **Favorites** | `/favorites` | `GET /api/collections/favorites` |
 | **History** | `/history` | `GET /api/collections/history` |
 
 **批量操作：** `POST /api/videos/batch/favorite`、`/batch/rating`、`/batch/tags`
 
-**实体来源：** 标签与自定义标签当前均基于历史 `Tags/MovieTags` 查询语义，不按 `Tags.Source` 强行拆分；真实库中 `LegacyLabel` 同时承载了用户维护标签（如“五星”“高颜值”）和状态标识（如“已收藏”），因此 `Source` 不能可靠区分标签来源。状态 Badge（如 `新加入`、`已收藏`）不是标签分类，不进入 `/tags` 二级分类与标签统计。Genre 使用独立 `Genres/MovieGenres`，不是标签。系列使用 `Series/MovieSeries`；导演使用 `Directors/MovieDirectors`（旧库可不存在，UI 显示空态）。实体列表数量使用 `COUNT(DISTINCT MovieId)`，点击实体后跳转影片墙并传递明确 ID 参数（如 `directorId`、`seriesId`、`movieTagId`、`customTagId`），不创建第二套影片列表。
+**标签二级页：** `/tags` 不再显示大卡片分类首页；页面内使用横向工具栏切换范围、分类和排序。范围可选全部标准库或具体媒体库，只影响当前分类统计和点击后 MovieWall 的默认媒体库条件。分类按钮包括全部、类型、系列、厂商、自定义；当前“全部”按最稳妥实现等同默认“类型”视图，不混合多种实体 DTO。返回 `/tags` 时恢复范围、分类、排序、搜索、页码和滚动位置。
+
+**实体来源：** 标签与自定义标签当前均基于历史 `Tags/MovieTags` 查询语义，不按 `Tags.Source` 强行拆分；真实库中 `LegacyLabel` 同时承载了用户维护标签（如“五星”“高颜值”）和状态标识（如“已收藏”），因此 `Source` 不能可靠区分标签来源。状态 Badge（如 `新加入`、`已收藏`）不是标签分类，不进入 `/tags` 二级分类与标签统计。Genre 使用独立 `Genres/MovieGenres`，不是标签；厂商使用 `Studios/MovieStudios`，包括迁移和同步写入的 Studio/Publisher 关系。系列使用 `Series/MovieSeries`；导演使用 `Directors/MovieDirectors`（旧库可不存在，UI 显示空态）。实体列表数量使用 `COUNT(DISTINCT MovieId)`，点击实体后跳转影片墙并传递明确 ID 参数（如 `directorId`、`genreId`、`seriesId`、`studioId`、`movieTagId`、`customTagId`），不创建第二套影片列表。
 
 ### 16.6 媒体资源（Images & MediaStorage）
 

@@ -27,15 +27,19 @@ export default function MediaPage() {
     const directorId = numericParam(params, 'directorId')
     const movieTagId = numericParam(params, 'movieTagId')
     const customTagId = numericParam(params, 'customTagId')
+    const genreId = numericParam(params, 'genreId')
     const seriesId = numericParam(params, 'seriesId')
+    const studioId = numericParam(params, 'studioId')
     const libraryId = numericParam(params, 'libraryId')
     const label = actorId ? `演员：${params.get('actorName') || actorId}` :
       directorId ? `导演：${params.get('directorName') || directorId}` :
       movieTagId ? `影片标签：${params.get('movieTagName') || movieTagId}` :
       customTagId ? `自定义标签：${params.get('customTagName') || customTagId}` :
+      genreId ? `类型：${params.get('genreName') || genreId}` :
       seriesId ? `系列：${params.get('seriesName') || seriesId}` :
+      studioId ? `厂商：${params.get('studioName') || studioId}` :
       libraryId ? `媒体库：${params.get('libraryName') || libraryId}` : ''
-    return { defaults: { actorId, directorId, movieTagId, customTagId, seriesId, libraryId } satisfies MovieWallDefaults, label }
+    return { defaults: { actorId, directorId, movieTagId, customTagId, genreId, seriesId, studioId, libraryId } satisfies MovieWallDefaults, label }
   }, [params])
   const [notice, setNotice] = useState('')
   const [selected, setSelected] = useState<number[]>([])

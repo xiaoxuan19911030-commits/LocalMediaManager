@@ -99,6 +99,7 @@
 | 39 | 端口监听 | P2 | 重要 | 已部分迁移 | Bridge lifecycle；Settings；端口探测；会话鉴权；重连 | 低风险写入 | 可配置端口与运行时客户端重连 | 0.5.0 | 冲突可见；Bridge/React 自动恢复一致连接 | Tauri: Release 无控制台、端口冲突阻止重复 Bridge、health 警告、退出无残留；Automated: 日志轮转；Installed smoke: 第二实例退出且 Bridge 保持 1 个；可配置端口/客户端重连仍待完成 |
 | 40 | 任务队列 | P0 | 必须保留 | 已部分迁移 | Tasks Schema；Bridge Task Service；Task DTO；Runner；持久日志 | 数据库写入 | 独立图片/NFO Runner 与全部任务类型统一控制 | 0.5.0 | 完整状态机、重启恢复、失败重试和日志通过 | Bridge: task/list/log/pause/resume/cancel/retry；Migration: `0004`/`0005`/`0008`；Automated: 扫描、同步、整理与异常中断恢复；Real smoke: pause/resume/cancel/retry 持久日志；Installed UI: 任务阶段/失败/日志入口；独立图片/NFO Runner 仍待完成，故保持部分迁移 |
 | 41 | 其他旧版能力 | P3 | 待确认 | 需要重构 | 持续源码审计；用户确认；Roadmap/TODO | 需要备份与回滚 | 逐项拆分并进入本矩阵 | 0.5.x | 每项建立独立依赖、风险和验收后实施 | 三份旧版审计文档；Commit `83c53b5`；不代表功能完成 |
+| 42 | 厂商分类浏览 | P0 | 必须保留 | 已完整迁移 | `Studios/MovieStudios`；实体列表；MovieWall 默认条件；媒体库范围 | 无写入 | 无 | 0.5.0 | 标签页切到厂商显示厂商与去重影片数；点击进入 MovieWall 后 `studioId` 与 Smart Search、FilterBar、媒体库范围 AND 组合；返回恢复标签页状态 | Bridge: `GET /api/entities/studios` + `GET /api/search/advanced?studioId=`；Migration: N/A（复用 `0001_InitialSchema` 的 `Studios/MovieStudios`）；Automated: `EntityListsReturnDistinctMovieCounts`、`StudioListCanBeScopedToLibraryAndSorted`、`CategoryFiltersComposeWithSearchAndFilterBar`；Smoke: 本 Sprint 安装版只读验证；Commit: 本 Sprint `feat(tags): add studio category browsing` |
 
 ## 证据记录格式
 
@@ -157,3 +158,11 @@ Acceptance: 发布验证记录或独立验收文档
 - Retained user-data features: rating, favorite, custom tags, actor display ordering, poster/image adjustment, manual crop, future image SetAs, playback count, last played time, recent playback, and future Human-approved user notes.
 - Retained Feature Parity order: complete all retained legacy features first and update this matrix after each feature; run Legacy Cleanup only after retained Feature Parity reaches 100% and is stable; start Human-experience-driven product optimization only after Legacy Cleanup.
 - Do not mark custom tags, rating, favorite, actor display order, or image adjustment as cancelled.
+
+## 2026-07-19 Studio Category Evidence Note
+
+- Scope: migrate legacy studio category browsing without adding studio editing or changing metadata ownership.
+- Data source: `Studios` and `MovieStudios`; migration imports legacy Studio and Publisher values as `RelationType`.
+- UI: `/tags` uses one toolbar page with range, category and sort controls; categories are 全部、类型、系列、厂商、自定义. “全部” currently reuses the 类型/Genre list to avoid a mixed entity DTO.
+- MovieWall handoff: studio items navigate with `studioId` and optional `libraryId`, so default conditions are preserved and compose with Smart Search and FilterBar using AND.
+- Automated: Bridge tests cover studio list loading, distinct movie counts, media-library scoped stats, sorting, empty-name tolerance, and AND composition with Smart Search/FilterBar.

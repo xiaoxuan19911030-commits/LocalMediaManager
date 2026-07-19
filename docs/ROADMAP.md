@@ -136,23 +136,26 @@ Retained user-data features remain in scope: scoring, favorite, custom tags, act
 
 **P0**
 
-1. 厂商分类浏览
-2. MovieWall 随机影片
-3. 图片 SetAs
-4. 复制影片信息
+1. MovieWall 随机影片
+2. 图片 SetAs
+3. 复制影片信息
 
 **P1**
 
-5. 查重处理流程
-6. 批量整理入口
-7. 日志清理
+4. 查重处理流程
+5. 批量整理入口
+6. 日志清理
 
 **P2**
 
-8. 语言设置
-9. 托盘与关闭行为
-10. 快捷键管理
-11. 检查更新
+7. 语言设置
+8. 托盘与关闭行为
+9. 快捷键管理
+10. 检查更新
+
+### Completed Retained Parity
+
+- 厂商分类浏览：`/tags` 横向工具栏接入 `Studios/MovieStudios`，并通过统一 MovieWall 的 `studioId` 默认条件进入厂商影片集合。
 
 ### Fixed Development Order
 

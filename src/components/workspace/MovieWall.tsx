@@ -19,7 +19,9 @@ export interface MovieWallDefaults {
   directorId?: number
   movieTagId?: number
   customTagId?: number
+  genreId?: number
   seriesId?: number
+  studioId?: number
   libraryId?: number
   favorite?: boolean
   watched?: boolean

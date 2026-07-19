@@ -56,8 +56,8 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
         await Execute(connection, "INSERT INTO MovieTags(MovieId,TagId,CreatedAt) VALUES(1,1,$at),(1,2,$at),(2,3,$at),(1,4,$at),(1,5,$at),(2,6,$at)", ("$at", At));
         await Execute(connection, "INSERT INTO Genres(Id,Name,NormalizedName) VALUES(1,'办公室','办公室')");
         await Execute(connection, "INSERT INTO MovieGenres(MovieId,GenreId) VALUES(1,1)");
-        await Execute(connection, "INSERT INTO Studios(Id,Name,NormalizedName) VALUES(1,'S1','s1')");
-        await Execute(connection, "INSERT INTO MovieStudios(MovieId,StudioId,RelationType) VALUES(1,1,'Studio')");
+        await Execute(connection, "INSERT INTO Studios(Id,Name,NormalizedName) VALUES(1,'S1','s1'),(2,'','empty-studio')");
+        await Execute(connection, "INSERT INTO MovieStudios(MovieId,StudioId,RelationType) VALUES(1,1,'Studio'),(1,1,'Publisher'),(2,2,'Studio')");
         await Execute(connection, "INSERT INTO Series(Id,Name,NormalizedName) VALUES(1,'SONE','sone')");
         await Execute(connection, "INSERT INTO MovieSeries(MovieId,SeriesId,SortOrder) VALUES(1,1,0)");
         await Execute(connection, """
@@ -104,10 +104,26 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
         EntityPageDto directors = await ProductReader.ReadEntitiesPageAsync(Database, "http://localhost", "directors", "", "count", 24, 0);
         EntityPageDto series = await ProductReader.ReadEntitiesPageAsync(Database, "http://localhost", "series", "", "count", 24, 0);
         EntityPageDto movieTags = await ProductReader.ReadEntitiesPageAsync(Database, "http://localhost", "movie-tags", "", "count", 24, 0);
+        EntityPageDto genres = await ProductReader.ReadEntitiesPageAsync(Database, "http://localhost", "genres", "", "count", 24, 0);
+        EntityPageDto studios = await ProductReader.ReadEntitiesPageAsync(Database, "http://localhost", "studios", "", "count", 24, 0);
 
         Assert.Equal(1, directors.Items.Single(item => item.Name == "导演A").MovieCount);
         Assert.Equal(1, series.Items.Single(item => item.Name == "SONE").MovieCount);
         Assert.Equal(1, movieTags.Items.Single(item => item.Name == "长发").MovieCount);
+        Assert.Equal(1, genres.Items.Single(item => item.Name == "办公室").MovieCount);
+        Assert.Equal(1, studios.Items.Single(item => item.Name == "S1").MovieCount);
+    }
+
+    [Fact]
+    public async Task StudioListCanBeScopedToLibraryAndSorted()
+    {
+        EntityPageDto scoped = await ProductReader.ReadEntitiesPageAsync(Database, "http://localhost", "studios", "", "count", 24, 0, libraryId: 1);
+        EntityPageDto archived = await ProductReader.ReadEntitiesPageAsync(Database, "http://localhost", "studios", "", "count", 24, 0, libraryId: 2);
+        EntityPageDto ascending = await ProductReader.ReadEntitiesPageAsync(Database, "http://localhost", "studios", "", "count-asc", 24, 0);
+
+        Assert.Contains(scoped.Items, item => item.Name == "S1" && item.MovieCount == 1);
+        Assert.DoesNotContain(archived.Items, item => item.Name == "S1");
+        Assert.True(ascending.Items.First().MovieCount <= ascending.Items.Last().MovieCount);
     }
 
     [Fact]
@@ -138,10 +154,19 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
             "标签:长发", null, null, null, null, null, 1, null, null, 0, "all", "all", "all", "all", null, "newest", 24, 0);
         MediaPageDto movieTag = await ProductReader.AdvancedSearchAsync(Database, "http://localhost",
             "自定义标签:收藏候选", null, null, null, 1, null, null, null, null, 0, "all", "all", "all", "all", null, "newest", 24, 0);
+        MediaPageDto genre = await ProductReader.AdvancedSearchAsync(Database, "http://localhost",
+            "评分>=4", null, null, null, null, null, null, true, null, 0, "all", "all", "all", "all", null, "newest", 24, 0, genreId: 1);
+        MediaPageDto studio = await ProductReader.AdvancedSearchAsync(Database, "http://localhost",
+            "评分>=4", null, null, null, null, null, null, true, null, 0, "all", "all", "all", "all", null, "newest", 24, 0, studioId: 1);
+        MediaPageDto studioWithFilterBar = await ProductReader.AdvancedSearchAsync(Database, "http://localhost",
+            "", null, null, null, null, null, null, null, null, 0, "5", "all", "all", "all", 1, "newest", 24, 0, studioId: 1);
 
         Assert.Equal([1], director.Items.Select(item => item.DataId).ToArray());
         Assert.Equal([1], series.Items.Select(item => item.DataId).ToArray());
         Assert.Equal([1], movieTag.Items.Select(item => item.DataId).ToArray());
+        Assert.Equal([1], genre.Items.Select(item => item.DataId).ToArray());
+        Assert.Equal([1], studio.Items.Select(item => item.DataId).ToArray());
+        Assert.Empty(studioWithFilterBar.Items);
     }
 
     [Fact]

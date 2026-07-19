@@ -241,7 +241,7 @@ export interface EntityCard { id: number; name: string; movieCount: number; imag
 export interface ActorDetail { id: number; name: string; alias?: string; gender?: number; birthDate?: string; description?: string }
 export interface EntityPageResult { items: EntityCard[]; total: number; limit: number; offset: number }
 export interface AdvancedSearchFilters {
-  query: string; actorId?: number; tagId?: number; directorId?: number; movieTagId?: number; customTagId?: number; seriesId?: number; favorite?: boolean; watched?: boolean; ratingMin?: number; ratingFilter?: string
+  query: string; actorId?: number; tagId?: number; directorId?: number; movieTagId?: number; customTagId?: number; genreId?: number; seriesId?: number; studioId?: number; favorite?: boolean; watched?: boolean; ratingMin?: number; ratingFilter?: string
   metadata?: string; fileStatus?: string; metadataStatus?: string; libraryId?: number; sort?: string; limit?: number; offset?: number
 }
 export interface MetadataOverview {
