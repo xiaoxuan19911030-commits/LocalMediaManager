@@ -469,7 +469,7 @@ function ProviderDiagnosticSection({ title, description, providers, diagnostics,
         <Button variant="outlined" startIcon={<RefreshRoundedIcon/>} disabled={busy} onClick={onRefresh}>{busy ? '检测中...' : '重新检测'}</Button>
       </Stack>
       {error && <Alert severity="warning">{error}</Alert>}
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))', gap: 1.5 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2,minmax(0,1fr))' }, gap: 1.5 }}>
         {providers.map(provider => <ProviderDiagnosticCard key={provider} provider={provider} result={diagnostics.find(item => item.provider === provider)} busy={busy}/>) }
       </Box>
     </Stack>
@@ -490,7 +490,13 @@ function ProviderDiagnosticCard({ provider, result, busy }: { provider: string; 
         </Stack>
         <Typography variant="body2" color="text.secondary">影响范围 <Box component="span" sx={{ fontFamily: 'monospace' }}>{result?.scope || '—'}</Box></Typography>
         <Typography variant="body2" color="text.secondary">建议动作　{recommendation}</Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{message}</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{
+          overflowWrap: 'anywhere',
+          display: '-webkit-box',
+          WebkitLineClamp: 3,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+        }}>{message}</Typography>
       </Stack>
     </CardContent>
   </Card>
