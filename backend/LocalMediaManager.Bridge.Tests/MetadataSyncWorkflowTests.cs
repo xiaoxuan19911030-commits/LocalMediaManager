@@ -90,6 +90,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Progress,TotalItems,CompletedItems,CreatedAt,CurrentMovieId) VALUES(1,'Sync','WritingMetadata',80,1,0,$at,1)", ("$at", at));
         await Execute(connection, "INSERT INTO Genres(Id,Name,NormalizedName) VALUES(1,'Old genre','OLD GENRE'); INSERT INTO MovieGenres(MovieId,GenreId) VALUES(1,1)");
         await Execute(connection, "INSERT INTO Series(Id,Name,NormalizedName) VALUES(1,'Old series','OLD SERIES'); INSERT INTO MovieSeries(MovieId,SeriesId,SortOrder) VALUES(1,1,0)");
+        await Execute(connection, "INSERT INTO Actors(Id,Name,NormalizedName,LegacySource,CreatedAt,UpdatedAt) VALUES(1,'Old actor','OLD ACTOR','Test',$at,$at); INSERT INTO MovieActors(MovieId,ActorId,RoleName,SortOrder) VALUES(1,1,'',0)", ("$at", at));
         await Execute(connection, "INSERT INTO Tags(Id,Name,NormalizedName,Source,CreatedAt,UpdatedAt) VALUES(1,'User tag','USER TAG','User',$at,$at); INSERT INTO MovieTags(MovieId,TagId,CreatedAt) VALUES(1,1,$at)", ("$at", at));
         var movie = new SyncMovie(1, "OLD-001", "Old title", "Old plot", null, 60, null, null);
         var metadata = new ProviderMetadata("FANZA", "remote-2", "NEW-001", "New title", "New plot", "Director A",
@@ -103,6 +104,8 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieGenres mg JOIN Genres g ON g.Id=mg.GenreId WHERE mg.MovieId=1 AND g.Name='New genre'"));
         Assert.Equal(0, await Scalar(connection, "SELECT COUNT(*) FROM MovieGenres mg JOIN Genres g ON g.Id=mg.GenreId WHERE mg.MovieId=1 AND g.Name='Old genre'"));
         Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieDirectors md JOIN Directors d ON d.Id=md.DirectorId WHERE md.MovieId=1 AND d.Name='Director A'"));
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieActors ma JOIN Actors a ON a.Id=ma.ActorId WHERE ma.MovieId=1 AND a.Name='Actor A'"));
+        Assert.Equal(0, await Scalar(connection, "SELECT COUNT(*) FROM MovieActors ma JOIN Actors a ON a.Id=ma.ActorId WHERE ma.MovieId=1 AND a.Name='Old actor'"));
         Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieTags WHERE MovieId=1"));
     }
 
@@ -199,7 +202,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         await settings.SaveMetaTubeAsync(new(false, "http://127.0.0.1:8080/", 30, false, false, false, true));
         var factory = new FakeHttpClientFactory(_ => new(HttpStatusCode.ServiceUnavailable));
         var resolver = new MediaStoragePathResolver(Database, root);
-        var executor = new MetadataSyncExecutor(Database, resolver, settings, new MetaTubeProvider(factory),
+        var executor = new MetadataSyncExecutor(Database, resolver, settings, CreateDiagnostics(settings), new MetaTubeProvider(factory),
             new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database, resolver), new TaskLogService(Database));
 
         await executor.StartAsync(CancellationToken.None);
@@ -286,7 +289,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
             return new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
         });
         var resolver = new MediaStoragePathResolver(Database, root);
-        var executor = new MetadataSyncExecutor(Database, resolver, settings, new MetaTubeProvider(factory),
+        var executor = new MetadataSyncExecutor(Database, resolver, settings, CreateDiagnostics(settings, factory), new MetaTubeProvider(factory),
             new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database, resolver), new TaskLogService(Database));
         MetadataSyncLaunchResult launch = await executor.EnqueueAsync(1, "Manual");
 
@@ -308,8 +311,16 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         var settings = new MetadataProviderSettingsService(Database);
         var factory = new FakeHttpClientFactory(_ => new(HttpStatusCode.ServiceUnavailable));
         var resolver = new MediaStoragePathResolver(Database, root);
-        return new(Database, resolver, settings, new MetaTubeProvider(factory),
+        return new(Database, resolver, settings, CreateDiagnostics(settings), new MetaTubeProvider(factory),
             new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database, resolver), new TaskLogService(Database));
+    }
+    private static ProviderDiagnosticsService CreateDiagnostics(MetadataProviderSettingsService settings, IHttpClientFactory? factory = null)
+    {
+        IHttpClientFactory diagnosticsFactory = factory ?? new FakeHttpClientFactory(_ => new(HttpStatusCode.OK) { Content = new StringContent("""{"data":[]}""", Encoding.UTF8, "application/json") });
+        return new(settings, new MetaTubeProvider(diagnosticsFactory), new JavBusProvider(diagnosticsFactory),
+            new DmmProvider(diagnosticsFactory), new JavDbProvider(diagnosticsFactory),
+            new MinnanoActorProfileProvider(diagnosticsFactory), new WikipediaJpActorProfileProvider(diagnosticsFactory),
+            enableNetworkFiltering: false);
     }
     private LibraryWorkflowService CreateLibraryService() => new(Database);
     private ImageGenerationTaskService CreateImageGenerationService()

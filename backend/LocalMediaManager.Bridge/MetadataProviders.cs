@@ -92,12 +92,12 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
         MetaTubeSettingsDto settings = context.MetaTube;
         var watch = Stopwatch.StartNew();
         try {
-            using HttpClient client = CreateClient(settings);
-            using HttpResponseMessage response = await client.GetAsync(new Uri(new Uri(settings.BaseUrl), "v1/movies/search?q=ABP-001&fallback=False"), cancellationToken);
+            Uri uri = new(new Uri(settings.BaseUrl), "v1/movies/search?q=ABP-001&fallback=False");
+            string trace = await ProviderNetworkDiagnostics.ProbeAsync(Name, uri, settings.TimeoutSeconds,
+                ProviderNetworkDiagnostics.JsonHeaders, cancellationToken);
             watch.Stop();
-            return response.IsSuccessStatusCode
-                ? new(true, Name, $"连接成功（HTTP {(int)response.StatusCode}）。", watch.ElapsedMilliseconds)
-                : new(false, Name, $"服务器返回 HTTP {(int)response.StatusCode}。", watch.ElapsedMilliseconds);
+            bool success = trace.Contains("HTTP 200", StringComparison.OrdinalIgnoreCase);
+            return new(success, Name, trace, watch.ElapsedMilliseconds);
         } catch (Exception error) when (error is HttpRequestException or TaskCanceledException) {
             watch.Stop();
             return new(false, Name, error is TaskCanceledException ? "连接超时。" : error.Message, watch.ElapsedMilliseconds);
@@ -109,7 +109,7 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
         HttpClient client = clients.CreateClient("MetaTube");
         client.Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.Clear();
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.6.2"));
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.6.3"));
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         return client;
     }
@@ -133,7 +133,9 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
                 if (attempt < 2) await Task.Delay(attempt == 0 ? 500 : 1700, cancellationToken);
             }
         }
-        throw new HttpRequestException($"MetaTube 连续请求 3 次均失败。最后错误：{lastError?.Message ?? "未知错误"}", lastError);
+        string trace = await ProviderNetworkDiagnostics.ProbeAsync("MetaTube", uri, (int)Math.Max(15, client.Timeout.TotalSeconds),
+            ProviderNetworkDiagnostics.JsonHeaders, CancellationToken.None);
+        throw new ProviderNetworkException("MetaTube", uri, $"MetaTube 连续请求 3 次均失败。最后错误：{lastError?.Message ?? "未知错误"}。{trace}", lastError);
     }
 
     private static bool HasUsefulMetadata(ProviderMetadata value) =>
@@ -164,30 +166,72 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
     }
 }
 
-public sealed class CompositeMetadataProvider(MetaTubeProvider metaTube, JavBusProvider javBus) : IMetadataProvider
+public sealed class CompositeMetadataProvider(MetaTubeProvider metaTube, JavBusProvider javBus, DmmProvider dmm, JavDbProvider javDb) : IMetadataProvider
 {
     public string Name => "Metadata";
 
     public async Task<IReadOnlyList<MetadataSearchResult>> SearchAsync(string code, MetadataProviderContext settings, CancellationToken cancellationToken)
     {
         var providers = Ordered(settings).ToArray();
+        if (providers.Length == 0)
+            throw new InvalidOperationException("当前网络检测没有可用的元数据来源，本次同步已跳过不可达 Provider。");
         var results = new List<MetadataSearchResult>();
         foreach (IMetadataProvider provider in providers) {
-            IReadOnlyList<MetadataSearchResult> found = await provider.SearchAsync(code, settings, cancellationToken);
-            results.AddRange(found);
-            if (found.Count > 0 && !string.IsNullOrWhiteSpace(settings.PreferredSource)) break;
+            try {
+                IReadOnlyList<MetadataSearchResult> found = await provider.SearchAsync(code, settings, cancellationToken);
+                results.AddRange(found);
+                if (found.Count > 0 && !string.IsNullOrWhiteSpace(settings.PreferredSource)) break;
+            } catch (Exception error) when (error is not OperationCanceledException && string.IsNullOrWhiteSpace(settings.PreferredSource)) {
+                results.Add(new($"__error:{provider.Name}", error.Message, code, null));
+            }
         }
+        MetadataSearchResult[] errors = results.Where(value => value.Provider.StartsWith("__error:", StringComparison.Ordinal)).ToArray();
+        results.RemoveAll(value => value.Provider.StartsWith("__error:", StringComparison.Ordinal));
+        if (results.Count == 0 && errors.Length > 0)
+            throw new HttpRequestException("All metadata providers failed: " + string.Join(" | ", errors.Select(value => $"{value.Provider[8..]}: {value.ExternalId}")));
         return results;
     }
 
     public async Task<ProviderMetadata?> GetMetadataAsync(MetadataSearchResult result, MetadataProviderContext settings, CancellationToken cancellationToken)
     {
-        IMetadataProvider provider = result.Provider.Equals("JavBus", StringComparison.OrdinalIgnoreCase) ? javBus : metaTube;
-        return await provider.GetMetadataAsync(result, settings, cancellationToken);
+        IMetadataProvider provider = result.Provider.ToLowerInvariant() switch {
+            "javbus" => javBus,
+            "dmm" => dmm,
+            "javdb" => javDb,
+            _ => metaTube,
+        };
+        if (provider == dmm || provider == javDb)
+            return await provider.GetMetadataAsync(result, settings, cancellationToken);
+        if (provider == javBus || !settings.JavBus.Enabled || !string.IsNullOrWhiteSpace(settings.PreferredSource))
+            return await provider.GetMetadataAsync(result, settings, cancellationToken);
+
+        ProviderMetadata? primary = null;
+        Exception? primaryError = null;
+        try {
+            primary = await metaTube.GetMetadataAsync(result, settings, cancellationToken);
+        } catch (Exception error) when (error is not OperationCanceledException) {
+            primaryError = error;
+        }
+
+        if (primary is not null && !NeedsJavBusSupplement(primary))
+            return primary;
+
+        ProviderMetadata? fallback = await TryJavBusAsync(result.Code, settings, cancellationToken);
+        if (primary is null) {
+            if (fallback is not null) return fallback;
+            if (primaryError is not null) throw primaryError;
+            return null;
+        }
+        return fallback is null ? primary : Merge(primary, fallback);
     }
 
     public Task<IReadOnlyList<MetadataImage>> GetImagesAsync(ProviderMetadata metadata, CancellationToken cancellationToken) =>
-        metadata.Provider.Equals("JavBus", StringComparison.OrdinalIgnoreCase) ? javBus.GetImagesAsync(metadata, cancellationToken) : metaTube.GetImagesAsync(metadata, cancellationToken);
+        metadata.Provider.ToLowerInvariant() switch {
+            "javbus" => javBus.GetImagesAsync(metadata, cancellationToken),
+            "dmm" => dmm.GetImagesAsync(metadata, cancellationToken),
+            "javdb" => javDb.GetImagesAsync(metadata, cancellationToken),
+            _ => metaTube.GetImagesAsync(metadata, cancellationToken),
+        };
 
     public Task<ProviderConnectionResult> TestConnectionAsync(MetadataProviderContext settings, CancellationToken cancellationToken) =>
         metaTube.TestConnectionAsync(settings, cancellationToken);
@@ -195,17 +239,74 @@ public sealed class CompositeMetadataProvider(MetaTubeProvider metaTube, JavBusP
     private IEnumerable<IMetadataProvider> Ordered(MetadataProviderContext settings)
     {
         if (settings.PreferredSource?.Equals("JavBus", StringComparison.OrdinalIgnoreCase) == true) {
-            yield return javBus;
+            if (settings.JavBus.Enabled) yield return javBus;
             yield break;
         }
         if (settings.PreferredSource?.Equals("MetaTube", StringComparison.OrdinalIgnoreCase) == true) {
-            yield return metaTube;
+            if (settings.MetaTube.Enabled) yield return metaTube;
             yield break;
         }
-        var items = new List<(int Priority, IMetadataProvider Provider)> { (1, metaTube) };
+        if (settings.PreferredSource?.Equals("DMM", StringComparison.OrdinalIgnoreCase) == true) {
+            if ((settings.Dmm ?? SettingsDefaults.Dmm).Enabled) yield return dmm;
+            yield break;
+        }
+        if (settings.PreferredSource?.Equals("JavDB", StringComparison.OrdinalIgnoreCase) == true) {
+            if ((settings.JavDb ?? SettingsDefaults.JavDb).Enabled) yield return javDb;
+            yield break;
+        }
+        var items = new List<(int Priority, IMetadataProvider Provider)>();
+        if (settings.MetaTube.Enabled) items.Add((1, metaTube));
         if (settings.JavBus.Enabled) items.Add((settings.JavBus.Priority, javBus));
+        if ((settings.Dmm ?? SettingsDefaults.Dmm).Enabled) items.Add(((settings.Dmm ?? SettingsDefaults.Dmm).Priority, dmm));
+        if ((settings.JavDb ?? SettingsDefaults.JavDb).Enabled) items.Add(((settings.JavDb ?? SettingsDefaults.JavDb).Priority, javDb));
         foreach ((_, IMetadataProvider provider) in items.OrderBy(item => item.Priority)) yield return provider;
     }
+
+    private async Task<ProviderMetadata?> TryJavBusAsync(string code, MetadataProviderContext settings, CancellationToken cancellationToken)
+    {
+        try {
+            MetadataProviderContext javBusOnly = settings with { PreferredSource = "JavBus" };
+            MetadataSearchResult? result = (await javBus.SearchAsync(code, javBusOnly, cancellationToken)).FirstOrDefault();
+            return result is null ? null : await javBus.GetMetadataAsync(result, javBusOnly, cancellationToken);
+        } catch (Exception error) when (error is HttpRequestException or InvalidDataException or InvalidOperationException or TaskCanceledException) {
+            if (error is OperationCanceledException && cancellationToken.IsCancellationRequested) throw;
+            return null;
+        }
+    }
+
+    private static bool NeedsJavBusSupplement(ProviderMetadata metadata) =>
+        string.IsNullOrWhiteSpace(metadata.Title)
+        || string.IsNullOrWhiteSpace(metadata.Director)
+        || string.IsNullOrWhiteSpace(metadata.Studio)
+        || string.IsNullOrWhiteSpace(metadata.Publisher)
+        || string.IsNullOrWhiteSpace(metadata.Series)
+        || metadata.DurationSeconds is null or <= 0
+        || string.IsNullOrWhiteSpace(metadata.ReleaseDate)
+        || metadata.Actors.Count == 0
+        || metadata.Genres.Count == 0
+        || metadata.Images.Count == 0;
+
+    private static ProviderMetadata Merge(ProviderMetadata primary, ProviderMetadata fallback) => primary with {
+        Title = FirstText(primary.Title, fallback.Title),
+        Description = FirstText(primary.Description, fallback.Description),
+        Director = FirstText(primary.Director, fallback.Director),
+        Studio = FirstText(primary.Studio, fallback.Studio),
+        Publisher = FirstText(primary.Publisher, fallback.Publisher),
+        Series = FirstText(primary.Series, fallback.Series),
+        DurationSeconds = primary.DurationSeconds is > 0 ? primary.DurationSeconds : fallback.DurationSeconds,
+        ReleaseDate = FirstText(primary.ReleaseDate, fallback.ReleaseDate),
+        WebUrl = FirstText(primary.WebUrl, fallback.WebUrl),
+        Genres = Union(primary.Genres, fallback.Genres),
+        Actors = Union(primary.Actors, fallback.Actors),
+        Images = primary.Images.Count > 0 ? primary.Images : fallback.Images,
+    };
+
+    private static string? FirstText(string? primary, string? fallback) =>
+        string.IsNullOrWhiteSpace(primary) ? fallback : primary;
+
+    private static IReadOnlyList<string> Union(IReadOnlyList<string> primary, IReadOnlyList<string> fallback) =>
+        primary.Concat(fallback).Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 }
 
 public sealed class JavBusProvider(IHttpClientFactory clients) : IMetadataProvider
@@ -246,11 +347,14 @@ public sealed class JavBusProvider(IHttpClientFactory clients) : IMetadataProvid
         var watch = Stopwatch.StartNew();
         try {
             using HttpClient client = CreateClient(context.JavBus);
-            using HttpResponseMessage response = await client.GetAsync(new Uri(context.JavBus.BaseUrl), cancellationToken);
+            Uri uri = new(context.JavBus.BaseUrl);
+            string trace = await ProviderNetworkDiagnostics.ProbeAsync(Name, uri, context.JavBus.TimeoutSeconds,
+                request => ProviderNetworkDiagnostics.BrowserHeaders(request, context.JavBus.Cookie, context.JavBus.BaseUrl), cancellationToken);
             watch.Stop();
-            return response.IsSuccessStatusCode
-                ? new(true, Name, $"连接成功（HTTP {(int)response.StatusCode}）。", watch.ElapsedMilliseconds)
-                : new(false, Name, JavBusErrors.ForStatus(response.StatusCode), watch.ElapsedMilliseconds);
+            bool success = trace.Contains("HTTP 200", StringComparison.OrdinalIgnoreCase)
+                && !trace.Contains("Cloudflare: detected", StringComparison.OrdinalIgnoreCase)
+                && !trace.Contains("Blocked Page:", StringComparison.OrdinalIgnoreCase);
+            return new(success, Name, trace, watch.ElapsedMilliseconds);
         } catch (Exception error) when (error is HttpRequestException or TaskCanceledException) {
             watch.Stop();
             return new(false, Name, error is TaskCanceledException ? "JavBus 请求超时，请检查网络或代理。" : $"JavBus 网络错误：{error.Message}", watch.ElapsedMilliseconds);
@@ -262,8 +366,9 @@ public sealed class JavBusProvider(IHttpClientFactory clients) : IMetadataProvid
         HttpClient client = clients.CreateClient("JavBus");
         client.Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.Clear();
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.6.2"));
-        client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36");
+        client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+        client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("ja-JP,ja;q=0.9,en-US;q=0.7,en;q=0.5");
         if (!string.IsNullOrWhiteSpace(settings.Cookie))
             client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", settings.Cookie);
         return client;
@@ -293,11 +398,14 @@ public sealed class JavBusProvider(IHttpClientFactory clients) : IMetadataProvid
                 if (attempt < attempts - 1) await Task.Delay(attempt == 0 ? 500 : 1500, cancellationToken);
             }
         }
-        throw new HttpRequestException(lastError is TaskCanceledException ? "JavBus 请求超时，请检查网络或代理。" : $"JavBus 网络错误：{lastError?.Message ?? "未知错误"}", lastError);
+        string trace = await ProviderNetworkDiagnostics.ProbeAsync("JavBus", uri, settings.TimeoutSeconds,
+            request => ProviderNetworkDiagnostics.BrowserHeaders(request, settings.Cookie, settings.BaseUrl), CancellationToken.None);
+        throw new ProviderNetworkException("JavBus", uri,
+            lastError is TaskCanceledException ? $"JavBus 请求超时，请检查网络或代理。{trace}" : $"JavBus 网络错误：{lastError?.Message ?? "未知错误"}。{trace}", lastError);
     }
 
     private static bool HasUsefulMetadata(ProviderMetadata value) =>
-        !string.IsNullOrWhiteSpace(value.Title) || value.Images.Count > 0 || value.Actors.Count > 0 || value.Genres.Count > 0;
+        !string.IsNullOrWhiteSpace(value.Title) || value.Images.Count > 0 || value.Actors.Count > 0;
     private static string Comparable(string value) => value.Replace("-", "").Replace("_", "").Replace(" ", "").Trim();
 }
 

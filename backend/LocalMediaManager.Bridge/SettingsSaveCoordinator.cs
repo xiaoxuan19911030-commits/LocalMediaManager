@@ -758,7 +758,7 @@ public sealed class SettingsSaveCoordinator(
 
 public static class SettingsDefaults
 {
-    public static JavBusSettingsDto JavBus => new(false, 2, JavBusProvider.DefaultBaseUrl, 30, 1, "", true, true);
+    public static JavBusSettingsDto JavBus => new(true, 2, JavBusProvider.DefaultBaseUrl, 30, 1, "", true, true);
     public static WebMetadataSettingsDto Dmm => new(false, 3, DmmProvider.DefaultBaseUrl, 30, 1, "", true, true);
     public static WebMetadataSettingsDto JavDb => new(false, 4, JavDbProvider.DefaultBaseUrl, 30, 1, "", true, true);
     public static WebMetadataSettingsDto Minnano => new(false, 1, MinnanoActorProfileProvider.DefaultBaseUrl, 30, 1, "", true, true);

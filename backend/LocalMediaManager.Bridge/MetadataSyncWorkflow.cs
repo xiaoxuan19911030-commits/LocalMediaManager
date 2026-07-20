@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 
@@ -12,6 +13,7 @@ public sealed record SavedImage(string Type, string Path, string SourceUrl, long
     int Width = 0, int Height = 0, string? ContentType = null, string? FileHash = null,
     string Ownership = "Provider", bool IsDerived = false);
 public sealed record PreparedFiles(IReadOnlyList<SavedImage> Images, string? NfoPath, IReadOnlyList<string> CreatedPaths);
+public sealed record ImageDownloadOptions(string? Cookie = null, string? Referer = null);
 
 public sealed class TaskLogService(string databasePath)
 {
@@ -37,12 +39,20 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
     private const long MaximumDownloadBytes = 64L * 1024 * 1024;
 
     public async Task<IReadOnlyList<SavedImage>> DownloadAsync(MediaStoragePathResolver pathResolver, MediaStorageMovie movie,
-        IReadOnlyList<MetadataImage> images, int timeoutSeconds, bool overwriteExisting, CancellationToken cancellationToken)
+        IReadOnlyList<MetadataImage> images, int timeoutSeconds, bool overwriteExisting, CancellationToken cancellationToken,
+        ImageDownloadOptions? options = null)
     {
         var saved = new List<SavedImage>();
         if (images.Count == 0) return saved;
         using HttpClient client = clients.CreateClient("MetadataImages");
         client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+        client.DefaultRequestHeaders.UserAgent.Clear();
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.6.3"));
+        client.DefaultRequestHeaders.Accept.ParseAdd("image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
+        if (!string.IsNullOrWhiteSpace(options?.Cookie))
+            client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", options.Cookie);
+        if (!string.IsNullOrWhiteSpace(options?.Referer))
+            client.DefaultRequestHeaders.Referrer = new Uri(options.Referer);
         int previewIndex = 0;
         string temporaryRoot = await pathResolver.TemporaryRootAsync(cancellationToken);
         try {
@@ -161,6 +171,7 @@ public sealed class MetadataWriteService(string databasePath)
             await ExecuteAsync(connection, transaction, "DELETE FROM MovieGenres WHERE MovieId=$movie", ("$movie", movie.Id));
             await ExecuteAsync(connection, transaction, "DELETE FROM MovieSeries WHERE MovieId=$movie", ("$movie", movie.Id));
             await ExecuteAsync(connection, transaction, "DELETE FROM MovieStudios WHERE MovieId=$movie", ("$movie", movie.Id));
+            await ExecuteAsync(connection, transaction, "DELETE FROM MovieActors WHERE MovieId=$movie", ("$movie", movie.Id));
             if (await TableExistsAsync(connection, transaction, "MovieDirectors"))
                 await ExecuteAsync(connection, transaction, "DELETE FROM MovieDirectors WHERE MovieId=$movie", ("$movie", movie.Id));
         }
@@ -239,30 +250,51 @@ public sealed class MetadataSyncExecutor(
     string databasePath,
     MediaStoragePathResolver pathResolver,
     MetadataProviderSettingsService settingsService,
+    ProviderDiagnosticsService diagnostics,
     IMetadataProvider provider,
     MetadataWriteService writer,
     ImageDownloadService images,
     NfoService nfo,
     TaskLogService logs) : BackgroundService
 {
+    private const int MaxConcurrentSyncTasks = 3;
     private static readonly string[] ActiveStates = ["Preparing", "FetchingMetadata", "DownloadingImages", "WritingMetadata", "WritingNfo", "Running"];
     private readonly ConcurrentDictionary<long, CancellationTokenSource> cancellations = new();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await RecoverInterruptedAsync(stoppingToken);
+        var running = new List<Task>();
         while (!stoppingToken.IsCancellationRequested) {
             try {
-                MetadataProviderContext settings = await ReadProviderContextAsync();
-                long? taskId = await ClaimAsync(stoppingToken);
-                if (taskId is null) { await Task.Delay(750, stoppingToken); continue; }
-                using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-                cancellations[taskId.Value] = linked;
-                try { await ExecuteOneAsync(taskId.Value, settings, linked.Token); }
-                finally { cancellations.TryRemove(taskId.Value, out _); }
+                MetadataProviderContext settings = await ReadProviderContextAsync(stoppingToken);
+                foreach (Task completed in running.Where(task => task.IsCompleted).ToArray()) {
+                    running.Remove(completed);
+                    if (completed.IsFaulted) await completed;
+                }
+                while (running.Count < MaxConcurrentSyncTasks) {
+                    long? taskId = await ClaimAsync(stoppingToken);
+                    if (taskId is null) break;
+                    running.Add(RunClaimedAsync(taskId.Value, settings, stoppingToken));
+                }
+                if (running.Count == 0) { await Task.Delay(750, stoppingToken); continue; }
+                Task finished = await Task.WhenAny(running.Append(Task.Delay(750, stoppingToken)));
+                if (finished.IsFaulted) await finished;
             } catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception error) { Console.Error.WriteLine($"Metadata sync runner: {error}"); await Task.Delay(1000, stoppingToken); }
         }
+        if (running.Count > 0) {
+            try { await Task.WhenAll(running); }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+        }
+    }
+
+    private async Task RunClaimedAsync(long taskId, MetadataProviderContext settings, CancellationToken stoppingToken)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        cancellations[taskId] = linked;
+        try { await ExecuteOneAsync(taskId, settings, linked.Token); }
+        finally { cancellations.TryRemove(taskId, out _); }
     }
 
     public async Task<TaskMutationResult> PauseAsync(long taskId) {
@@ -323,19 +355,51 @@ public sealed class MetadataSyncExecutor(
             settings = settings with { PreferredSource = await ReadSourceAsync(taskId, cancellationToken) };
             await StageAsync(taskId, "FetchingMetadata", 22, $"{settings.PreferredSource ?? "自动数据源"} 搜索：{movie.Code}", cancellationToken);
             IReadOnlyList<MetadataSearchResult> results = await provider.SearchAsync(movie.Code, settings, cancellationToken);
-            MetadataSearchResult? selected = results.FirstOrDefault();
-            if (selected is null) throw new InvalidOperationException($"{settings.PreferredSource ?? "元数据源"} 未找到 {movie.Code} 的结果。");
-            await SetProviderAsync(taskId, selected.Provider, cancellationToken);
-            ProviderMetadata? metadata = await provider.GetMetadataAsync(selected, settings, cancellationToken);
-            if (metadata is null) throw new InvalidOperationException($"{selected.Provider} 返回结果缺少可用元数据。");
-            if (!Comparable(metadata.Code).Equals(Comparable(movie.Code), StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"{selected.Provider} 结果番号不匹配：期望 {movie.Code}，实际 {metadata.Code}。");
+            await logs.WriteAsync(taskId, "Info", $"Provider Search Results: {results.Count} candidate(s).", cancellationToken);
+            if (results.Count == 0) throw new InvalidOperationException($"{settings.PreferredSource ?? "元数据源"} 未找到 {movie.Code} 的结果。");
+            ProviderMetadata? metadata = null;
+            var attemptErrors = new List<string>();
+            foreach (MetadataSearchResult selected in results) {
+                await SetProviderAsync(taskId, selected.Provider, cancellationToken);
+                await logs.WriteAsync(taskId, "Info", $"Provider Detail Request: {selected.Provider} externalId={selected.ExternalId}", cancellationToken);
+                try {
+                    ProviderMetadata? candidate = await provider.GetMetadataAsync(selected, settings, cancellationToken);
+                    if (candidate is null) {
+                        attemptErrors.Add($"{selected.Provider}: empty metadata");
+                        await logs.WriteAsync(taskId, "Warning", $"{selected.Provider} 返回结果缺少可用元数据，继续尝试下一个候选。", cancellationToken);
+                        continue;
+                    }
+                    if (!Comparable(candidate.Code).Equals(Comparable(movie.Code), StringComparison.OrdinalIgnoreCase)) {
+                        attemptErrors.Add($"{selected.Provider}: expected {movie.Code}, got {candidate.Code}");
+                        await logs.WriteAsync(taskId, "Warning", $"{selected.Provider} 结果番号不匹配：期望 {movie.Code}，实际 {candidate.Code}，继续尝试下一个候选。", cancellationToken);
+                        continue;
+                    }
+                    metadata = candidate;
+                    break;
+                } catch (Exception error) when (error is not OperationCanceledException) {
+                    attemptErrors.Add($"{selected.Provider}: {error.Message}");
+                    await logs.WriteAsync(taskId, "Warning", $"{selected.Provider} 详情获取失败，继续尝试下一个候选：{error.Message}", cancellationToken);
+                }
+            }
+            if (metadata is null)
+                throw new InvalidOperationException($"{settings.PreferredSource ?? "元数据源"} 未找到 {movie.Code} 的可用详情。Attempts: {string.Join(" | ", attemptErrors)}");
+            await logs.WriteAsync(taskId, "Info",
+                $"Parse Success: title={(string.IsNullOrWhiteSpace(metadata.Title) ? 0 : 1)}, actors={metadata.Actors.Count}, director={(string.IsNullOrWhiteSpace(metadata.Director) ? 0 : 1)}, series={(string.IsNullOrWhiteSpace(metadata.Series) ? 0 : 1)}, tags={metadata.Genres.Count}, images={metadata.Images.Count}",
+                cancellationToken);
 
             IReadOnlyList<SavedImage> savedImages = [];
             if (settings.DownloadImages(metadata.Provider)) {
                 await StageAsync(taskId, "DownloadingImages", 48, $"下载图片（{metadata.Images.Count} 项）", cancellationToken);
-                savedImages = await images.DownloadAsync(pathResolver, new(movie.Id, movie.Code, movie.Title), await provider.GetImagesAsync(metadata, cancellationToken), settings.TimeoutSeconds(metadata.Provider), overwrite, cancellationToken);
-                createdPaths.AddRange(savedImages.Where(value => value.Created).Select(value => value.Path));
+                try {
+                    ImageDownloadOptions? imageOptions = metadata.Provider.Equals("JavBus", StringComparison.OrdinalIgnoreCase)
+                        ? new(settings.JavBus.Cookie, metadata.WebUrl ?? settings.JavBus.BaseUrl)
+                        : null;
+                    savedImages = await images.DownloadAsync(pathResolver, new(movie.Id, movie.Code, movie.Title),
+                        await provider.GetImagesAsync(metadata, cancellationToken), settings.TimeoutSeconds(metadata.Provider), overwrite, cancellationToken, imageOptions);
+                    createdPaths.AddRange(savedImages.Where(value => value.Created).Select(value => value.Path));
+                } catch (Exception error) when (metadata.Provider.Equals("JavBus", StringComparison.OrdinalIgnoreCase) && error is not OperationCanceledException) {
+                    await logs.WriteAsync(taskId, "Warning", $"JavBus 图片下载失败，已保留元数据同步：{error.Message}", cancellationToken);
+                }
             }
             string? nfoPath = null;
             if (settings.MetaTube.WriteNfo) {
@@ -396,10 +460,11 @@ public sealed class MetadataSyncExecutor(
         try { using JsonDocument json=JsonDocument.Parse(payload); return json.RootElement.TryGetProperty("Source", out JsonElement value) && value.ValueKind == JsonValueKind.String ? NormalizeSource(value.GetString()) : null; }
         catch(JsonException) { return null; }
     }
-    private async Task<MetadataProviderContext> ReadProviderContextAsync() =>
-        new(await settingsService.ReadMetaTubeAsync(), await settingsService.ReadJavBusAsync());
+    private async Task<MetadataProviderContext> ReadProviderContextAsync(CancellationToken token) =>
+        await diagnostics.FilterMovieProvidersAsync(new(await settingsService.ReadMetaTubeAsync(), await settingsService.ReadJavBusAsync(), null,
+            await settingsService.ReadDmmAsync(), await settingsService.ReadJavDbAsync()), token);
     private async Task SetProviderAsync(long id,string providerName,CancellationToken token){await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Provider=$provider,UpdatedAt=$at WHERE Id=$id",("$provider",providerName),("$at",Now()),("$id",id));await logs.WriteAsync(id,"Info",$"使用数据源：{providerName}",token);}
-    private static string? NormalizeSource(string? value) => value?.Trim().ToLowerInvariant() switch { "javbus" => "JavBus", "metatube" => "MetaTube", _ => null };
+    private static string? NormalizeSource(string? value) => value?.Trim().ToLowerInvariant() switch { "javbus" => "JavBus", "metatube" => "MetaTube", "dmm" => "DMM", "javdb" => "JavDB", _ => null };
     private async Task StageAsync(long id,string stage,double progress,string message,CancellationToken token){await EnsureRunnableAsync(id,token);await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Status=$stage,Stage=$stage,Progress=$progress,UpdatedAt=$at WHERE Id=$id",("$stage",stage),("$progress",progress),("$at",Now()),("$id",id));await logs.WriteAsync(id,"Info",message,token);}
     private async Task EnsureRunnableAsync(long id,CancellationToken token){while(true){token.ThrowIfCancellationRequested();await using var c=await OpenAsync();string? s=await ScalarTextAsync(c,"SELECT Status FROM Tasks WHERE Id=$id",("$id",id));if(s=="Cancelled")throw new OperationCanceledException(token);if(s!="Paused")return;await Task.Delay(250,token);}}
     private async Task CompleteAsync(long id,string summary,CancellationToken token){await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Status='Completed',Stage='Completed',Progress=100,CompletedItems=1,ResultJson=$result,ResultSummary='元数据同步完成',ErrorMessage=NULL,CompletedAt=$at,UpdatedAt=$at WHERE Id=$id",("$result",summary),("$at",Now()),("$id",id));await logs.WriteAsync(id,"Info","元数据、图片与 NFO 工作流已完成。",token);}

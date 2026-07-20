@@ -100,28 +100,39 @@ public sealed class MinnanoActorProfileProvider(IHttpClientFactory clients) : IA
         HttpClient client = clients.CreateClient(name);
         client.Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.Clear();
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.6.2"));
-        client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("ja-JP,ja;q=0.9");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36");
+        client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8");
+        client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("ja-JP,ja;q=0.9,en-US;q=0.7,en;q=0.5");
         if (!string.IsNullOrWhiteSpace(settings.Cookie)) client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", settings.Cookie);
         return client;
     }
     internal static async Task<string> GetTextAsync(HttpClient client, Uri uri, CancellationToken token)
     {
-        using HttpResponseMessage response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, token);
-        if (!response.IsSuccessStatusCode) throw new InvalidOperationException(ProviderParsing.StatusMessage(uri.Host, response.StatusCode));
-        string text = await response.Content.ReadAsStringAsync(token);
-        if (ProviderParsing.LooksBlocked(text)) throw new InvalidOperationException("来源返回了验证或登录页面。");
-        return text;
+        try {
+            using HttpResponseMessage response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, token);
+            if (!response.IsSuccessStatusCode) throw new InvalidOperationException(ProviderParsing.StatusMessage(uri.Host, response.StatusCode));
+            string text = await response.Content.ReadAsStringAsync(token);
+            if (ProviderParsing.LooksBlocked(text)) throw new InvalidOperationException("来源返回了验证或登录页面。");
+            return text;
+        } catch (Exception error) when (error is HttpRequestException or TaskCanceledException) {
+            string trace = await ProviderNetworkDiagnostics.ProbeAsync(uri.Host, uri, 30,
+                request => ProviderNetworkDiagnostics.BrowserHeaders(request, null, uri.GetLeftPart(UriPartial.Authority) + "/"), CancellationToken.None);
+            throw new ProviderNetworkException(uri.Host, uri, $"{error.Message}. {trace}", error);
+        }
     }
     internal static async Task<ProviderConnectionResult> TestAsync(IHttpClientFactory clients, string name, WebMetadataSettingsDto settings, CancellationToken token)
     {
         var watch = Stopwatch.StartNew();
         try {
-            using HttpClient client = ActorHttp(clients, name, settings);
-            using HttpResponseMessage response = await client.GetAsync(settings.BaseUrl, HttpCompletionOption.ResponseHeadersRead, token);
-            return new(response.IsSuccessStatusCode, name, response.IsSuccessStatusCode ? "连接成功。" : ProviderParsing.StatusMessage(name, response.StatusCode), watch.ElapsedMilliseconds);
+            Uri uri = new(settings.BaseUrl);
+            string trace = await ProviderNetworkDiagnostics.ProbeAsync(name, uri, settings.TimeoutSeconds,
+                request => ProviderNetworkDiagnostics.BrowserHeaders(request, settings.Cookie, settings.BaseUrl), token);
+            bool success = trace.Contains("HTTP 200", StringComparison.OrdinalIgnoreCase)
+                && !trace.Contains("Cloudflare: detected", StringComparison.OrdinalIgnoreCase)
+                && !trace.Contains("Blocked Page:", StringComparison.OrdinalIgnoreCase);
+            return new(success, name, trace, watch.ElapsedMilliseconds);
         } catch (Exception error) when (error is HttpRequestException or TaskCanceledException) {
-            return new(false, name, error is TaskCanceledException ? "请求超时，请检查代理后重试。" : "网络请求失败。", watch.ElapsedMilliseconds);
+            return new(false, name, error is TaskCanceledException ? $"{name} HTTP Timeout" : $"{name} 网络请求失败：{error.Message}", watch.ElapsedMilliseconds);
         }
     }
     private static string NormalizeName(string value) => Regex.Replace(value ?? "", @"[\s・･·]", "").ToUpperInvariant();

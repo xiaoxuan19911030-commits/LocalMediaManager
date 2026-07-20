@@ -50,11 +50,25 @@ public abstract class HtmlMetadataProvider(IHttpClientFactory clients) : IMetada
         WebMetadataSettingsDto settings = Settings(context);
         var watch = Stopwatch.StartNew();
         try {
+            Uri uri = new(settings.BaseUrl);
             using HttpClient client = CreateClient(settings);
-            using HttpResponseMessage response = await client.GetAsync(settings.BaseUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            return new(response.IsSuccessStatusCode, Name, response.IsSuccessStatusCode ? $"连接成功（HTTP {(int)response.StatusCode}）。" : ProviderParsing.StatusMessage(Name, response.StatusCode), watch.ElapsedMilliseconds);
+            using HttpResponseMessage response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                return new(false, Name, ProviderParsing.StatusMessage(Name, response.StatusCode), watch.ElapsedMilliseconds);
+            string html = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (ProviderParsing.LooksBlocked(html)) {
+                string trace = await ProviderNetworkDiagnostics.ProbeAsync(Name, uri, settings.TimeoutSeconds,
+                    request => ProviderNetworkDiagnostics.BrowserHeaders(request, settings.Cookie, settings.BaseUrl), CancellationToken.None);
+                return new(false, Name, trace, watch.ElapsedMilliseconds);
+            }
+            string okTrace = await ProviderNetworkDiagnostics.ProbeAsync(Name, uri, settings.TimeoutSeconds,
+                request => ProviderNetworkDiagnostics.BrowserHeaders(request, settings.Cookie, settings.BaseUrl), CancellationToken.None);
+            return new(true, Name, okTrace, watch.ElapsedMilliseconds);
         } catch (Exception error) when (error is HttpRequestException or TaskCanceledException) {
-            return new(false, Name, error is TaskCanceledException ? $"{Name} 请求超时，请检查代理后重试。" : $"{Name} 网络错误：{error.Message}", watch.ElapsedMilliseconds);
+            Uri uri = new(settings.BaseUrl);
+            string trace = await ProviderNetworkDiagnostics.ProbeAsync(Name, uri, settings.TimeoutSeconds,
+                request => ProviderNetworkDiagnostics.BrowserHeaders(request, settings.Cookie, settings.BaseUrl), CancellationToken.None);
+            return new(false, Name, error is TaskCanceledException ? $"{Name} HTTP Timeout. {trace}" : $"{Name} 网络错误：{error.Message}. {trace}", watch.ElapsedMilliseconds);
         }
     }
 
@@ -63,9 +77,10 @@ public abstract class HtmlMetadataProvider(IHttpClientFactory clients) : IMetada
         HttpClient client = clients.CreateClient(Name);
         client.Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.Clear();
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Mozilla", "5.0"));
-        client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml");
-        client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("ja-JP,ja;q=0.9,en;q=0.5");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36");
+        client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+        client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("ja-JP,ja;q=0.9,en-US;q=0.7,en;q=0.5");
+        client.DefaultRequestHeaders.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
         if (!string.IsNullOrWhiteSpace(settings.Cookie)) client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", settings.Cookie);
         return client;
     }
@@ -87,7 +102,9 @@ public abstract class HtmlMetadataProvider(IHttpClientFactory clients) : IMetada
                 if (attempt < settings.RetryCount) await Task.Delay(500 * (attempt + 1), cancellationToken);
             }
         }
-        throw new HttpRequestException(last is TaskCanceledException ? $"{uri.Host} request timed out." : last?.Message, last);
+        string trace = await ProviderNetworkDiagnostics.ProbeAsync(uri.Host, uri, settings.TimeoutSeconds,
+            request => ProviderNetworkDiagnostics.BrowserHeaders(request, settings.Cookie, uri.GetLeftPart(UriPartial.Authority) + "/"), CancellationToken.None);
+        throw new ProviderNetworkException(uri.Host, uri, last is TaskCanceledException ? $"{uri.Host} request timed out. {trace}" : $"{last?.Message}. {trace}", last);
     }
 }
 
@@ -210,7 +227,7 @@ internal static class ProviderParsing
     public static int? Minutes(string? value) => Regex.Match(value ?? "", @"\d+") is { Success: true } match && int.TryParse(match.Value, out int minutes) ? minutes * 60 : null;
     public static string? Date(string? value) => DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date) && date.Year > 1900 ? date.ToString("yyyy-MM-dd") : null;
     public static bool Useful(ProviderMetadata value) => !string.IsNullOrWhiteSpace(value.Title) || value.Actors.Count > 0 || value.Genres.Count > 0 || value.Images.Count > 0;
-    public static bool LooksBlocked(string html) => Regex.IsMatch(html, "captcha|cf-chl|年齢認証|age.?check|sign.?in|not-available-in-your-region", RegexOptions.IgnoreCase);
+    public static bool LooksBlocked(string html) => Regex.IsMatch(html, "captcha|cf-chl|cloudflare|turnstile|年齢認証|age.?check|sign.?in|login|not-available-in-your-region|This content is not available in your region|region", RegexOptions.IgnoreCase);
     public static string StatusMessage(string provider, HttpStatusCode status) => status switch {
         HttpStatusCode.Forbidden => $"{provider} 请求被拒绝，请检查 Cookie、代理或地区网络。",
         (HttpStatusCode)429 => $"{provider} 请求过于频繁，请稍后重试。",

@@ -68,11 +68,13 @@ builder.Services.AddSingleton(serviceProvider => new ActorProfileProviderService
     serviceProvider.GetRequiredService<WikipediaJpActorProfileProvider>(),
     serviceProvider.GetRequiredService<ActorProfileService>()));
 builder.Services.AddSingleton<ProviderDiagnosticsService>();
+builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<ProviderDiagnosticsService>());
 builder.Services.AddSingleton<IMetadataProvider, CompositeMetadataProvider>();
 builder.Services.AddSingleton(serviceProvider => new MetadataSyncExecutor(
     databasePath,
     serviceProvider.GetRequiredService<MediaStoragePathResolver>(),
     serviceProvider.GetRequiredService<MetadataProviderSettingsService>(),
+    serviceProvider.GetRequiredService<ProviderDiagnosticsService>(),
     serviceProvider.GetRequiredService<IMetadataProvider>(),
     serviceProvider.GetRequiredService<MetadataWriteService>(),
     serviceProvider.GetRequiredService<ImageDownloadService>(),
@@ -150,7 +152,7 @@ app.Use(async (context, next) => {
 app.MapGet("/health", () => Results.Ok(new {
     product = "Local Media Manager",
     abbreviation = "LMM",
-    version = "0.6.2",
+    version = "0.6.3",
     status = "ok",
     databaseAvailable = File.Exists(databasePath),
     databasePath,

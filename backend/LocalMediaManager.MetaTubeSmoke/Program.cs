@@ -8,8 +8,8 @@ using SkiaSharp;
 
 string repo = Path.GetFullPath(args.ElementAtOrDefault(0) ?? Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 string sourceDatabase = Path.GetFullPath(args.ElementAtOrDefault(1) ?? @"D:\Local Media Manager Next Data\data\LocalMediaManager.db");
-string runRoot = Path.GetFullPath(args.ElementAtOrDefault(2) ?? Path.Combine(@"D:\Local Media Manager Next Smoke", "0.4.3-" + DateTime.Now.ToString("yyyyMMdd-HHmmss")));
-int sampleCount = Math.Clamp(int.TryParse(args.ElementAtOrDefault(3), out int requested) ? requested : 30, 30, 50);
+string runRoot = Path.GetFullPath(args.ElementAtOrDefault(2) ?? Path.Combine(@"D:\Local Media Manager Next Smoke", "0.6.3-sync-" + DateTime.Now.ToString("yyyyMMdd-HHmmss")));
+int sampleCount = Math.Clamp(int.TryParse(args.ElementAtOrDefault(3), out int requested) ? requested : 20, 20, 50);
 string database = Path.Combine(runRoot, "data", "LocalMediaManager.db");
 string mediaRoot = Path.Combine(runRoot, "media");
 string imageRoot = Path.Combine(runRoot, "images");
@@ -35,6 +35,8 @@ try {
     using var client = new HttpClient { BaseAddress = new Uri(bridgeUrl), Timeout = TimeSpan.FromMinutes(2) };
     client.DefaultRequestHeaders.Add("X-LMM-Session", token);
     await WaitForBridgeAsync(client, bridge);
+    ProviderProbe[] probes = await ProbeProvidersAsync(client);
+    await WriteJsonAsync(Path.Combine(evidenceRoot, "provider-network-probe.json"), probes);
 
     var taskIds = new List<long>();
     foreach (Sample sample in samples) {
@@ -58,6 +60,8 @@ try {
     await WriteJsonAsync(Path.Combine(evidenceRoot, "after.json"), after);
     await WriteJsonAsync(Path.Combine(evidenceRoot, "tasks.json"), tasks);
     await WriteJsonAsync(Path.Combine(evidenceRoot, "task-logs.json"), await ReadTaskLogsAsync(database, taskIds));
+    ProviderStats[] providerStats = await ReadProviderStatsAsync(database, taskIds);
+    await WriteJsonAsync(Path.Combine(evidenceRoot, "provider-stats.json"), providerStats);
 
     string integrity = await ScalarTextAsync(database, "PRAGMA integrity_check") ?? "unknown";
     long foreignKeys = await ScalarLongFromPathAsync(database, "SELECT COUNT(*) FROM pragma_foreign_key_check");
@@ -73,9 +77,9 @@ try {
     int cancelled = tasks.Count(task => task.Status == "Cancelled");
     int imagesAdded = after.Sum(value => value.ImageCount) - before.Sum(value => value.ImageCount);
     int nfosAdded = after.Count(value => value.NfoExists) - before.Count(value => value.NfoExists);
-    string report = RenderReport(runRoot, sourceDatabase, samples, tasks, completed, failed, cancelled, noResult, providerMismatch, networkFailures, imagesAdded, nfosAdded,
+    string report = RenderReport(runRoot, sourceDatabase, samples, tasks, providerStats, completed, failed, cancelled, noResult, providerMismatch, networkFailures, imagesAdded, nfosAdded,
         protectedUsers, protectedImages, protectedNfos, temporaryFiles, integrity, foreignKeys);
-    await File.WriteAllTextAsync(Path.Combine(runRoot, "0.4.3-METATUBE-SMOKE.md"), report, new UTF8Encoding(false));
+    await File.WriteAllTextAsync(Path.Combine(runRoot, "0.6.3-SYNC-PROVIDER-SMOKE.md"), report, new UTF8Encoding(false));
     Console.WriteLine(report);
     return integrity == "ok" && foreignKeys == 0 && temporaryFiles == 0 && protectedUsers == samples.Count ? 0 : 3;
 }
@@ -95,9 +99,14 @@ static async Task UpgradeAsync(string database, string migrationRoot) {
     long version = await ScalarLongAsync(connection, "SELECT CAST(Value AS INTEGER) FROM DatabaseMetadata WHERE Key='SchemaVersion'");
     foreach (string file in Directory.EnumerateFiles(migrationRoot, "*.sql").Order()) {
         int number = int.Parse(Path.GetFileName(file)[..4]); if (number <= version) continue;
+        if (await MigrationRecordedAsync(connection, number)) continue;
+        if (number == 14 && await ColumnExistsAsync(connection, "Actors", "HeightCm")) continue;
         await using var command = connection.CreateCommand(); command.CommandText = await File.ReadAllTextAsync(file); await command.ExecuteNonQueryAsync();
     }
 }
+static async Task<bool> MigrationRecordedAsync(SqliteConnection connection,int version){if(!await TableExistsAsync(connection,"SchemaMigrations"))return false;await using var x=connection.CreateCommand();x.CommandText="SELECT COUNT(*) FROM SchemaMigrations WHERE Version=$version";x.Parameters.AddWithValue("$version",version);return Convert.ToInt64(await x.ExecuteScalarAsync()??0L)>0;}
+static async Task<bool> ColumnExistsAsync(SqliteConnection connection,string table,string column){await using var x=connection.CreateCommand();x.CommandText=$"PRAGMA table_info({table})";await using var r=await x.ExecuteReaderAsync();while(await r.ReadAsync())if(string.Equals(r.GetString(1),column,StringComparison.OrdinalIgnoreCase))return true;return false;}
+static async Task<bool> TableExistsAsync(SqliteConnection connection,string table){await using var x=connection.CreateCommand();x.CommandText="SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$table";x.Parameters.AddWithValue("$table",table);return Convert.ToInt64(await x.ExecuteScalarAsync()??0L)>0;}
 
 static async Task<List<Sample>> PrepareSamplesAsync(string database, string mediaRoot, string imageRoot, string nfoRoot, int count) {
     await using var connection = await OpenAsync(database, false);
@@ -109,9 +118,27 @@ static async Task<List<Sample>> PrepareSamplesAsync(string database, string medi
         ('metadata.metatube.downloadImages','true','boolean',$at),
         ('metadata.metatube.writeNfo','true','boolean',$at),
         ('metadata.metatube.autoExecute','true','boolean',$at),
+        ('metadata.javbus.enabled','true','boolean',$at),
+        ('metadata.javbus.priority','2','integer',$at),
+        ('metadata.javbus.baseUrl','\"https://www.javbus.com/\"','string',$at),
+        ('metadata.javbus.timeoutSeconds','45','integer',$at),
+        ('metadata.javbus.retryCount','1','integer',$at),
+        ('metadata.javbus.cookie','\"\"','secret',$at),
+        ('metadata.javbus.downloadImages','true','boolean',$at),
+        ('metadata.dmm.enabled','false','boolean',$at),
+        ('metadata.javdb.enabled','false','boolean',$at),
+        ('mediaStorage.rootPath',$imageRoot,'string',$at),
+        ('mediaStorage.directory.posters','\"Posters\"','string',$at),
+        ('mediaStorage.directory.thumbnails','\"Thumbnails\"','string',$at),
+        ('mediaStorage.directory.fanart','\"Fanart\"','string',$at),
+        ('mediaStorage.directory.previews','\"Previews\"','string',$at),
+        ('mediaStorage.directory.screenshots','\"Screenshots\"','string',$at),
+        ('mediaStorage.directory.wallCrops','\"WallCrops\"','string',$at),
+        ('mediaStorage.directory.gif','\"Gif\"','string',$at),
+        ('mediaStorage.directory.nfo','\"Nfo\"','string',$at),
         ('nfo.export.outputDirectory',$nfo,'string',$at)
         ON CONFLICT(Key) DO UPDATE SET ValueJson=excluded.ValueJson,ValueType=excluded.ValueType,UpdatedAt=excluded.UpdatedAt
-        """, ("$at", DateTimeOffset.UtcNow.ToString("O")), ("$nfo", JsonSerializer.Serialize(nfoRoot)));
+        """, ("$at", DateTimeOffset.UtcNow.ToString("O")), ("$nfo", JsonSerializer.Serialize(nfoRoot)), ("$imageRoot", JsonSerializer.Serialize(imageRoot)));
     var samples = new List<Sample>();
     await using (var command = connection.CreateCommand()) {
         command.CommandText = """
@@ -152,13 +179,41 @@ static Process StartBridge(string dll,string database,string imageRoot,string ur
 static async Task PumpAsync(StreamReader reader,string path){await using var writer=new StreamWriter(path,false,new UTF8Encoding(false)){AutoFlush=true};while(await reader.ReadLineAsync() is string line)await writer.WriteLineAsync(line);}
 static async Task WaitForBridgeAsync(HttpClient client,Process process){for(int i=0;i<60;i++){if(process.HasExited)throw new InvalidOperationException($"Bridge 提前退出：{process.ExitCode}");try{using var response=await client.GetAsync("/health");if(response.IsSuccessStatusCode)return;}catch(HttpRequestException){}await Task.Delay(500);}throw new TimeoutException("Bridge 未在 30 秒内就绪。");}
 static async Task PostAsync(HttpClient client,string path){using var response=await client.PostAsync(path,null);response.EnsureSuccessStatusCode();}
+static async Task<ProviderProbe[]> ProbeProvidersAsync(HttpClient client)
+{
+    var values = new List<ProviderProbe>();
+    var tests = new (string Name, string Path, object Body)[] {
+        ("MetaTube", "/api/settings/providers/metatube/test", new { enabled=true, baseUrl="http://127.0.0.1:8080/", timeoutSeconds=15, downloadImages=true, writeNfo=true, autoExecute=true, nonDestructive=true }),
+        ("JavBus", "/api/settings/providers/javbus/test", new { enabled=true, priority=2, baseUrl="https://www.javbus.com/", timeoutSeconds=20, retryCount=0, cookie="", downloadImages=true, fillMissingOnly=true }),
+        ("DMM", "/api/settings/providers/dmm/test", new { enabled=false, priority=3, baseUrl="https://www.dmm.co.jp/", timeoutSeconds=20, retryCount=0, cookie="", downloadImages=true, fillMissingOnly=true }),
+        ("JavDB", "/api/settings/providers/javdb/test", new { enabled=false, priority=4, baseUrl="https://javdb.com/", timeoutSeconds=20, retryCount=0, cookie="", downloadImages=true, fillMissingOnly=true }),
+        ("Minnano", "/api/settings/providers/minnano/test", new { enabled=false, priority=1, baseUrl="https://www.minnano-av.com/", timeoutSeconds=20, retryCount=0, cookie="", downloadImages=true, fillMissingOnly=true }),
+        ("Wikipedia JP", "/api/settings/providers/wikipedia-jp/test", new { enabled=false, priority=2, baseUrl="https://ja.wikipedia.org/", timeoutSeconds=20, retryCount=0, cookie="", downloadImages=false, fillMissingOnly=true }),
+    };
+    foreach ((string name, string path, object body) in tests) {
+        try {
+            using HttpResponseMessage response = await client.PostAsJsonAsync(path, body);
+            string json = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode) values.Add(new(name, false, 0, $"HTTP {(int)response.StatusCode}: {json}"));
+            else {
+                using JsonDocument document = JsonDocument.Parse(json);
+                JsonElement root = document.RootElement;
+                values.Add(new(name, root.GetProperty("success").GetBoolean(), root.GetProperty("elapsedMilliseconds").GetInt64(), root.GetProperty("message").GetString() ?? ""));
+            }
+        } catch (Exception error) {
+            values.Add(new(name, false, 0, error.Message));
+        }
+    }
+    return values.ToArray();
+}
 static async Task WaitForTasksAsync(string database,IReadOnlyList<long> ids,TimeSpan timeout){var watch=Stopwatch.StartNew();while(watch.Elapsed<timeout){await using var c=await OpenAsync(database,true);await using var x=c.CreateCommand();x.CommandText=$"SELECT COUNT(*) FROM Tasks WHERE Id IN ({string.Join(',',ids)}) AND Status NOT IN ('Completed','Failed','Cancelled')";if(Convert.ToInt64(await x.ExecuteScalarAsync()??0L)==0)return;await Task.Delay(1000);}throw new TimeoutException("MetaTube 批量任务未在时限内结束。");}
 
 static async Task<List<Snapshot>> SnapshotAsync(string database,IReadOnlyList<Sample> samples){var result=new List<Snapshot>();await using var c=await OpenAsync(database,true);foreach(Sample sample in samples){await using var x=c.CreateCommand();x.CommandText="""SELECT m.Id,m.Code,COALESCE(m.Title,''),COALESCE(m.Description,''),COALESCE(m.ReleaseDate,''),m.DurationSeconds,COALESCE(s.IsFavorite,0),CASE WHEN COALESCE(s.HasUserRating,0)=1 THEN s.UserRating END,COALESCE(s.Notes,''),(SELECT COUNT(*) FROM Images WHERE MovieId=m.Id),(SELECT COUNT(*) FROM NfoDocuments WHERE MovieId=m.Id),EXISTS(SELECT 1 FROM NfoDocuments WHERE MovieId=m.Id AND FilePath<>''),(SELECT COALESCE(json_group_array(t.Name),'[]') FROM Tags t JOIN MovieTags mt ON mt.TagId=t.Id WHERE mt.MovieId=m.Id AND t.Source='User'),(SELECT COUNT(*) FROM MovieActors WHERE MovieId=m.Id) FROM Movies m LEFT JOIN UserMovieState s ON s.MovieId=m.Id WHERE m.Id=$id""";x.Parameters.AddWithValue("$id",sample.Id);await using var r=await x.ExecuteReaderAsync();await r.ReadAsync();result.Add(new(r.GetInt64(0),r.GetString(1),r.GetString(2),r.GetString(3),r.GetString(4),r.GetInt32(5),r.GetInt64(6)==1,r.IsDBNull(7)?null:r.GetDouble(7),r.GetString(8),r.GetInt32(9),r.GetInt32(10),r.GetInt64(11)==1,JsonSerializer.Deserialize<string[]>(r.GetString(12))??[],r.GetInt32(13)));}return result;}
 static async Task<List<TaskEvidence>> ReadTasksAsync(string database,IReadOnlyList<long> ids){var list=new List<TaskEvidence>();await using var c=await OpenAsync(database,true);await using var x=c.CreateCommand();x.CommandText=$"SELECT Id,COALESCE(CurrentMovieId,0),Status,COALESCE(Stage,''),COALESCE(ErrorMessage,''),RetryCount,COALESCE(ResultJson,'') FROM Tasks WHERE Id IN ({string.Join(',',ids)}) ORDER BY Id";await using var r=await x.ExecuteReaderAsync();while(await r.ReadAsync())list.Add(new(r.GetInt64(0),r.GetInt64(1),r.GetString(2),r.GetString(3),r.GetString(4),r.GetInt32(5),r.GetString(6)));return list;}
 static async Task<List<object>> ReadTaskLogsAsync(string database,IReadOnlyList<long> ids){var list=new List<object>();await using var c=await OpenAsync(database,true);await using var x=c.CreateCommand();x.CommandText=$"SELECT TaskId,Level,Message,CreatedAt FROM TaskLogs WHERE TaskId IN ({string.Join(',',ids)}) ORDER BY Id";await using var r=await x.ExecuteReaderAsync();while(await r.ReadAsync())list.Add(new{taskId=r.GetInt64(0),level=r.GetString(1),message=r.GetString(2),createdAt=r.GetString(3)});return list;}
-static string RenderReport(string root,string source,IReadOnlyList<Sample> samples,IReadOnlyList<TaskEvidence> tasks,int completed,int failed,int cancelled,int noResult,int providerMismatch,int networkFailures,int images,int nfos,int users,int protectedImages,int protectedNfos,long temporary,string integrity,long foreignKeys)=>$"""
-    # Local Media Manager 0.4.3 MetaTube real smoke
+static async Task<ProviderStats[]> ReadProviderStatsAsync(string database,IReadOnlyList<long> ids){var list=new List<ProviderStats>();await using var c=await OpenAsync(database,true);await using var x=c.CreateCommand();x.CommandText=$"SELECT COALESCE(Provider,'Unknown'),Status,COALESCE(ResultJson,'') FROM Tasks WHERE Id IN ({string.Join(',',ids)}) ORDER BY Id";await using var r=await x.ExecuteReaderAsync();while(await r.ReadAsync()){string json=r.GetString(2);list.Add(new(r.GetString(0),r.GetString(1),json.Contains("\"Title\":",StringComparison.OrdinalIgnoreCase),json.Contains("\"Actors\":",StringComparison.OrdinalIgnoreCase),json.Contains("\"Genres\":",StringComparison.OrdinalIgnoreCase),json.Contains("\"ImagesDownloaded\":",StringComparison.OrdinalIgnoreCase)));}return list.ToArray();}
+static string RenderReport(string root,string source,IReadOnlyList<Sample> samples,IReadOnlyList<TaskEvidence> tasks,IReadOnlyList<ProviderStats> providerStats,int completed,int failed,int cancelled,int noResult,int providerMismatch,int networkFailures,int images,int nfos,int users,int protectedImages,int protectedNfos,long temporary,string integrity,long foreignKeys)=>$"""
+    # Local Media Manager 0.6.3 real sync provider smoke
 
     - Executed: {DateTimeOffset.Now:O}
     - Source database: `{source}` (opened read-only and copied with SQLite backup API)
@@ -179,8 +234,9 @@ static string RenderReport(string root,string source,IReadOnlyList<Sample> sampl
     - `integrity_check`: `{integrity}`
     - `foreign_key_check` rows: {foreignKeys}
     - Retried tasks: {tasks.Count(t=>t.RetryCount>0)}
+    - Provider success: {string.Join("; ", providerStats.GroupBy(s=>s.Provider).Select(g=>$"{g.Key}: {g.Count(x=>x.Status=="Completed")}/{g.Count()}"))}
 
-    Evidence: `evidence/before.json`, `evidence/after.json`, `evidence/tasks.json`, `evidence/task-logs.json`, and Bridge logs under `logs/`.
+    Evidence: `evidence/before.json`, `evidence/after.json`, `evidence/tasks.json`, `evidence/task-logs.json`, `evidence/provider-stats.json`, and Bridge logs under `logs/`.
     """;
 static async Task<SqliteConnection> OpenAsync(string path,bool readOnly){var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=path,Mode=readOnly?SqliteOpenMode.ReadOnly:SqliteOpenMode.ReadWrite,Cache=SqliteCacheMode.Private}.ToString());await c.OpenAsync();if(!readOnly)await ExecuteAsync(c,"PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");return c;}
 static async Task ExecuteAsync(SqliteConnection c,string sql,params(string,object?)[] p){await using var x=c.CreateCommand();x.CommandText=sql;foreach(var(n,v)in p)x.Parameters.AddWithValue(n,v??DBNull.Value);await x.ExecuteNonQueryAsync();}
@@ -194,3 +250,5 @@ static Task WriteJsonAsync(string path,object value)=>File.WriteAllTextAsync(pat
 sealed record Sample(long Id,string Code,bool Favorite,bool HasRating,int TagCount,int ActorCount,string? ProtectedImagePath=null,string? ProtectedImageHash=null,string? ProtectedNfoPath=null,string? ProtectedNfoText=null);
 sealed record Snapshot(long Id,string Code,string Title,string Description,string ReleaseDate,int DurationSeconds,bool Favorite,double? UserRating,string Notes,int ImageCount,int NfoCount,bool NfoExists,string[] UserTags,int ActorCount);
 sealed record TaskEvidence(long Id,long MovieId,string Status,string Stage,string Error,int RetryCount,string ResultJson);
+sealed record ProviderStats(string Provider,string Status,bool TitleSignal,bool ActorSignal,bool GenreSignal,bool ImageSignal);
+sealed record ProviderProbe(string Provider,bool Success,long ElapsedMilliseconds,string Message);

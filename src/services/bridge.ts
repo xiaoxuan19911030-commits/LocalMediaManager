@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { ActorDetail, ActorProfileCandidate, ActorProfilePreview, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateDeleteGroupCommand, DuplicateDeletePreview, DuplicateResults, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageCropCommand, ImageDeletePreview, ImageMutationResult, ImageTaskLaunchResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, PlatformOpenResult, RandomMovieResult, SafeDeleteLaunchResult, SafeDeletePreview, SafeDeletePreviewCommand, ScanLaunchResult, TaskCleanupResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
 import type { JavBusSettings, WebMetadataSettings } from '@/types/settings'
-import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, FfmpegToolStatus, LogCleanupPreview, LogCleanupResult, MetaTubeSettings, ProviderConnectionResult, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings, UnifiedSettingsSaveResult, UpdateCheckResult } from '@/types/settings'
+import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, FfmpegToolStatus, LogCleanupPreview, LogCleanupResult, MetaTubeSettings, ProviderConnectionResult, ProviderDiagnosticResult, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings, UnifiedSettingsSaveResult, UpdateCheckResult } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
 
@@ -86,6 +86,7 @@ export const bridge = {
   testJavDb: (value: WebMetadataSettings) => request<ProviderConnectionResult>('/api/settings/providers/javdb/test', { method: 'POST', body: JSON.stringify(value) }),
   testMinnano: (value: WebMetadataSettings) => request<ProviderConnectionResult>('/api/settings/providers/minnano/test', { method: 'POST', body: JSON.stringify(value) }),
   testWikipediaJp: (value: WebMetadataSettings) => request<ProviderConnectionResult>('/api/settings/providers/wikipedia-jp/test', { method: 'POST', body: JSON.stringify(value) }),
+  providerDiagnostics: () => request<ProviderDiagnosticResult[]>('/api/settings/providers/diagnostics', { method: 'POST' }),
   ffmpegStatus: () => request<FfmpegToolStatus>('/api/plugins/ffmpeg/status'),
   movie: (id: number) => request<MovieDetail>(`/api/videos/${id}`),
   movieImages: (id: number) => request<ImageAsset[]>(`/api/videos/${id}/images`),
