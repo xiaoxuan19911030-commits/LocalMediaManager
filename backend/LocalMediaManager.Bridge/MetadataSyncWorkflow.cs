@@ -29,7 +29,7 @@ public sealed class TaskLogService(string databasePath)
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
     private async Task<SqliteConnection> OpenAsync() {
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = SqliteOpenMode.ReadWrite, Cache = SqliteCacheMode.Shared }.ToString());
+        var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = SqliteOpenMode.ReadWrite }.ToString());
         await connection.OpenAsync(); return connection;
     }
 }
@@ -237,7 +237,7 @@ public sealed class MetadataWriteService(string databasePath)
             VALUES($name,$normalized,'MetaTube',$at,$at); SELECT last_insert_rowid();
             """, ("$name", name), ("$normalized", normalized), ("$at", Now()));
     }
-    private async Task<SqliteConnection> OpenAsync() { var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource=databasePath, Mode=SqliteOpenMode.ReadWrite, Cache=SqliteCacheMode.Shared }.ToString()); await c.OpenAsync(); return c; }
+    private async Task<SqliteConnection> OpenAsync() { var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource=databasePath, Mode=SqliteOpenMode.ReadWrite }.ToString()); await c.OpenAsync(); return c; }
     private static string Normalize(string value) => string.Join(' ', value.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant();
     private static string Now() => DateTimeOffset.UtcNow.ToString("O");
     private static async Task ExecuteAsync(SqliteConnection c, System.Data.Common.DbTransaction tx, string sql, params (string,object?)[] p) { await using var x=c.CreateCommand(); x.Transaction=(SqliteTransaction)tx; x.CommandText=sql; foreach(var (n,v) in p)x.Parameters.AddWithValue(n,v??DBNull.Value); await x.ExecuteNonQueryAsync(); }
@@ -473,7 +473,7 @@ public sealed class MetadataSyncExecutor(
     private async Task FailAsync(long id,Exception error){try{await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Status='Failed',Stage='Failed',ErrorMessage=$error,ResultSummary='同步失败，已有有效数据未被覆盖',CompletedAt=$at,UpdatedAt=$at WHERE Id=$id",("$error",error.Message),("$at",Now()),("$id",id));await logs.WriteAsync(id,"Error",error.Message);}catch(Exception e){Console.Error.WriteLine($"Could not persist sync failure {id}: {e}");}}
     private async Task MarkCancelledAsync(long id){try{await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Status='Cancelled',Stage='Cancelled',ResultSummary='用户取消',CompletedAt=$at,UpdatedAt=$at WHERE Id=$id",("$at",Now()),("$id",id));}catch(Exception e){Console.Error.WriteLine(e);}}
     private async Task UpdateTaskAsync(long id,string status,string stage,double? progress,string? error,bool cancel){await using var c=await OpenAsync();if(await ScalarLongAsync(c,"SELECT COUNT(*) FROM Tasks WHERE Id=$id AND TaskType='Sync'",("$id",id))==0)throw new KeyNotFoundException("同步任务不存在。");await ExecuteAsync(c,"UPDATE Tasks SET Status=$status,Stage=$stage,Progress=COALESCE($progress,Progress),ErrorMessage=$error,CancellationRequested=$cancel,UpdatedAt=$at WHERE Id=$id",("$status",status),("$stage",stage),("$progress",progress),("$error",error),("$cancel",cancel?1:0),("$at",Now()),("$id",id));}
-    private async Task<SqliteConnection> OpenAsync(){var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=databasePath,Mode=SqliteOpenMode.ReadWrite,Cache=SqliteCacheMode.Shared}.ToString());await c.OpenAsync();await ExecuteAsync(c,"PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");return c;}
+    private async Task<SqliteConnection> OpenAsync(){var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=databasePath,Mode=SqliteOpenMode.ReadWrite}.ToString());await c.OpenAsync();await ExecuteAsync(c,"PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");return c;}
     private static async Task SafeDeleteAsync(IEnumerable<string> paths){foreach(string p in paths.Reverse())try{if(File.Exists(p))File.Delete(p);}catch{await Task.Yield();}}
     private static string Comparable(string value)=>value.Replace("-","").Replace("_","").Replace(" ","").Trim();
     private static string Now()=>DateTimeOffset.UtcNow.ToString("O");
@@ -547,7 +547,7 @@ public sealed class TaskCommandService(string databasePath, LibraryWorkflowServi
     public async Task<BatchTaskMutationResult> CancelSyncBatchAsync(IReadOnlyList<long> ids) { long[] values=ids.Distinct().Where(id=>id>0).ToArray(); if(values.Length is 0 or >500) throw new ArgumentException("Select 1 to 500 sync tasks."); foreach(long id in values){if(await TypeAsync(id)!="Sync")throw new ArgumentException("Only sync tasks can be cancelled in batch."); await sync.CancelAsync(id);} return new(values.Length,$"Cancelled {values.Length} sync tasks."); }
     private async Task<string> TypeAsync(long id){await using var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=databasePath,Mode=SqliteOpenMode.ReadOnly}.ToString());await c.OpenAsync();await using var x=c.CreateCommand();x.CommandText="SELECT TaskType FROM Tasks WHERE Id=$id";x.Parameters.AddWithValue("$id",id);return(await x.ExecuteScalarAsync())?.ToString()??throw new KeyNotFoundException("任务不存在。");}
     private async Task<TaskSnapshot> SnapshotAsync(long id){await using var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=databasePath,Mode=SqliteOpenMode.ReadOnly}.ToString());await c.OpenAsync();await using var x=c.CreateCommand();x.CommandText="SELECT TaskType,Status FROM Tasks WHERE Id=$id";x.Parameters.AddWithValue("$id",id);await using var r=await x.ExecuteReaderAsync();if(!await r.ReadAsync())throw new KeyNotFoundException("任务不存在。");return new(r.GetString(0),r.GetString(1));}
-    private async Task<SqliteConnection> OpenWriteAsync(){var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=databasePath,Mode=SqliteOpenMode.ReadWrite,Cache=SqliteCacheMode.Shared}.ToString());await c.OpenAsync();return c;}
+    private async Task<SqliteConnection> OpenWriteAsync(){var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=databasePath,Mode=SqliteOpenMode.ReadWrite}.ToString());await c.OpenAsync();return c;}
     private static async Task ExecuteAsync(SqliteConnection c,string sql,System.Data.Common.DbTransaction tx,params (string,object?)[] p){await using var x=c.CreateCommand();x.Transaction=(SqliteTransaction)tx;x.CommandText=sql;foreach(var(n,v)in p)x.Parameters.AddWithValue(n,v??DBNull.Value);await x.ExecuteNonQueryAsync();}
     private static async Task<long> ScalarLongAsync(SqliteConnection c,string sql,System.Data.Common.DbTransaction tx,params (string,object?)[] p){await using var x=c.CreateCommand();x.Transaction=(SqliteTransaction)tx;x.CommandText=sql;foreach(var(n,v)in p)x.Parameters.AddWithValue(n,v??DBNull.Value);return Convert.ToInt64(await x.ExecuteScalarAsync()??0L);}
     private sealed record TaskSnapshot(string Type, string Status);
