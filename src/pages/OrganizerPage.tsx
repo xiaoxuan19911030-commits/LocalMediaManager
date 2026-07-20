@@ -232,7 +232,7 @@ function DuplicateDeleteDialog({ preview, busy, confirmOriginal, onConfirmOrigin
   onExecute: () => void
 }) {
   const safe = preview?.safeDelete
-  const canExecute = Boolean(preview?.canExecute && safe && (!safe.deletesOriginalMedia || confirmOriginal))
+  const canExecute = Boolean(preview && safe && (!safe.deletesOriginalMedia || confirmOriginal))
   return <Dialog open={Boolean(preview)} onClose={busy ? undefined : onClose} maxWidth="md" fullWidth>
     <DialogTitle>重复影片 Safe Delete 预览</DialogTitle>
     <DialogContent dividers>

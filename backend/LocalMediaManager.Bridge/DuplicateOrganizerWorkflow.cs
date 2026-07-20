@@ -28,11 +28,12 @@ public sealed class DuplicateOrganizerWorkflowService(string databasePath, SafeD
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadOnly, token);
         var merges = new List<DuplicateMergePreview>();
         var blockers = new List<string>();
+        var conflictWarnings = new List<string>();
         foreach (DuplicateDeleteGroupCommand group in groups) {
             DuplicateMergePreview merge = await BuildMergePreviewAsync(connection, group, token);
             merges.Add(merge);
-            if (merge.RatingConflict) blockers.Add($"{merge.GroupKey}: 评分冲突，需要手动选择。");
-            if (merge.NotesConflict) blockers.Add($"{merge.GroupKey}: 用户备注冲突，需要手动选择。");
+            if (merge.RatingConflict) conflictWarnings.Add($"{merge.GroupKey}: 评分冲突，系统不会静默覆盖保留项已有评分。");
+            if (merge.NotesConflict) conflictWarnings.Add($"{merge.GroupKey}: 用户备注冲突，系统不会静默合并不同备注。");
         }
 
         var warnings = new List<string> {
@@ -40,16 +41,17 @@ public sealed class DuplicateOrganizerWorkflowService(string databasePath, SafeD
             "执行前会重新生成 Safe Delete 预览并校验确认令牌，重复范围或文件状态变化时会拒绝执行。",
             "收藏、标签、播放次数和最后播放时间可自动合并到保留项；评分和备注冲突不会静默覆盖。"
         };
+        warnings.AddRange(conflictWarnings);
         warnings.AddRange(safePreview.Warnings);
         string confirmationToken = Token(groups, safePreview, merges);
-        return new(safePreview, merges, blockers.Count == 0, confirmationToken, warnings, blockers);
+        return new(safePreview, merges, true, confirmationToken, warnings, blockers);
     }
 
     public async Task<SafeDeleteLaunchResult> ExecuteAsync(DuplicateDeleteExecuteRequest request, CancellationToken token = default)
     {
         var preview = await PreviewAsync(new(request.Groups, request.Mode, request.DeleteDatabaseInfo), token);
         VerifyToken(preview.ConfirmationToken, request.ConfirmationToken);
-        if (!preview.CanExecute) throw new InvalidOperationException("重复处理预览存在阻塞项，请先处理评分或备注冲突。");
+        if (!preview.CanExecute) throw new InvalidOperationException("重复处理预览存在阻塞项，请重新预览后再执行。");
 
         await ApplyMergesAsync(preview.Merges, token);
         long[] deleteIds = preview.Merges.SelectMany(merge => merge.DeleteMovieIds).Distinct().Order().ToArray();

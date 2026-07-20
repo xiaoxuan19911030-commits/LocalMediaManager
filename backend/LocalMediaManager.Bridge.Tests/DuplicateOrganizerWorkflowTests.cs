@@ -40,7 +40,7 @@ public sealed class DuplicateOrganizerWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task PreviewBlocksUnsafeRatingAndNotesConflict()
+    public async Task PreviewWarnsButAllowsRatingAndNotesConflict()
     {
         string at = DateTimeOffset.UtcNow.ToString("O");
         await using (SqliteConnection connection = await Open()) {
@@ -50,10 +50,10 @@ public sealed class DuplicateOrganizerWorkflowTests : IAsyncLifetime
 
         DuplicateDeletePreview preview = await service.PreviewAsync(new([new("code:DUP-001", 1, [1, 2])], "metadata", true));
 
-        Assert.False(preview.CanExecute);
-        Assert.Contains(preview.Blockers, item => item.Contains("评分冲突"));
-        Assert.Contains(preview.Blockers, item => item.Contains("用户备注冲突"));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExecuteAsync(new([new("code:DUP-001", 1, [1, 2])], "metadata", true, preview.ConfirmationToken)));
+        Assert.True(preview.CanExecute);
+        Assert.Empty(preview.Blockers);
+        Assert.Contains(preview.Warnings, item => item.Contains("评分冲突"));
+        Assert.Contains(preview.Warnings, item => item.Contains("用户备注冲突"));
     }
 
     [Fact]
