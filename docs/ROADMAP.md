@@ -22,6 +22,19 @@ Scope:
 - Edit mode actions are consolidated into the filter toolbar.
 - Random movie stays inside the MovieWall result surface instead of opening Details.
 
+## Unreleased - Data Center Consolidation
+
+**Status:** Develop / verification in progress
+**Date:** 2026-07-20
+
+Scope:
+
+- Metadata Center, Diagnostics Center, Maintenance, and Duplicate Movies are consolidated into one Data Center navigation entry.
+- Data Center uses three tabs: 概览, 诊断与修复, 重复影片.
+- Duplicate Movies remains backed by the existing organizer and Safe Delete workflow.
+- Legacy routes redirect to the matching Data Center tab.
+- No database schema changes, no Details changes, and no AI features.
+
 ## 0.6.1 - Task Center Polish
 
 **Status:** Released

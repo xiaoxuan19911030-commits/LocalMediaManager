@@ -169,7 +169,7 @@ export default function HomePage() {
         <Box onClick={() => navigate('/actors')} sx={{ cursor: 'pointer' }}><StatCard label="演员" value={dashboardView.actorCount} icon={<GroupsRoundedIcon/>}/></Box>
         <Box onClick={() => navigate('/tags')} sx={{ cursor: 'pointer' }}><StatCard label="标签" value={dashboardView.tagCount} icon={<LocalOfferRoundedIcon/>}/></Box>
         <Box onClick={() => navigate('/tasks')} sx={{ cursor: 'pointer' }}><StatCard label="活动任务" value={dashboardView.activeTaskCount} icon={<SyncRoundedIcon/>} tone="warning.main"/></Box>
-        <Box onClick={() => navigate('/maintenance')} sx={{ cursor: 'pointer' }}><StatCard label="待维护" value={dashboardView.maintenance.pendingMovies} icon={<BuildRoundedIcon/>} tone="warning.main"/></Box>
+        <Box onClick={() => navigate('/data-center?tab=diagnostics')} sx={{ cursor: 'pointer' }}><StatCard label="待维护" value={dashboardView.maintenance.pendingMovies} icon={<BuildRoundedIcon/>} tone="warning.main"/></Box>
       </Box>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0,1.35fr) minmax(320px,.65fr)' }, gap: 2 }}>
@@ -186,8 +186,8 @@ export default function HomePage() {
           <Box sx={{ display: 'grid', gap: 1 }}>
             <ActionButton icon={<FolderRoundedIcon/>} label="扫描与管理媒体库" onClick={() => navigate('/libraries')}/>
             <ActionButton icon={<SyncRoundedIcon/>} label="同步与任务中心" onClick={() => navigate('/tasks')}/>
-            <ActionButton icon={<BuildRoundedIcon/>} label="维护中心" onClick={() => navigate('/maintenance')}/>
-            <ActionButton icon={<DriveFileMoveRoundedIcon/>} label="重复影片" onClick={() => navigate('/duplicates')}/>
+            <ActionButton icon={<BuildRoundedIcon/>} label="数据中心" onClick={() => navigate('/data-center')}/>
+            <ActionButton icon={<DriveFileMoveRoundedIcon/>} label="重复影片" onClick={() => navigate('/data-center?tab=duplicates')}/>
             <ActionButton icon={<SettingsRoundedIcon/>} label="设置" onClick={() => navigate('/settings')}/>
           </Box>
         </SurfaceSection>

@@ -62,7 +62,8 @@ internal sealed record EntityConfig(string Table, string Relation, string Key, s
 public sealed record MediaPageDto(IReadOnlyList<MediaCardDto> Items, long Total, int Limit, int Offset);
 public sealed record MetadataOverviewDto(long TotalMovies, long ScrapedMovies, long CompleteMovies, long PendingMovies, long UnscrapedMovies,
     long MissingTitle, long MissingCover, long MissingFanart, long MissingPreview, long MissingActors, long MissingTags,
-    long MissingDescription, long MissingNfo, long MissingFiles);
+    long MissingDescription, long MissingNfo, long MissingFiles, long MissingScreenshots, long MissingGif, long MissingDirectors,
+    long MissingSeries, long MissingStudios, long MissingCustomTags);
 public sealed record DiagnosticItemDto(string Severity, string Code, string Title, string Detail, long Count);
 public sealed record DiagnosticsDto(string Integrity, long ForeignKeyErrors, IReadOnlyList<DiagnosticItemDto> Items);
 public sealed record NeighborsDto(long? PreviousId, long? NextId);
@@ -526,6 +527,7 @@ public static class ProductReader
     {
         await using var connection = await OpenAsync(databasePath);
         (long complete, long pending, long unscraped) = await ReadMetadataCountsAsync(connection);
+        bool hasDirectors = await HasDirectorsAsync(connection);
         return new(
             await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies"),
             await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies WHERE IsScraped=1"),
@@ -537,10 +539,16 @@ public static class ProductReader
             await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE " + MissingFanartSql()),
             await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE " + MissingPreviewSql()),
             await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id)"),
-            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieTags mt WHERE mt.MovieId=m.Id)"),
+            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieGenres mg WHERE mg.MovieId=m.Id)"),
             await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies WHERE trim(COALESCE(Description,''))=''"),
             await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies WHERE trim(COALESCE(NfoPath,''))=''"),
-            await ScalarAsync(connection, "SELECT COUNT(DISTINCT MovieId) FROM MediaFiles WHERE ExistsState='Missing'"));
+            await ScalarAsync(connection, "SELECT COUNT(DISTINCT MovieId) FROM MediaFiles WHERE ExistsState='Missing'"),
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType='Screenshot')"),
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType='GIF')"),
+            hasDirectors ? await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieDirectors md WHERE md.MovieId=m.Id)") : await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies"),
+            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieSeries ms WHERE ms.MovieId=m.Id)"),
+            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieStudios mst WHERE mst.MovieId=m.Id)"),
+            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieTags mt WHERE mt.MovieId=m.Id)"));
     }
 
     public static async Task<DiagnosticsDto> ReadDiagnosticsAsync(string databasePath)

@@ -8,10 +8,7 @@ import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded'
 import TaskRoundedIcon from '@mui/icons-material/TaskRounded'
 import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded'
-import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded'
-import TroubleshootRoundedIcon from '@mui/icons-material/TroubleshootRounded'
 import BuildRoundedIcon from '@mui/icons-material/BuildRounded'
-import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
 import { Alert, Box, Divider, InputAdornment, List, ListItemButton, ListItemIcon, ListItemText, Paper, TextField, Typography } from '@mui/material'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
@@ -25,7 +22,7 @@ import type { BridgeHealth, TaskItem } from '@/types/media'
 
 type NavItem = readonly [string,string,ReactNode]
 const primary:NavItem[]=[['首页','/',<HomeRoundedIcon/>],['影片墙','/media',<MovieRoundedIcon/>],['媒体库','/libraries',<FolderRoundedIcon/>],['标签','/tags',<LocalOfferRoundedIcon/>],['收藏','/favorites',<FavoriteRoundedIcon/>],['最近播放','/history',<HistoryRoundedIcon/>]]
-const utility:NavItem[]=[['元数据中心','/metadata',<FactCheckRoundedIcon/>],['诊断中心','/diagnostics',<TroubleshootRoundedIcon/>],['重复影片','/duplicates',<ContentCopyRoundedIcon/>],['Maintenance','/maintenance',<BuildRoundedIcon/>],['任务中心','/tasks',<TaskRoundedIcon/>],['AI Provider','/ai-providers',<AutoAwesomeRoundedIcon/>],['设置','/settings',<SettingsRoundedIcon/>]]
+const visibleUtility:NavItem[]=[['数据中心','/data-center',<BuildRoundedIcon/>],['任务中心','/tasks',<TaskRoundedIcon/>],['AI Provider','/ai-providers',<AutoAwesomeRoundedIcon/>],['设置','/settings',<SettingsRoundedIcon/>]]
 
 export default function AppShell(){
   const navigate=useNavigate();const{pathname}=useLocation();const[search,setSearch]=useState('');const[bridgeOnline,setBridgeOnline]=useState<boolean>();const[health,setHealth]=useState<BridgeHealth>()
@@ -42,7 +39,7 @@ export default function AppShell(){
       <Box sx={{px:2,py:2}}><BrandMark/></Box><Divider/>
       <Box component="form" onSubmit={submit} sx={{px:1.25,pt:1.25}}><TextField inputRef={searchRef} size="small" fullWidth value={search} onChange={(event)=>setSearch(event.target.value)} placeholder="全局搜索"
         slotProps={{input:{startAdornment:<InputAdornment position="start"><SearchRoundedIcon fontSize="small"/></InputAdornment>}}}/></Box>
-      <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}><List sx={{px:1,py:1}}>{nav(primary)}</List><Divider sx={{mx:1}}/><List sx={{px:1,py:1}}>{nav(utility)}</List></Box>
+      <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}><List sx={{px:1,py:1}}>{nav(primary)}</List><Divider sx={{mx:1}}/><List sx={{px:1,py:1}}>{nav(visibleUtility)}</List></Box>
       <Box><Divider/><Box sx={{px:2,py:1.25}}><Typography variant="caption" color={bridgeOnline===false?'error.main':'text.secondary'} sx={{display:'block'}}>LMM {shortBuildLabel}</Typography><Typography variant="caption" color={bridgeOnline===false?'error.main':'text.secondary'}>{bridgeOnline===false?'Bridge 已断开':`Bridge ${health?.version ?? 'unknown'} 已连接`}</Typography></Box></Box>
     </Paper>
     <Box component="main" sx={{overflowY:'auto',p:{xs:2,md:3},minWidth:0}}>{bridgeOnline===false&&<Alert severity="error" sx={{mb:2}}>Bridge 已停止响应。请保存当前操作并重新启动 Local Media Manager；未完成的持久任务会在下次启动时恢复为可重试状态。</Alert>}<Outlet/></Box>

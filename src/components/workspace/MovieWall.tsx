@@ -6,6 +6,7 @@ import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import ShuffleRoundedIcon from '@mui/icons-material/ShuffleRounded'
 import { Box, Button, Collapse, IconButton, InputAdornment, MenuItem, Paper, Snackbar, Stack, TextField, Tooltip, Typography } from '@mui/material'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { useNavigate } from 'react-router'
 import { MovieResultContainer, useMovieActions } from '@/components/workspace/MovieResults'
 import { ViewModeToggle, WorkspacePage, WorkspaceToolbar, refreshAction, type WorkspaceAction, type WorkspaceViewMode } from '@/components/workspace/Workspace'
 import { defaultMovieWallDisplay, normalizeMovieWallDisplay, type MovieWallDisplaySettings } from '@/components/workspace/movieWallDisplay'
@@ -95,6 +96,7 @@ export function MovieWall({
   childrenAfterResults?: (context: MovieWallRenderContext) => ReactNode
   reloadSignal?: number
 }) {
+  const navigate = useNavigate()
   const saved = useMemo(() => readSavedState(stateKey), [stateKey])
   const defaultsSignature = useMemo(() => JSON.stringify(defaults), [defaults])
   const canReuseSavedState = saved.defaultsSignature === defaultsSignature
@@ -263,6 +265,8 @@ export function MovieWall({
   const clearFilters = () => {
     setRating('all'); setMetadataStatus('all'); setImageStatus('all'); setLibraryId(defaults.libraryId ?? 0); setPage(1)
   }
+  const dataCenterProblemType = imageStatus === 'missing' ? 'missing-cover' : metadataToProblemType(metadataStatus)
+  const openDataCenter = () => navigate(`/data-center?tab=diagnostics&type=${dataCenterProblemType}`)
   const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') { event.preventDefault(); submitSearch() }
     else if (event.key === 'Escape') { if (search) clearSearch(); else event.currentTarget.blur() }
@@ -296,6 +300,7 @@ export function MovieWall({
         <TextField select size="small" label="媒体库" value={libraryId} onChange={(event) => { setPage(1); setLibraryId(Number(event.target.value)) }} sx={fieldSx}>
           <MenuItem value={0}>全部媒体库</MenuItem>{libraries.map((library) => <MenuItem key={library.id} value={library.id}>{library.name}</MenuItem>)}
         </TextField>
+        {dataCenterProblemType !== 'all' && <Button variant="outlined" startIcon={<SearchRoundedIcon/>} onClick={openDataCenter}>在数据中心查看</Button>}
         {filterDirty && <Button color="inherit" onClick={clearFilters}>清空</Button>}
       </Stack>
     </Collapse>
@@ -333,6 +338,17 @@ function writeFilterOpenPreference(value: boolean) {
     window.localStorage.setItem(filterOpenStorageKey, String(value))
   } catch {
     // Ignore storage errors; the current page state still updates.
+  }
+}
+
+function metadataToProblemType(value: string) {
+  switch (value) {
+    case 'missing-nfo': return 'missing-nfo'
+    case 'missing-actors': return 'missing-actors'
+    case 'missing-tags': return 'missing-tags'
+    case 'missing-description': return 'missing-description'
+    case 'missing-images': return 'missing-cover'
+    default: return 'all'
   }
 }
 

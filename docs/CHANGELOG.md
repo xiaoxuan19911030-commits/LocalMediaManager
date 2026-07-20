@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### UI Improvements
+
+- 元数据中心、诊断中心和重复影片统一归并为“数据中心”，左侧工具区只保留一个数据维护入口。
+- 数据中心提供“概览 / 诊断与修复 / 重复影片”分页；重复影片继续复用现有 Safe Delete 工作流。
+- 影片墙在元数据或图片缺失筛选下提供“在数据中心查看”入口，跳转后自动带入诊断筛选。
+
+### Compatibility
+
+- 旧 `/metadata`、`/diagnostics`、`/duplicates`、`/maintenance` 路由保留兼容重定向，不删除用户数据，不修改数据库 Schema。
+
 ## [0.6.2] - 2026-07-20
 
 ### Features

@@ -249,6 +249,7 @@ export interface MetadataOverview {
   totalMovies: number; scrapedMovies: number; completeMovies: number; pendingMovies: number; unscrapedMovies: number
   missingTitle: number; missingCover: number; missingFanart: number; missingPreview: number
   missingActors: number; missingTags: number; missingDescription: number; missingNfo: number; missingFiles: number
+  missingScreenshots: number; missingGif: number; missingDirectors: number; missingSeries: number; missingStudios: number; missingCustomTags: number
 }
 export interface DiagnosticItem { severity: 'error' | 'warning' | 'info'; code: string; title: string; detail: string; count: number }
 export interface DiagnosticsResult { integrity: string; foreignKeyErrors: number; items: DiagnosticItem[] }

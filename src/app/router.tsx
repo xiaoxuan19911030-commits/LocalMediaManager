@@ -10,10 +10,7 @@ import TasksPage from '@/pages/TasksPage'
 import EntityPage from '@/pages/EntityPage'
 import TagCategoriesPage from '@/pages/TagCategoriesPage'
 import CollectionPage from '@/pages/CollectionPage'
-import MetadataPage from '@/pages/MetadataPage'
-import DiagnosticsPage from '@/pages/DiagnosticsPage'
-import OrganizerPage from '@/pages/OrganizerPage'
-import MaintenancePage from '@/pages/MaintenancePage'
+import DataCenterPage from '@/pages/DataCenterPage'
 import AiProvidersPage from '@/pages/AiProvidersPage'
 
 export const router = createHashRouter([{ path: '/', Component: AppShell, children: [
@@ -32,11 +29,12 @@ export const router = createHashRouter([{ path: '/', Component: AppShell, childr
   { path: 'actors', element: <EntityPage type="actors" /> },
   { path: 'favorites', element: <CollectionPage kind="favorites" /> },
   { path: 'history', element: <CollectionPage kind="history" /> },
-  { path: 'metadata', Component: MetadataPage },
-  { path: 'diagnostics', Component: DiagnosticsPage },
-  { path: 'organizer', element: <Navigate to="/duplicates" replace /> },
-  { path: 'duplicates', Component: OrganizerPage },
-  { path: 'maintenance', Component: MaintenancePage },
+  { path: 'data-center', Component: DataCenterPage },
+  { path: 'metadata', element: <Navigate to="/data-center?tab=overview" replace /> },
+  { path: 'diagnostics', element: <Navigate to="/data-center?tab=diagnostics" replace /> },
+  { path: 'organizer', element: <Navigate to="/data-center?tab=duplicates" replace /> },
+  { path: 'duplicates', element: <Navigate to="/data-center?tab=duplicates" replace /> },
+  { path: 'maintenance', element: <Navigate to="/data-center?tab=diagnostics" replace /> },
   { path: 'tasks', Component: TasksPage },
   { path: 'plugins', element: <Navigate to="/settings" replace /> },
   { path: 'ai-providers', Component: AiProvidersPage },
