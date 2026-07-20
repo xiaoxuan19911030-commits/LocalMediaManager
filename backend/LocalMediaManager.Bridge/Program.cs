@@ -261,6 +261,7 @@ app.MapPost("/api/tasks/batch/cancel-sync", async (IReadOnlyList<long> taskIds, 
 app.MapPost("/api/videos/{movieId:long}/sync", async (long movieId, string? source, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Manual", source: source)));
 app.MapPost("/api/videos/{movieId:long}/rescrape", async (long movieId, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Rescrape", overwrite: true)));
 app.MapPost("/api/videos/batch/sync", async (IReadOnlyList<long> movieIds, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueBatchAsync(movieIds)));
+app.MapPost("/api/videos/library/sync", async (SyncLibraryCommand command, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueLibraryAsync(command.LibraryId)));
 app.MapPost("/api/delete/preview", async (SafeDeletePreviewCommand command, SafeDeleteWorkflowService service, CancellationToken token) =>
     Results.Ok(await service.PreviewAsync(command, token)));
 app.MapPost("/api/delete/execute", async (SafeDeleteExecuteRequest command, SafeDeleteWorkflowService service, CancellationToken token) =>

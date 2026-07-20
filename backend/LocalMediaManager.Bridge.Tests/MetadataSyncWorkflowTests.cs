@@ -236,6 +236,31 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task LibrarySyncEnqueuesAllActiveMoviesInLibrary()
+    {
+        await using (var connection = await Open()) {
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, "INSERT INTO Libraries(Id,Name,IsEnabled,SortOrder,CreatedAt,UpdatedAt) VALUES(1,'A',1,0,$at,$at),(2,'B',1,1,$at,$at)", ("$at", at));
+            for (int i = 1; i <= 120; i++) {
+                await InsertMovie(connection, i, $"LIB-{i:000}");
+                long libraryId = i <= 100 ? 1 : 2;
+                await Execute(connection, "INSERT INTO MediaFiles(MovieId,LibraryId,FilePath,NormalizedPath,FileName,MediaType,SourceType,IsPrimary,ExistsState,CreatedAt,UpdatedAt) VALUES($movie,$library,$path,$path,$name,'Video','Test',1,'Present',$at,$at)",
+                    ("$movie", i), ("$library", libraryId), ("$path", $"Z:\\Videos\\LIB-{i:000}.mp4"), ("$name", $"LIB-{i:000}.mp4"), ("$at", at));
+            }
+        }
+        MetadataSyncExecutor executor = CreateExecutor();
+
+        BatchTaskMutationResult scoped = await executor.EnqueueLibraryAsync(1);
+        BatchTaskMutationResult all = await executor.EnqueueLibraryAsync();
+
+        await using SqliteConnection verify = await Open();
+        Assert.Equal(100, scoped.Count);
+        Assert.Equal(120, all.Count);
+        Assert.Equal(120, await Scalar(verify, "SELECT COUNT(*) FROM Tasks WHERE TaskType='Sync'"));
+        Assert.Equal(100, await Scalar(verify, "SELECT COUNT(DISTINCT t.CurrentMovieId) FROM Tasks t JOIN MediaFiles f ON f.MovieId=t.CurrentMovieId WHERE f.LibraryId=1"));
+    }
+
+    [Fact]
     public async Task BatchCancelOnlyCancelsSyncTasks()
     {
         await using (var connection = await Open()) {

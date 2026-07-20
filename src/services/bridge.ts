@@ -162,6 +162,7 @@ export const bridge = {
   setBatchFavorite: (movieIds: number[], favorite: boolean) => request<MutationResult>('/api/videos/batch/favorite', { method: 'POST', body: JSON.stringify({ movieIds, favorite }) }),
   setBatchRating: (movieIds: number[], rating?: number, clearRating = false) => request<MutationResult>('/api/videos/batch/rating', { method: 'POST', body: JSON.stringify({ movieIds, rating: rating ?? null, clearRating }) }),
   createBatchSync: (movieIds: number[]) => request<{ count: number; message: string }>('/api/videos/batch/sync', { method: 'POST', body: JSON.stringify(movieIds) }),
+  createLibrarySync: (libraryId?: number) => request<{ count: number; message: string }>('/api/videos/library/sync', { method: 'POST', body: JSON.stringify({ libraryId: libraryId ?? null }) }),
   previewSafeDelete: (value: SafeDeletePreviewCommand) => request<SafeDeletePreview>('/api/delete/preview', { method: 'POST', body: JSON.stringify(value) }),
   executeSafeDelete: (preview: SafeDeletePreviewCommand, confirmationToken: string, confirmOriginalMedia = false) =>
     request<SafeDeleteLaunchResult>('/api/delete/execute', { method: 'POST', body: JSON.stringify({ ...preview, confirmationToken, confirmOriginalMedia }) }),

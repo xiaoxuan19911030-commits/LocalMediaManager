@@ -7,6 +7,7 @@ namespace LocalMediaManager.Bridge;
 
 public sealed record MetadataSyncLaunchResult(long TaskId, string Status, string Message);
 public sealed record BatchTaskMutationResult(int Count, string Message);
+public sealed record SyncLibraryCommand(long? LibraryId = null);
 public sealed record SyncMovie(long Id, string Code, string? Title, string? Description, string? ReleaseDate,
     int DurationSeconds, string? PrimaryFile, string? NfoPath);
 public sealed record SavedImage(string Type, string Path, string SourceUrl, long Size, bool Created,
@@ -342,6 +343,33 @@ public sealed class MetadataSyncExecutor(
         if (ids.Length is 0 or > 500) throw new ArgumentException("Select 1 to 500 movies.");
         foreach (long id in ids) await EnqueueAsync(id, "Batch");
         return new(ids.Length, $"Created {ids.Length} sync tasks.");
+    }
+
+    public async Task<BatchTaskMutationResult> EnqueueLibraryAsync(long? libraryId = null) {
+        await using var connection = await OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = libraryId.HasValue
+            ? """
+              SELECT DISTINCT m.Id
+              FROM Movies m
+              JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video'
+              WHERE f.LibraryId=$library AND COALESCE(f.ExistsState,'')<>'Missing'
+              ORDER BY m.Id
+              """
+            : """
+              SELECT DISTINCT m.Id
+              FROM Movies m
+              JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video'
+              WHERE COALESCE(f.ExistsState,'')<>'Missing'
+              ORDER BY m.Id
+              """;
+        if (libraryId.HasValue) command.Parameters.AddWithValue("$library", libraryId.Value);
+        var ids = new List<long>();
+        await using (SqliteDataReader reader = await command.ExecuteReaderAsync()) {
+            while (await reader.ReadAsync()) ids.Add(reader.GetInt64(0));
+        }
+        foreach (long id in ids) await EnqueueAsync(id, "Library");
+        return new(ids.Count, libraryId.HasValue ? $"Created sync tasks for {ids.Count} movies in library." : $"Created sync tasks for {ids.Count} movies.");
     }
 
     private async Task ExecuteOneAsync(long taskId, MetadataProviderContext settings, CancellationToken cancellationToken)

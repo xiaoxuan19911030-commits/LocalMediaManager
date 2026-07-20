@@ -95,29 +95,8 @@ export default function MediaPage() {
     if (syncAllBusy) return
     setSyncAllBusy(true)
     try {
-      const batchSize = 500
-      let created = 0
-      for (let offset = 0; ; offset += batchSize) {
-        const page = await bridge.advancedSearch({
-          query: '',
-          sort: 'newest',
-          metadata: 'all',
-          fileStatus: 'all',
-          metadataStatus: 'all',
-          ratingFilter: 'all',
-          ratingMin: 0,
-          libraryId: category.defaults.libraryId,
-          limit: batchSize,
-          offset,
-        })
-        const ids = page.items.map((item) => item.dataId)
-        if (ids.length > 0) {
-          await bridge.createBatchSync(ids)
-          created += ids.length
-        }
-        if (ids.length < batchSize || offset + batchSize >= page.total) break
-      }
-      setNotice(`已为库内 ${created} 部影片创建刮削任务，可在任务中心查看进度。`)
+      const result = await bridge.createLibrarySync(category.defaults.libraryId)
+      setNotice(`已为库内 ${result.count} 部影片创建刮削任务，可在任务中心查看进度。`)
     } catch (reason) {
       setNotice((reason as Error).message)
     } finally {
