@@ -73,7 +73,7 @@ public sealed class ProviderDiagnosticsService(
                 return;
 
             MetadataProviderContext context = new(await settings.ReadMetaTubeAsync(), await settings.ReadJavBusAsync(), null,
-                await settings.ReadDmmAsync(), await settings.ReadJavDbAsync());
+                await settings.ReadDmmAsync(), await settings.ReadJavDbAsync(), await settings.ReadNetworkAsync());
             WebMetadataSettingsDto minnanoSettings = await settings.ReadMinnanoAsync();
             WebMetadataSettingsDto wikipediaSettings = await settings.ReadWikipediaJpAsync();
 

@@ -176,18 +176,18 @@ app.MapPut("/api/settings/all", async (UnifiedSettingsDto input, bool? createMis
 app.MapPut("/api/settings/providers/metatube", async (MetaTubeSettingsDto input, MetadataProviderSettingsService settings) =>
     Results.Ok(await settings.SaveMetaTubeAsync(input)));
 app.MapPost("/api/settings/providers/metatube/test", async (MetaTubeSettingsDto input, MetaTubeProvider provider, MetadataProviderSettingsService settingsService) =>
-    Results.Ok(await provider.TestConnectionAsync(new(input with { BaseUrl = input.BaseUrl.Trim().TrimEnd('/') + "/" }, await settingsService.ReadJavBusAsync()), CancellationToken.None)));
+    Results.Ok(await provider.TestConnectionAsync(new(input with { BaseUrl = input.BaseUrl.Trim().TrimEnd('/') + "/" }, await settingsService.ReadJavBusAsync(), Network: await settingsService.ReadNetworkAsync()), CancellationToken.None)));
 app.MapPost("/api/settings/providers/javbus/test", async (JavBusSettingsDto input, JavBusProvider provider, MetadataProviderSettingsService settingsService) =>
-    Results.Ok(await provider.TestConnectionAsync(new(await settingsService.ReadMetaTubeAsync(), MetadataProviderSettingsService.NormalizeJavBus(input)), CancellationToken.None)));
+    Results.Ok(await provider.TestConnectionAsync(new(await settingsService.ReadMetaTubeAsync(), MetadataProviderSettingsService.NormalizeJavBus(input), Network: await settingsService.ReadNetworkAsync()), CancellationToken.None)));
 app.MapPost("/api/settings/providers/dmm/test", async (WebMetadataSettingsDto input, DmmProvider provider, MetadataProviderSettingsService settingsService) =>
     Results.Ok(await provider.TestConnectionAsync(new(await settingsService.ReadMetaTubeAsync(), await settingsService.ReadJavBusAsync(), null,
-        MetadataProviderSettingsService.NormalizeWeb(input, "DMM"), await settingsService.ReadJavDbAsync()), CancellationToken.None)));
+        MetadataProviderSettingsService.NormalizeWeb(input, "DMM"), await settingsService.ReadJavDbAsync(), await settingsService.ReadNetworkAsync()), CancellationToken.None)));
 app.MapPost("/api/settings/providers/javdb/test", async (WebMetadataSettingsDto input, JavDbProvider provider, MetadataProviderSettingsService settingsService) =>
     Results.Ok(await provider.TestConnectionAsync(new(await settingsService.ReadMetaTubeAsync(), await settingsService.ReadJavBusAsync(), null,
-        await settingsService.ReadDmmAsync(), MetadataProviderSettingsService.NormalizeWeb(input, "JavDB")), CancellationToken.None)));
+        await settingsService.ReadDmmAsync(), MetadataProviderSettingsService.NormalizeWeb(input, "JavDB"), await settingsService.ReadNetworkAsync()), CancellationToken.None)));
 app.MapGet("/api/search/remote", async (string q, string? kind, JavDbProvider provider, MetadataProviderSettingsService settingsService, CancellationToken token) =>
     Results.Ok(await provider.SearchKeywordAsync(q, kind ?? "code",
-        new(await settingsService.ReadMetaTubeAsync(), await settingsService.ReadJavBusAsync(), null, await settingsService.ReadDmmAsync(), await settingsService.ReadJavDbAsync()), token)));
+        new(await settingsService.ReadMetaTubeAsync(), await settingsService.ReadJavBusAsync(), null, await settingsService.ReadDmmAsync(), await settingsService.ReadJavDbAsync(), await settingsService.ReadNetworkAsync()), token)));
 app.MapPost("/api/settings/providers/minnano/test", async (WebMetadataSettingsDto input, MinnanoActorProfileProvider provider) =>
     Results.Ok(await provider.TestConnectionAsync(MetadataProviderSettingsService.NormalizeWeb(input, "Minnano"), CancellationToken.None)));
 app.MapPost("/api/settings/providers/wikipedia-jp/test", async (WebMetadataSettingsDto input, WikipediaJpActorProfileProvider provider) =>

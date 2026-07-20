@@ -29,11 +29,17 @@ export interface MetaTubeSettings {
 }
 export interface JavBusSettings {
   enabled: boolean; priority: number; baseUrl: string; timeoutSeconds: number; retryCount: number
-  cookie: string; downloadImages: boolean; fillMissingOnly: boolean
+  cookie: string; downloadImages: boolean; fillMissingOnly: boolean; mirrorUrls?: string[]
 }
 export interface WebMetadataSettings {
   enabled: boolean; priority: number; baseUrl: string; timeoutSeconds: number; retryCount: number
-  cookie: string; downloadImages: boolean; fillMissingOnly: boolean
+  cookie: string; downloadImages: boolean; fillMissingOnly: boolean; mirrorUrls?: string[]
+}
+export interface ProviderNetworkSettings {
+  proxyMode: 'System' | 'Direct' | 'Manual'
+  proxyUrl: string
+  username: string
+  password: string
 }
 
 export interface ProviderConnectionResult { success: boolean; provider: string; message: string; elapsedMilliseconds: number }
@@ -82,6 +88,7 @@ export interface UnifiedSettings {
   javDb: WebMetadataSettings
   minnano: WebMetadataSettings
   wikipediaJp: WebMetadataSettings
+  providerNetwork?: ProviderNetworkSettings
   nfo: NfoSettings
   playback: PlaybackSettings
   ratingRetention: RatingRetentionSettings

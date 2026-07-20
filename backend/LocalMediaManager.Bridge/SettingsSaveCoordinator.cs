@@ -44,7 +44,8 @@ public sealed record UnifiedSettingsDto(
     WebMetadataSettingsDto? Dmm = null,
     WebMetadataSettingsDto? JavDb = null,
     WebMetadataSettingsDto? Minnano = null,
-    WebMetadataSettingsDto? WikipediaJp = null);
+    WebMetadataSettingsDto? WikipediaJp = null,
+    ProviderNetworkSettingsDto? ProviderNetwork = null);
 
 public sealed record UnifiedSettingsSaveResult(UnifiedSettingsDto Settings, IReadOnlyList<string> ChangedFields, string Message);
 
@@ -85,7 +86,8 @@ public sealed class SettingsSaveCoordinator(
             await metadata.ReadDmmAsync(),
             await metadata.ReadJavDbAsync(),
             await metadata.ReadMinnanoAsync(),
-            await metadata.ReadWikipediaJpAsync());
+            await metadata.ReadWikipediaJpAsync(),
+            await metadata.ReadNetworkAsync());
     }
 
     public UnifiedSettingsDto DefaultSettings() => SettingsDefaults.UnifiedForEnvironment(installRoot, databasePath);
@@ -112,6 +114,7 @@ public sealed class SettingsSaveCoordinator(
         await MetadataProviderSettingsService.StoreWebAsync(connection, transaction, "javdb", clean.JavDb!);
         await MetadataProviderSettingsService.StoreWebAsync(connection, transaction, "minnano", clean.Minnano!);
         await MetadataProviderSettingsService.StoreWebAsync(connection, transaction, "wikipediaJp", clean.WikipediaJp!);
+        await MetadataProviderSettingsService.StoreNetworkAsync(connection, transaction, clean.ProviderNetwork ?? ProviderNetworkSettingsDto.Default);
         await StoreAsync(connection, transaction, "nfo.export.policy", clean.Nfo.ExportPolicy, "string", token);
         await StoreAsync(connection, transaction, "nfo.export.outputDirectory", clean.Nfo.OutputDirectory, "string", token);
         await StoreAsync(connection, transaction, "nfo.import.fillEmptyOnly", true, "boolean", token);
@@ -192,7 +195,8 @@ public sealed class SettingsSaveCoordinator(
             MetadataProviderSettingsService.NormalizeWeb(input.Dmm ?? SettingsDefaults.Dmm, "DMM"),
             MetadataProviderSettingsService.NormalizeWeb(input.JavDb ?? SettingsDefaults.JavDb, "JavDB"),
             MetadataProviderSettingsService.NormalizeWeb(input.Minnano ?? SettingsDefaults.Minnano, "Minnano"),
-            MetadataProviderSettingsService.NormalizeWeb(input.WikipediaJp ?? SettingsDefaults.WikipediaJp, "Wikipedia JP"));
+            MetadataProviderSettingsService.NormalizeWeb(input.WikipediaJp ?? SettingsDefaults.WikipediaJp, "Wikipedia JP"),
+            MetadataProviderSettingsService.NormalizeNetwork(input.ProviderNetwork ?? ProviderNetworkSettingsDto.Default));
     }
 
     private static string NormalizeDirectory(string value, string label)
@@ -763,6 +767,7 @@ public static class SettingsDefaults
     public static WebMetadataSettingsDto JavDb => new(false, 4, JavDbProvider.DefaultBaseUrl, 30, 1, "", true, true);
     public static WebMetadataSettingsDto Minnano => new(false, 1, MinnanoActorProfileProvider.DefaultBaseUrl, 30, 1, "", true, true);
     public static WebMetadataSettingsDto WikipediaJp => new(false, 2, WikipediaJpActorProfileProvider.DefaultBaseUrl, 30, 1, "", false, true);
+    public static ProviderNetworkSettingsDto ProviderNetwork => ProviderNetworkSettingsDto.Default;
     public static UnifiedSettingsDto Unified => UnifiedForEnvironment(null, null);
 
     public static UnifiedSettingsDto UnifiedForEnvironment(string? installRoot, string? databasePath) => new(
@@ -781,7 +786,8 @@ public static class SettingsDefaults
         Dmm,
         JavDb,
         Minnano,
-        WikipediaJp);
+        WikipediaJp,
+        ProviderNetwork);
 
     public static MediaStorageSettingsDto MediaStorageForEnvironment(
         string? installRoot,

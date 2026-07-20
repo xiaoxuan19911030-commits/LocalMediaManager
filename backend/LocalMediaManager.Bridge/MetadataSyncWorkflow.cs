@@ -464,7 +464,7 @@ public sealed class MetadataSyncExecutor(
     }
     private async Task<MetadataProviderContext> ReadProviderContextAsync(CancellationToken token) =>
         await diagnostics.FilterMovieProvidersAsync(new(await settingsService.ReadMetaTubeAsync(), await settingsService.ReadJavBusAsync(), null,
-            await settingsService.ReadDmmAsync(), await settingsService.ReadJavDbAsync()), token);
+            await settingsService.ReadDmmAsync(), await settingsService.ReadJavDbAsync(), await settingsService.ReadNetworkAsync()), token);
     private async Task SetProviderAsync(long id,string providerName,CancellationToken token){await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Provider=$provider,UpdatedAt=$at WHERE Id=$id",("$provider",providerName),("$at",Now()),("$id",id));await logs.WriteAsync(id,"Info",$"使用数据源：{providerName}",token);}
     private static string? NormalizeSource(string? value) => value?.Trim().ToLowerInvariant() switch { "javbus" => "JavBus", "metatube" => "MetaTube", "dmm" => "DMM", "javdb" => "JavDB", _ => null };
     private async Task StageAsync(long id,string stage,double progress,string message,CancellationToken token){await EnsureRunnableAsync(id,token);await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Status=$stage,Stage=$stage,Progress=$progress,UpdatedAt=$at WHERE Id=$id",("$stage",stage),("$progress",progress),("$at",Now()),("$id",id));await logs.WriteAsync(id,"Info",message,token);}

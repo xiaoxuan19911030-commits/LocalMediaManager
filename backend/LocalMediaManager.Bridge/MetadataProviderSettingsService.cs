@@ -20,15 +20,23 @@ public sealed record JavBusSettingsDto(
     int RetryCount,
     string Cookie,
     bool DownloadImages,
-    bool FillMissingOnly);
+    bool FillMissingOnly,
+    IReadOnlyList<string>? MirrorUrls = null);
 
 public sealed record WebMetadataSettingsDto(
     bool Enabled, int Priority, string BaseUrl, int TimeoutSeconds, int RetryCount,
-    string Cookie, bool DownloadImages, bool FillMissingOnly);
+    string Cookie, bool DownloadImages, bool FillMissingOnly, IReadOnlyList<string>? MirrorUrls = null);
+
+public sealed record ProviderNetworkSettingsDto(string ProxyMode, string ProxyUrl, string Username = "", string Password = "")
+{
+    public static ProviderNetworkSettingsDto Default => new("System", "");
+}
 
 public sealed record MetadataProviderContext(MetaTubeSettingsDto MetaTube, JavBusSettingsDto JavBus, string? PreferredSource = null,
-    WebMetadataSettingsDto? Dmm = null, WebMetadataSettingsDto? JavDb = null)
+    WebMetadataSettingsDto? Dmm = null, WebMetadataSettingsDto? JavDb = null, ProviderNetworkSettingsDto? Network = null)
 {
+    public ProviderNetworkSettingsDto NetworkSettings => Network ?? ProviderNetworkSettingsDto.Default;
+
     public int TimeoutSeconds(string provider) =>
         provider.Equals("JavBus", StringComparison.OrdinalIgnoreCase) ? JavBus.TimeoutSeconds
         : provider.Equals("DMM", StringComparison.OrdinalIgnoreCase) ? (Dmm ?? SettingsDefaults.Dmm).TimeoutSeconds
@@ -82,7 +90,23 @@ public sealed class MetadataProviderSettingsService(string databasePath)
             Math.Clamp(Int(values, "metadata.javbus.retryCount", defaults.RetryCount), 0, 3),
             Text(values, "metadata.javbus.cookie", defaults.Cookie),
             Bool(values, "metadata.javbus.downloadImages", defaults.DownloadImages),
-            true);
+            true,
+            UrlList(values, "metadata.javbus.mirrorUrls", defaults.MirrorUrls));
+    }
+
+    public async Task<ProviderNetworkSettingsDto> ReadNetworkAsync()
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        await using var connection = await OpenAsync(SqliteOpenMode.ReadOnly);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Key,ValueJson FROM AppSettings WHERE Key LIKE 'metadata.network.%'";
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) values[reader.GetString(0)] = reader.GetString(1);
+        return NormalizeNetwork(new(
+            Text(values, "metadata.network.proxyMode", ProviderNetworkSettingsDto.Default.ProxyMode),
+            Text(values, "metadata.network.proxyUrl", ProviderNetworkSettingsDto.Default.ProxyUrl),
+            Text(values, "metadata.network.username", ""),
+            Text(values, "metadata.network.password", "")));
     }
 
     public Task<WebMetadataSettingsDto> ReadDmmAsync() => ReadWebAsync("dmm", SettingsDefaults.Dmm);
@@ -134,6 +158,7 @@ public sealed class MetadataProviderSettingsService(string databasePath)
             RetryCount = Math.Clamp(input.RetryCount, 0, 3),
             Cookie = input.Cookie?.Trim() ?? "",
             FillMissingOnly = true,
+            MirrorUrls = NormalizeUrlList(input.MirrorUrls ?? []),
         };
     }
 
@@ -147,6 +172,7 @@ public sealed class MetadataProviderSettingsService(string databasePath)
         await StoreAsync(connection, transaction, "metadata.javbus.cookie", clean.Cookie, "secret");
         await StoreAsync(connection, transaction, "metadata.javbus.downloadImages", clean.DownloadImages, "boolean");
         await StoreAsync(connection, transaction, "metadata.javbus.fillMissingOnly", true, "boolean");
+        await StoreAsync(connection, transaction, "metadata.javbus.mirrorUrls", clean.MirrorUrls ?? [], "json");
     }
 
     public static WebMetadataSettingsDto NormalizeWeb(WebMetadataSettingsDto input, string provider)
@@ -160,7 +186,21 @@ public sealed class MetadataProviderSettingsService(string databasePath)
             RetryCount = Math.Clamp(input.RetryCount, 0, 3),
             Cookie = input.Cookie?.Trim() ?? "",
             FillMissingOnly = true,
+            MirrorUrls = NormalizeUrlList(input.MirrorUrls ?? []),
         };
+    }
+
+    public static ProviderNetworkSettingsDto NormalizeNetwork(ProviderNetworkSettingsDto input)
+    {
+        string mode = input.ProxyMode?.Trim().ToLowerInvariant() switch {
+            "direct" => "Direct",
+            "manual" => "Manual",
+            _ => "System",
+        };
+        string proxyUrl = (input.ProxyUrl ?? "").Trim();
+        if (mode == "Manual" && (!Uri.TryCreate(proxyUrl, UriKind.Absolute, out Uri? proxy) || proxy.Scheme is not ("http" or "https")))
+            throw new ArgumentException("手动代理地址必须是有效的 http 或 https URL。");
+        return new(mode, mode == "Manual" ? proxyUrl : "", input.Username?.Trim() ?? "", input.Password?.Trim() ?? "");
     }
 
     public static async Task StoreWebAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
@@ -175,6 +215,16 @@ public sealed class MetadataProviderSettingsService(string databasePath)
         await StoreAsync(connection, transaction, prefix + "cookie", clean.Cookie, "secret");
         await StoreAsync(connection, transaction, prefix + "downloadImages", clean.DownloadImages, "boolean");
         await StoreAsync(connection, transaction, prefix + "fillMissingOnly", true, "boolean");
+        await StoreAsync(connection, transaction, prefix + "mirrorUrls", clean.MirrorUrls ?? [], "json");
+    }
+
+    public static async Task StoreNetworkAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
+        ProviderNetworkSettingsDto clean)
+    {
+        await StoreAsync(connection, transaction, "metadata.network.proxyMode", clean.ProxyMode, "string");
+        await StoreAsync(connection, transaction, "metadata.network.proxyUrl", clean.ProxyUrl, "string");
+        await StoreAsync(connection, transaction, "metadata.network.username", clean.Username, "secret");
+        await StoreAsync(connection, transaction, "metadata.network.password", clean.Password, "secret");
     }
 
     public static async Task StoreAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
@@ -215,10 +265,19 @@ public sealed class MetadataProviderSettingsService(string databasePath)
         return new(Bool(values, key + "enabled", defaults.Enabled), Math.Clamp(Int(values, key + "priority", defaults.Priority), 1, 99),
             NormalizeBaseUrl(Text(values, key + "baseUrl", defaults.BaseUrl)), Math.Clamp(Int(values, key + "timeoutSeconds", defaults.TimeoutSeconds), 10, 180),
             Math.Clamp(Int(values, key + "retryCount", defaults.RetryCount), 0, 3), Text(values, key + "cookie", defaults.Cookie),
-            Bool(values, key + "downloadImages", defaults.DownloadImages), true);
+            Bool(values, key + "downloadImages", defaults.DownloadImages), true, UrlList(values, key + "mirrorUrls", defaults.MirrorUrls));
     }
 
     private static string NormalizeBaseUrl(string value) => value.Trim().TrimEnd('/') + "/";
+    private static IReadOnlyList<string> NormalizeUrlList(IEnumerable<string> values) =>
+        values.Select(value => (value ?? "").Trim()).Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) && uri.Scheme is "http" or "https" ? NormalizeBaseUrl(uri.ToString()) : "")
+            .Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).Take(8).ToArray();
+    private static IReadOnlyList<string> UrlList(IReadOnlyDictionary<string, string> values, string key, IReadOnlyList<string>? fallback)
+    {
+        if (!values.TryGetValue(key, out string? raw)) return fallback ?? [];
+        try { return NormalizeUrlList(JsonSerializer.Deserialize<string[]>(raw) ?? []); } catch (JsonException) { return fallback ?? []; }
+    }
     private static bool Bool(IReadOnlyDictionary<string, string> values, string key, bool fallback) =>
         values.TryGetValue(key, out string? raw) && JsonSerializer.Deserialize<bool>(raw) is bool value ? value : fallback;
     private static int Int(IReadOnlyDictionary<string, string> values, string key, int fallback) =>

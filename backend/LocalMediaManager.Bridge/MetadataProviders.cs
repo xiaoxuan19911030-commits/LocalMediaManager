@@ -32,7 +32,7 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
     public async Task<IReadOnlyList<MetadataSearchResult>> SearchAsync(string code, MetadataProviderContext context, CancellationToken cancellationToken)
     {
         MetaTubeSettingsDto settings = context.MetaTube;
-        using HttpClient client = CreateClient(settings);
+        using HttpClient client = CreateClient(settings, context.NetworkSettings);
         using JsonDocument document = await GetJsonAsync(client,
             new Uri(new Uri(settings.BaseUrl), $"v1/movies/search?q={Uri.EscapeDataString(NormalizeCode(code))}&fallback=True"), cancellationToken, notFoundAsEmpty: true);
         if (!document.RootElement.TryGetProperty("data", out JsonElement data) || data.ValueKind != JsonValueKind.Array)
@@ -55,7 +55,7 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
     public async Task<ProviderMetadata?> GetMetadataAsync(MetadataSearchResult result, MetadataProviderContext context, CancellationToken cancellationToken)
     {
         MetaTubeSettingsDto settings = context.MetaTube;
-        using HttpClient client = CreateClient(settings);
+        using HttpClient client = CreateClient(settings, context.NetworkSettings);
         Uri detailUrl = new(new Uri(settings.BaseUrl), $"v1/movies/{Uri.EscapeDataString(result.Provider)}/{Uri.EscapeDataString(result.ExternalId)}?lazy=True");
         using JsonDocument document = await GetJsonAsync(client, detailUrl, cancellationToken);
         JsonElement root = document.RootElement;
@@ -94,7 +94,7 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
         try {
             Uri uri = new(new Uri(settings.BaseUrl), "v1/movies/search?q=ABP-001&fallback=False");
             string trace = await ProviderNetworkDiagnostics.ProbeAsync(Name, uri, settings.TimeoutSeconds,
-                ProviderNetworkDiagnostics.JsonHeaders, cancellationToken);
+                ProviderNetworkDiagnostics.JsonHeaders, cancellationToken, context.NetworkSettings);
             watch.Stop();
             bool success = trace.Contains("HTTP 200", StringComparison.OrdinalIgnoreCase);
             return new(success, Name, trace, watch.ElapsedMilliseconds);
@@ -104,9 +104,11 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
         }
     }
 
-    private HttpClient CreateClient(MetaTubeSettingsDto settings)
+    private HttpClient CreateClient(MetaTubeSettingsDto settings, ProviderNetworkSettingsDto network)
     {
-        HttpClient client = clients.CreateClient("MetaTube");
+        HttpClient client = network.ProxyMode.Equals("System", StringComparison.OrdinalIgnoreCase)
+            ? clients.CreateClient("MetaTube")
+            : ProviderHttpClients.Create(settings.TimeoutSeconds, network);
         client.Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.Clear();
         client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.6.3"));
@@ -320,21 +322,33 @@ public sealed class JavBusProvider(IHttpClientFactory clients) : IMetadataProvid
         if (string.IsNullOrWhiteSpace(normalized) || JavBusCode.IsUnsupported(normalized)) return [];
         JavBusSettingsDto settings = context.JavBus;
         string urlCode = Uri.EscapeDataString(normalized);
-        using HttpClient client = CreateClient(settings);
-        string html = await GetHtmlAsync(client, new Uri(new Uri(settings.BaseUrl), urlCode), settings, cancellationToken, notFoundAsEmpty: true);
-        if (string.IsNullOrWhiteSpace(html)) return [];
-        string parsedCode = JavBusParser.Code(html) ?? normalized;
-        return Comparable(parsedCode) == Comparable(normalized)
-            ? [new("JavBus", normalized, parsedCode, JavBusParser.Title(html))]
-            : [];
+        Exception? last = null;
+        foreach (JavBusSettingsDto candidate in Candidates(settings)) {
+            try {
+                Uri uri = new(new Uri(candidate.BaseUrl), urlCode);
+                using HttpClient client = CreateClient(candidate, context.NetworkSettings);
+                string html = await GetHtmlAsync(client, uri, candidate, cancellationToken, notFoundAsEmpty: true);
+                if (string.IsNullOrWhiteSpace(html)) continue;
+                string parsedCode = JavBusParser.Code(html) ?? normalized;
+                if (Comparable(parsedCode) == Comparable(normalized))
+                    return [new("JavBus", uri.ToString(), parsedCode, JavBusParser.Title(html))];
+            } catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested) {
+                last = error;
+            }
+        }
+        if (last is not null) throw last;
+        return [];
     }
 
     public async Task<ProviderMetadata?> GetMetadataAsync(MetadataSearchResult result, MetadataProviderContext context, CancellationToken cancellationToken)
     {
         JavBusSettingsDto settings = context.JavBus;
-        using HttpClient client = CreateClient(settings);
-        Uri uri = new(new Uri(settings.BaseUrl), Uri.EscapeDataString(JavBusCode.Normalize(result.ExternalId)));
-        string html = await GetHtmlAsync(client, uri, settings, cancellationToken);
+        Uri uri = Uri.TryCreate(result.ExternalId, UriKind.Absolute, out Uri? absolute)
+            ? absolute
+            : new Uri(new Uri(settings.BaseUrl), Uri.EscapeDataString(JavBusCode.Normalize(result.ExternalId)));
+        JavBusSettingsDto effective = settings with { BaseUrl = uri.GetLeftPart(UriPartial.Authority) + "/" };
+        using HttpClient client = CreateClient(effective, context.NetworkSettings);
+        string html = await GetHtmlAsync(client, uri, effective, cancellationToken);
         ProviderMetadata metadata = JavBusParser.Parse(html, uri.ToString(), result.Code);
         return HasUsefulMetadata(metadata) ? metadata : null;
     }
@@ -346,10 +360,10 @@ public sealed class JavBusProvider(IHttpClientFactory clients) : IMetadataProvid
     {
         var watch = Stopwatch.StartNew();
         try {
-            using HttpClient client = CreateClient(context.JavBus);
+            using HttpClient client = CreateClient(context.JavBus, context.NetworkSettings);
             Uri uri = new(context.JavBus.BaseUrl);
             string trace = await ProviderNetworkDiagnostics.ProbeAsync(Name, uri, context.JavBus.TimeoutSeconds,
-                request => ProviderNetworkDiagnostics.BrowserHeaders(request, context.JavBus.Cookie, context.JavBus.BaseUrl), cancellationToken);
+                request => ProviderNetworkDiagnostics.BrowserHeaders(request, context.JavBus.Cookie, context.JavBus.BaseUrl), cancellationToken, context.NetworkSettings);
             watch.Stop();
             bool success = trace.Contains("HTTP 200", StringComparison.OrdinalIgnoreCase)
                 && !trace.Contains("Cloudflare: detected", StringComparison.OrdinalIgnoreCase)
@@ -361,9 +375,11 @@ public sealed class JavBusProvider(IHttpClientFactory clients) : IMetadataProvid
         }
     }
 
-    private HttpClient CreateClient(JavBusSettingsDto settings)
+    private HttpClient CreateClient(JavBusSettingsDto settings, ProviderNetworkSettingsDto network)
     {
-        HttpClient client = clients.CreateClient("JavBus");
+        HttpClient client = network.ProxyMode.Equals("System", StringComparison.OrdinalIgnoreCase)
+            ? clients.CreateClient("JavBus")
+            : ProviderHttpClients.Create(settings.TimeoutSeconds, network);
         client.Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.Clear();
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36");
@@ -373,6 +389,12 @@ public sealed class JavBusProvider(IHttpClientFactory clients) : IMetadataProvid
             client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", settings.Cookie);
         return client;
     }
+
+    private static IReadOnlyList<JavBusSettingsDto> Candidates(JavBusSettingsDto settings) =>
+        new[] { settings.BaseUrl }.Concat(settings.MirrorUrls ?? [])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(url => settings with { BaseUrl = url })
+            .ToArray();
 
     private static async Task<string> GetHtmlAsync(HttpClient client, Uri uri, JavBusSettingsDto settings, CancellationToken cancellationToken, bool notFoundAsEmpty = false)
     {

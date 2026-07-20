@@ -26,15 +26,26 @@ public abstract class HtmlMetadataProvider(IHttpClientFactory clients) : IMetada
     {
         WebMetadataSettingsDto settings = Settings(context);
         string normalized = ProviderParsing.NormalizeCode(code);
-        using HttpClient client = CreateClient(settings);
-        (string html, Uri uri) = await GetAsync(client, SearchUri(settings, normalized), settings, cancellationToken, true);
-        return ParseSearch(html, uri, normalized).Where(item => ProviderParsing.Comparable(item.Code) == ProviderParsing.Comparable(normalized)).ToArray();
+        Exception? last = null;
+        foreach (WebMetadataSettingsDto candidate in Candidates(settings)) {
+            try {
+                using HttpClient client = CreateClient(candidate, context.NetworkSettings);
+                (string html, Uri uri) = await GetAsync(client, SearchUri(candidate, normalized), candidate, cancellationToken, true);
+                MetadataSearchResult[] results = ParseSearch(html, uri, normalized)
+                    .Where(item => ProviderParsing.Comparable(item.Code) == ProviderParsing.Comparable(normalized)).ToArray();
+                if (results.Length > 0 || candidate == Candidates(settings).Last()) return results;
+            } catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested) {
+                last = error;
+            }
+        }
+        if (last is not null) throw last;
+        return [];
     }
 
     public async Task<ProviderMetadata?> GetMetadataAsync(MetadataSearchResult result, MetadataProviderContext context, CancellationToken cancellationToken)
     {
         WebMetadataSettingsDto settings = Settings(context);
-        using HttpClient client = CreateClient(settings);
+        using HttpClient client = CreateClient(settings, context.NetworkSettings);
         (string html, Uri uri) = await GetAsync(client, new Uri(result.ExternalId), settings, cancellationToken, false);
         ProviderMetadata metadata = ParseDetail(html, uri, result);
         if (ProviderParsing.Comparable(metadata.Code) != ProviderParsing.Comparable(result.Code))
@@ -51,30 +62,32 @@ public abstract class HtmlMetadataProvider(IHttpClientFactory clients) : IMetada
         var watch = Stopwatch.StartNew();
         try {
             Uri uri = new(settings.BaseUrl);
-            using HttpClient client = CreateClient(settings);
+            using HttpClient client = CreateClient(settings, context.NetworkSettings);
             using HttpResponseMessage response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (!response.IsSuccessStatusCode)
                 return new(false, Name, ProviderParsing.StatusMessage(Name, response.StatusCode), watch.ElapsedMilliseconds);
             string html = await response.Content.ReadAsStringAsync(cancellationToken);
             if (ProviderParsing.LooksBlocked(html)) {
                 string trace = await ProviderNetworkDiagnostics.ProbeAsync(Name, uri, settings.TimeoutSeconds,
-                    request => ProviderNetworkDiagnostics.BrowserHeaders(request, settings.Cookie, settings.BaseUrl), CancellationToken.None);
+                    request => ProviderNetworkDiagnostics.BrowserHeaders(request, settings.Cookie, settings.BaseUrl), CancellationToken.None, context.NetworkSettings);
                 return new(false, Name, trace, watch.ElapsedMilliseconds);
             }
             string okTrace = await ProviderNetworkDiagnostics.ProbeAsync(Name, uri, settings.TimeoutSeconds,
-                request => ProviderNetworkDiagnostics.BrowserHeaders(request, settings.Cookie, settings.BaseUrl), CancellationToken.None);
+                request => ProviderNetworkDiagnostics.BrowserHeaders(request, settings.Cookie, settings.BaseUrl), CancellationToken.None, context.NetworkSettings);
             return new(true, Name, okTrace, watch.ElapsedMilliseconds);
         } catch (Exception error) when (error is HttpRequestException or TaskCanceledException) {
             Uri uri = new(settings.BaseUrl);
             string trace = await ProviderNetworkDiagnostics.ProbeAsync(Name, uri, settings.TimeoutSeconds,
-                request => ProviderNetworkDiagnostics.BrowserHeaders(request, settings.Cookie, settings.BaseUrl), CancellationToken.None);
+                request => ProviderNetworkDiagnostics.BrowserHeaders(request, settings.Cookie, settings.BaseUrl), CancellationToken.None, context.NetworkSettings);
             return new(false, Name, error is TaskCanceledException ? $"{Name} HTTP Timeout. {trace}" : $"{Name} 网络错误：{error.Message}. {trace}", watch.ElapsedMilliseconds);
         }
     }
 
-    protected HttpClient CreateClient(WebMetadataSettingsDto settings)
+    protected HttpClient CreateClient(WebMetadataSettingsDto settings, ProviderNetworkSettingsDto network)
     {
-        HttpClient client = clients.CreateClient(Name);
+        HttpClient client = network.ProxyMode.Equals("System", StringComparison.OrdinalIgnoreCase)
+            ? clients.CreateClient(Name)
+            : ProviderHttpClients.Create(settings.TimeoutSeconds, network);
         client.Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.Clear();
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36");
@@ -84,6 +97,12 @@ public abstract class HtmlMetadataProvider(IHttpClientFactory clients) : IMetada
         if (!string.IsNullOrWhiteSpace(settings.Cookie)) client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", settings.Cookie);
         return client;
     }
+
+    private static IReadOnlyList<WebMetadataSettingsDto> Candidates(WebMetadataSettingsDto settings) =>
+        new[] { settings.BaseUrl }.Concat(settings.MirrorUrls ?? [])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(url => settings with { BaseUrl = url })
+            .ToArray();
 
     protected static async Task<(string Html, Uri Uri)> GetAsync(HttpClient client, Uri uri, WebMetadataSettingsDto settings,
         CancellationToken cancellationToken, bool notFoundAsEmpty)
@@ -132,7 +151,7 @@ public sealed class JavDbProvider(IHttpClientFactory clients) : HtmlMetadataProv
     public async Task<IReadOnlyList<RemoteMetadataResult>> SearchKeywordAsync(string keyword, string kind, MetadataProviderContext context, CancellationToken cancellationToken)
     {
         WebMetadataSettingsDto settings = Settings(context);
-        using HttpClient client = CreateClient(settings);
+        using HttpClient client = CreateClient(settings, context.NetworkSettings);
         string prefix = kind.ToLowerInvariant() switch { "actor" => "actors", "tag" => "tags", _ => "search" };
         Uri uri = prefix == "search" ? SearchUri(settings, keyword) : new(new Uri(settings.BaseUrl), $"{prefix}?q={Uri.EscapeDataString(keyword)}");
         (string html, Uri response) = await GetAsync(client, uri, settings, cancellationToken, true);

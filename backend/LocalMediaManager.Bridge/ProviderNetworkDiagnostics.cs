@@ -19,37 +19,46 @@ public static class ProviderNetworkDiagnostics
     private static readonly Regex Cloudflare = new("cf-chl|cloudflare|checking your browser|turnstile", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex Blocked = new("captcha|age.?check|sign.?in|login|not-available-in-your-region|region", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    public static async Task<string> ProbeAsync(string provider, Uri uri, int timeoutSeconds, Action<HttpRequestMessage>? configure = null, CancellationToken token = default)
+    public static async Task<string> ProbeAsync(string provider, Uri uri, int timeoutSeconds, Action<HttpRequestMessage>? configure = null,
+        CancellationToken token = default, ProviderNetworkSettingsDto? network = null)
     {
         var lines = new List<string>();
         var watch = Stopwatch.StartNew();
-        IPAddress[] addresses;
-        try {
-            lines.Add($"DNS Resolve: {uri.Host}");
-            addresses = await Dns.GetHostAddressesAsync(uri.Host, token).WaitAsync(TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 5, 60)), token);
-            lines.Add($"DNS OK: {string.Join(", ", addresses.Select(value => value.ToString()).Take(4))}");
-        } catch (Exception error) when (error is SocketException or TimeoutException or OperationCanceledException) {
-            lines.Add($"DNS Failed: {error.Message}");
-            return Format(provider, lines, watch);
-        }
+        ProviderNetworkSettingsDto cleanNetwork = MetadataProviderSettingsService.NormalizeNetwork(network ?? ProviderNetworkSettingsDto.Default);
+        lines.Add($"Proxy Mode: {cleanNetwork.ProxyMode}");
+        bool manualProxy = cleanNetwork.ProxyMode.Equals("Manual", StringComparison.OrdinalIgnoreCase);
 
-        int port = uri.Port > 0 ? uri.Port : uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) ? 443 : 80;
-        try {
-            lines.Add($"TCP Connect: {uri.Host}:{port}");
-            using var tcp = new TcpClient();
-            await tcp.ConnectAsync(addresses, port, token).AsTask().WaitAsync(TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 5, 60)), token);
-            lines.Add("TCP Connected");
-
-            if (uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)) {
-                lines.Add("TLS Handshake");
-                using var ssl = new SslStream(tcp.GetStream(), false, (_, _, _, errors) => errors == SslPolicyErrors.None);
-                await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = uri.Host }, token)
-                    .WaitAsync(TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 5, 60)), token);
-                lines.Add($"TLS OK: {ssl.SslProtocol}");
+        if (manualProxy) {
+            lines.Add("Direct TCP skipped because manual proxy is configured");
+        } else {
+            IPAddress[] addresses;
+            try {
+                lines.Add($"DNS Resolve: {uri.Host}");
+                addresses = await Dns.GetHostAddressesAsync(uri.Host, token).WaitAsync(TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 5, 60)), token);
+                lines.Add($"DNS OK: {string.Join(", ", addresses.Select(value => value.ToString()).Take(4))}");
+            } catch (Exception error) when (error is SocketException or TimeoutException or OperationCanceledException) {
+                lines.Add($"DNS Failed: {error.Message}");
+                return Format(provider, lines, watch);
             }
-        } catch (Exception error) when (error is SocketException or IOException or AuthenticationException or TimeoutException or OperationCanceledException) {
-            lines.Add($"{(uri.Scheme == "https" ? "TLS/TCP" : "TCP")} Failed: {error.Message}");
-            return Format(provider, lines, watch);
+
+            int port = uri.Port > 0 ? uri.Port : uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) ? 443 : 80;
+            try {
+                lines.Add($"TCP Connect: {uri.Host}:{port}");
+                using var tcp = new TcpClient();
+                await tcp.ConnectAsync(addresses, port, token).AsTask().WaitAsync(TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 5, 60)), token);
+                lines.Add("TCP Connected");
+
+                if (uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)) {
+                    lines.Add("TLS Handshake");
+                    using var ssl = new SslStream(tcp.GetStream(), false, (_, _, _, errors) => errors == SslPolicyErrors.None);
+                    await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = uri.Host }, token)
+                        .WaitAsync(TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 5, 60)), token);
+                    lines.Add($"TLS OK: {ssl.SslProtocol}");
+                }
+            } catch (Exception error) when (error is SocketException or IOException or AuthenticationException or TimeoutException or OperationCanceledException) {
+                lines.Add($"{(uri.Scheme == "https" ? "TLS/TCP" : "TCP")} Failed: {error.Message}");
+                return Format(provider, lines, watch);
+            }
         }
 
         try {
@@ -58,6 +67,7 @@ public static class ProviderNetworkDiagnostics
                 AutomaticDecompression = DecompressionMethods.All,
                 UseCookies = false,
             };
+            ProviderHttpClients.ApplyProxy(handler, cleanNetwork);
             using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 5, 180)) };
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
             configure?.Invoke(request);

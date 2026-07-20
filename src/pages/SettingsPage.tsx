@@ -23,7 +23,7 @@ import { defaultMovieWallDisplay, normalizeMovieWallDisplay } from '@/components
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
 import type { BridgeHealth, TaskItem } from '@/types/media'
-import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegToolStatus, LogCleanupPreview, LogCleanupResult, MediaStorageSettings, MovieWallDisplaySettings, PlaybackSettings, ProviderDiagnosticResult, RatingRetentionSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult } from '@/types/settings'
+import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegToolStatus, JavBusSettings, LogCleanupPreview, LogCleanupResult, MediaStorageSettings, MovieWallDisplaySettings, PlaybackSettings, ProviderDiagnosticResult, ProviderNetworkSettings, RatingRetentionSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult, WebMetadataSettings } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 
 const categories = [
@@ -280,7 +280,7 @@ export default function SettingsPage() {
         </Paper>
         {category === 'general' && <GeneralSection snapshot={snapshot} system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
         {category === 'metadata' && <MetadataSection/>}
-        {category === 'plugins' && <PluginsSection snapshot={snapshot} setNotice={setNotice}/>}
+        {category === 'plugins' && <PluginsSection snapshot={snapshot} providerNetwork={draft.providerNetwork} setProviderNetwork={(value) => updateDraft('providerNetwork', value)} javBus={draft.javBus} setJavBus={(value) => updateDraft('javBus', value)} dmm={draft.dmm} setDmm={(value) => updateDraft('dmm', value)} javDb={draft.javDb} setJavDb={(value) => updateDraft('javDb', value)} setNotice={setNotice}/>}
         {category === 'mediaStorage' && <MediaStorageSection mediaStorage={draft.mediaStorage} defaults={defaults.mediaStorage} setMediaStorage={(value) => updateDraft('mediaStorage', value)} setNotice={setNotice}/>}
         {category === 'search' && <SearchSection search={draft.search} setSearch={(value) => updateDraft('search', value)}/>}
         {category === 'shortcuts' && <ShortcutSection system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
@@ -378,8 +378,16 @@ function MetadataSection() {
   </Stack>
 }
 
-function PluginsSection({ snapshot, setNotice }: {
+function PluginsSection({ snapshot, providerNetwork, setProviderNetwork, javBus, setJavBus, dmm, setDmm, javDb, setJavDb, setNotice }: {
   snapshot: SettingsSnapshot
+  providerNetwork?: ProviderNetworkSettings
+  setProviderNetwork: (value: ProviderNetworkSettings) => void
+  javBus: JavBusSettings
+  setJavBus: (value: JavBusSettings) => void
+  dmm: WebMetadataSettings
+  setDmm: (value: WebMetadataSettings) => void
+  javDb: WebMetadataSettings
+  setJavDb: (value: WebMetadataSettings) => void
   setNotice: (value: string) => void
 }) {
   const [ffmpeg, setFfmpeg] = useState<FfmpegToolStatus>()
@@ -387,6 +395,7 @@ function PluginsSection({ snapshot, setNotice }: {
   const [diagnostics, setDiagnostics] = useState<ProviderDiagnosticResult[]>([])
   const [diagnosticsBusy, setDiagnosticsBusy] = useState(false)
   const [diagnosticsError, setDiagnosticsError] = useState('')
+  const network = providerNetwork ?? { proxyMode: 'System', proxyUrl: '', username: '', password: '' }
   const refreshFfmpeg = () => bridge.ffmpegStatus().then(setFfmpeg).catch((reason: Error) => setFfmpegError(reason.message))
   const refreshDiagnostics = useCallback(() => {
     setDiagnosticsBusy(true)
@@ -404,6 +413,24 @@ function PluginsSection({ snapshot, setNotice }: {
   const groups = [...new Set(snapshot.servers.map(item => item.pluginId || 'legacy'))]
     .map(id => ({ id, servers: snapshot.servers.filter(item => (item.pluginId || 'legacy') === id) }))
   return <Stack spacing={2}>
+    <SurfaceSection title="Provider 网络" description="这里只放影响所有同步源的少量网络选项；保存设置后生效，重新检测可立即查看结果。">
+      <Stack spacing={1.5}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '180px minmax(0,1fr)' }, gap: 1.5 }}>
+          <TextField select size="small" label="代理方式" value={network.proxyMode} onChange={event => setProviderNetwork({ ...network, proxyMode: event.target.value as ProviderNetworkSettings['proxyMode'] })}>
+            <MenuItem value="System">系统代理</MenuItem>
+            <MenuItem value="Direct">直连</MenuItem>
+            <MenuItem value="Manual">手动代理</MenuItem>
+          </TextField>
+          <TextField size="small" label="手动代理地址" placeholder="http://127.0.0.1:7890" value={network.proxyUrl} disabled={network.proxyMode !== 'Manual'} onChange={event => setProviderNetwork({ ...network, proxyUrl: event.target.value })}/>
+        </Box>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3,minmax(0,1fr))' }, gap: 1.5 }}>
+          <MirrorField label="JavBus 镜像域名" value={javBus.mirrorUrls} onChange={mirrorUrls => setJavBus({ ...javBus, mirrorUrls })}/>
+          <MirrorField label="JavDB 镜像域名" value={javDb.mirrorUrls} onChange={mirrorUrls => setJavDb({ ...javDb, mirrorUrls })}/>
+          <MirrorField label="DMM 镜像域名" value={dmm.mirrorUrls} onChange={mirrorUrls => setDmm({ ...dmm, mirrorUrls })}/>
+        </Box>
+        <Alert severity="info">另一个软件的本地配置可解析出 ProxyConfig、Servers、Cookie 和 Headers；本轮先支持代理与镜像域名，敏感 Cookie/Header 不在界面明文展示。</Alert>
+      </Stack>
+    </SurfaceSection>
     <ProviderDiagnosticSection
       title="搜索来源诊断"
       description="这里统一展示 MetaTube、DMM、JavDB、JavBus 在当前网络下的最小可达性与搜索链影响。软件启动后会自动检测；同步时只调用当前可达的来源。"
@@ -453,6 +480,16 @@ function PluginsSection({ snapshot, setNotice }: {
   </Stack>
 }
 
+function MirrorField({ label, value, onChange }: { label: string; value?: string[]; onChange: (value: string[]) => void }) {
+  return <TextField
+    size="small"
+    label={label}
+    placeholder="https://example.com/, https://example2.com/"
+    value={(value ?? []).join(', ')}
+    onChange={event => onChange(event.target.value.split(',').map(item => item.trim()).filter(Boolean))}
+    helperText="多个地址用英文逗号分隔"
+  />
+}
 function ProviderDiagnosticSection({ title, description, providers, diagnostics, busy, error, onRefresh }: {
   title: string
   description: string
