@@ -42,7 +42,8 @@ public sealed record MovieDetailDto(long Id, string? Code, string? Title, string
     MetadataStatusDto MetadataStatus, IReadOnlyList<MediaFileDto> MediaFiles, IReadOnlyList<NamedDto> Actors, IReadOnlyList<NamedDto> Directors, IReadOnlyList<NamedDto> Tags,
     IReadOnlyList<NamedDto> Genres, IReadOnlyList<NamedDto> Studios, IReadOnlyList<NamedDto> Series);
 public sealed record EntityCardDto(long Id, string Name, long MovieCount, string? ImageUrl);
-public sealed record ActorDetailDto(long Id, string Name, string? Alias, int? Gender, string? BirthDate, string? Description);
+public sealed record ActorDetailDto(long Id, string Name, string? Alias, int? Gender, string? BirthDate, string? Description,
+    int? HeightCm, string? Cup, string? BirthPlace, string? ActivityPeriod);
 public sealed record EntityPageDto(IReadOnlyList<EntityCardDto> Items, long Total, int Limit, int Offset);
 public sealed record RandomMovieDto(MediaCardDto? Item, IReadOnlyList<MediaCardDto> Items, long Total, int Limit);
 internal sealed record AdvancedSearchPlan(string Condition, IReadOnlyList<(string Name, object Value)> Parameters, string OrderBy);
@@ -718,11 +719,12 @@ public static class ProductReader
     {
         await using var connection = await OpenAsync(databasePath);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id,Name,Alias,Gender,BirthDate,Description FROM Actors WHERE Id=$id";
+        command.CommandText = "SELECT Id,Name,Alias,Gender,BirthDate,Description,HeightCm,Cup,BirthPlace,ActivityPeriod FROM Actors WHERE Id=$id";
         command.Parameters.AddWithValue("$id", actorId);
         await using var reader = await command.ExecuteReaderAsync();
         return await reader.ReadAsync()
-            ? new(reader.GetInt64(0), reader.GetString(1), Text(reader, 2), reader.IsDBNull(3) ? null : reader.GetInt32(3), Text(reader, 4), Text(reader, 5))
+            ? new(reader.GetInt64(0), reader.GetString(1), Text(reader, 2), reader.IsDBNull(3) ? null : reader.GetInt32(3), Text(reader, 4), Text(reader, 5),
+                reader.IsDBNull(6) ? null : reader.GetInt32(6), Text(reader, 7), Text(reader, 8), Text(reader, 9))
             : null;
     }
 

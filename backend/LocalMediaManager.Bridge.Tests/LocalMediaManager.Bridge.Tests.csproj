@@ -24,5 +24,6 @@
     <Content Include="..\LocalMediaManager.Migration\migrations\0011_RemoveRatingRetentionClearSetting.sql" Link="migrations\0011_RemoveRatingRetentionClearSetting.sql" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\LocalMediaManager.Migration\migrations\0012_MediaStorageSettings.sql" Link="migrations\0012_MediaStorageSettings.sql" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\LocalMediaManager.Migration\migrations\0013_DirectorMetadata.sql" Link="migrations\0013_DirectorMetadata.sql" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\LocalMediaManager.Migration\migrations\0014_ActorProfileFields.sql" Link="migrations\0014_ActorProfileFields.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

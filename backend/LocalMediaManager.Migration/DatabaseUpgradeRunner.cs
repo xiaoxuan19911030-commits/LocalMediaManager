@@ -34,18 +34,23 @@ internal static class DatabaseUpgradeRunner
     internal static async Task<IReadOnlyList<int>> ApplyPendingAsync(SqliteConnection connection, string migrationDirectory)
     {
         var applied = new List<int>();
-        var existing = new HashSet<int>();
+        var existing = new Dictionary<int, string>();
         await using (var command = connection.CreateCommand()) {
-            command.CommandText = "SELECT Version FROM SchemaMigrations ORDER BY Version";
+            command.CommandText = "SELECT Version,Checksum FROM SchemaMigrations ORDER BY Version";
             await using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync()) existing.Add(reader.GetInt32(0));
+            while (await reader.ReadAsync()) existing[reader.GetInt32(0)] = reader.GetString(1);
         }
 
         foreach (string file in Directory.GetFiles(migrationDirectory, "*.sql").OrderBy(path => path, StringComparer.OrdinalIgnoreCase)) {
             string name = Path.GetFileNameWithoutExtension(file);
-            if (!int.TryParse(name.Split('_', 2)[0], out int version) || existing.Contains(version)) continue;
+            if (!int.TryParse(name.Split('_', 2)[0], out int version)) continue;
             string sql = await File.ReadAllTextAsync(file);
             string checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sql))).ToLowerInvariant();
+            if (existing.TryGetValue(version, out string? recordedChecksum)) {
+                if (!recordedChecksum.Equals(checksum, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException($"Migration checksum mismatch: version={version}, name={name}.");
+                continue;
+            }
             await using var transaction = await connection.BeginTransactionAsync();
             await using (var migration = connection.CreateCommand()) {
                 migration.Transaction = (SqliteTransaction)transaction;
@@ -62,7 +67,7 @@ internal static class DatabaseUpgradeRunner
                 await record.ExecuteNonQueryAsync();
             }
             await transaction.CommitAsync();
-            existing.Add(version);
+            existing[version] = checksum;
             applied.Add(version);
         }
         return applied;

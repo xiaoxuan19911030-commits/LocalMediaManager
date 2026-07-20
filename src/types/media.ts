@@ -238,7 +238,7 @@ export interface MovieDetail {
 }
 
 export interface EntityCard { id: number; name: string; movieCount: number; imageUrl?: string }
-export interface ActorDetail { id: number; name: string; alias?: string; gender?: number; birthDate?: string; description?: string }
+export interface ActorDetail { id: number; name: string; alias?: string; gender?: number; birthDate?: string; description?: string; heightCm?: number; cup?: string; birthPlace?: string; activityPeriod?: string }
 export interface EntityPageResult { items: EntityCard[]; total: number; limit: number; offset: number }
 export interface RandomMovieResult { item?: MediaItem; items: MediaItem[]; total: number; limit: number }
 export interface AdvancedSearchFilters {

@@ -16,7 +16,7 @@ public sealed class ProductWriterTests : IAsyncLifetime
         writer = new ProductWriter(Database);
         await using var connection = new SqliteConnection($"Data Source={Database}");
         await connection.OpenAsync();
-        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql" }) {
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0014_ActorProfileFields.sql" }) {
             await using var command = connection.CreateCommand();
             command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
             await command.ExecuteNonQueryAsync();
