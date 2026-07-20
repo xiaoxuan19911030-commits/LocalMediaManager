@@ -1,4 +1,5 @@
 import EditRoundedIcon from '@mui/icons-material/EditRounded'
+import SyncRoundedIcon from '@mui/icons-material/SyncRounded'
 import { Divider, MenuItem, MenuList, Paper, Snackbar, Stack } from '@mui/material'
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { useSearchParams } from 'react-router'
@@ -37,6 +38,7 @@ export default function MediaPage() {
   const [notice, setNotice] = useState('')
   const [selected, setSelected] = useState<number[]>([])
   const [editMode, setEditMode] = useState(false)
+  const [syncAllBusy, setSyncAllBusy] = useState(false)
   const [reloadSignal, setReloadSignal] = useState(0)
   const [contextMenu, setContextMenu] = useState<{ mouseX: number; mouseY: number; item: MediaItem }>()
   const contextMenuRef = useRef<HTMLDivElement>(null)
@@ -89,6 +91,39 @@ export default function MediaPage() {
   const createBatchSync = () => selected.length && bridge.createBatchSync(selected)
     .then((result) => { setNotice(result.message); setSelected([]) })
     .catch((reason: Error) => setNotice(reason.message))
+  const createLibrarySync = async () => {
+    if (syncAllBusy) return
+    setSyncAllBusy(true)
+    try {
+      const batchSize = 500
+      let created = 0
+      for (let offset = 0; ; offset += batchSize) {
+        const page = await bridge.advancedSearch({
+          query: '',
+          sort: 'newest',
+          metadata: 'all',
+          fileStatus: 'all',
+          metadataStatus: 'all',
+          ratingFilter: 'all',
+          ratingMin: 0,
+          libraryId: category.defaults.libraryId,
+          limit: batchSize,
+          offset,
+        })
+        const ids = page.items.map((item) => item.dataId)
+        if (ids.length > 0) {
+          await bridge.createBatchSync(ids)
+          created += ids.length
+        }
+        if (ids.length < batchSize || offset + batchSize >= page.total) break
+      }
+      setNotice(`已为库内 ${created} 部影片创建刮削任务，可在任务中心查看进度。`)
+    } catch (reason) {
+      setNotice((reason as Error).message)
+    } finally {
+      setSyncAllBusy(false)
+    }
+  }
   const createBatchImageTasks = (type: string) => selected.length && Promise.all(selected.map((id) => bridge.generateMovieImage(id, type)))
     .then((results) => { setNotice(`已创建 ${results.length} 个${type === 'GIF' ? ' GIF' : '截图'}任务，可在任务中心查看进度。`); setSelected([]) })
     .catch((reason: Error) => setNotice(reason.message))
@@ -126,11 +161,15 @@ export default function MediaPage() {
     <MovieWall title="影片墙" description={(total) => `共 ${total} 部影片`} stateKey="lmm.movieWall.media" defaults={category.defaults} defaultLabel={category.label ? <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}><StatusBadge tone="info" label={category.label}/></Stack> : undefined}
       selectable={editMode} selectedIds={selected} onSelect={(item, checked) => setSelected((current) => checked ? Array.from(new Set([...current, item.dataId])) : current.filter((id) => id !== item.dataId))} onContextMenu={openContextMenu}
       onOpenItem={(item, openDefault) => editMode ? toggleSelect(item) : openDefault()} reloadSignal={reloadSignal}
-      primaryActions={({ items }) => {
+      primaryActions={(context) => {
+        const { items } = context
         const pageIds = items.map((item) => item.dataId)
         const allSelected = pageIds.length > 0 && pageIds.every((id) => selected.includes(id))
         return !editMode
-          ? [{ key: 'edit', label: '编辑', icon: <EditRoundedIcon/>, variant: 'outlined', onClick: enterEditMode }]
+          ? [
+            { key: 'sync-all', label: syncAllBusy ? '同步中' : '同步所有影片', icon: <SyncRoundedIcon/>, variant: 'outlined', disabled: syncAllBusy, onClick: () => { void createLibrarySync() } },
+            { key: 'edit', label: '编辑', icon: <EditRoundedIcon/>, variant: 'outlined', onClick: enterEditMode },
+          ]
           : [
             { key: 'selected-count', label: `已选择 ${selected.length} 部`, variant: 'text', color: 'inherit', disabled: true, onClick: () => undefined },
             { key: 'select-page', label: allSelected ? '取消当前页' : '全选当前页', variant: 'outlined', onClick: () => toggleSelectPage(items) },

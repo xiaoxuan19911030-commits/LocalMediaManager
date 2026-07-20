@@ -23,7 +23,7 @@ import { defaultMovieWallDisplay, normalizeMovieWallDisplay } from '@/components
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
 import type { BridgeHealth, TaskItem } from '@/types/media'
-import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegToolStatus, JavBusSettings, LogCleanupPreview, LogCleanupResult, MediaStorageSettings, MovieWallDisplaySettings, PlaybackSettings, ProviderDiagnosticResult, ProviderNetworkSettings, RatingRetentionSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult, WebMetadataSettings } from '@/types/settings'
+import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegToolStatus, JavBusSettings, LogCleanupPreview, LogCleanupResult, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, PlaybackSettings, ProviderDiagnosticResult, ProviderNetworkSettings, RatingRetentionSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult, WebMetadataSettings } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 
 const categories = [
@@ -280,7 +280,7 @@ export default function SettingsPage() {
         </Paper>
         {category === 'general' && <GeneralSection snapshot={snapshot} system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
         {category === 'metadata' && <MetadataSection/>}
-        {category === 'plugins' && <PluginsSection snapshot={snapshot} providerNetwork={draft.providerNetwork} setProviderNetwork={(value) => updateDraft('providerNetwork', value)} javBus={draft.javBus} setJavBus={(value) => updateDraft('javBus', value)} dmm={draft.dmm} setDmm={(value) => updateDraft('dmm', value)} javDb={draft.javDb} setJavDb={(value) => updateDraft('javDb', value)} setNotice={setNotice}/>}
+        {category === 'plugins' && <PluginsSection snapshot={snapshot} metaTube={draft.metaTube} setMetaTube={(value) => updateDraft('metaTube', value)} providerNetwork={draft.providerNetwork} setProviderNetwork={(value) => updateDraft('providerNetwork', value)} javBus={draft.javBus} setJavBus={(value) => updateDraft('javBus', value)} dmm={draft.dmm} setDmm={(value) => updateDraft('dmm', value)} javDb={draft.javDb} setJavDb={(value) => updateDraft('javDb', value)} minnano={draft.minnano} setMinnano={(value) => updateDraft('minnano', value)} wikipediaJp={draft.wikipediaJp} setWikipediaJp={(value) => updateDraft('wikipediaJp', value)} setNotice={setNotice}/>}
         {category === 'mediaStorage' && <MediaStorageSection mediaStorage={draft.mediaStorage} defaults={defaults.mediaStorage} setMediaStorage={(value) => updateDraft('mediaStorage', value)} setNotice={setNotice}/>}
         {category === 'search' && <SearchSection search={draft.search} setSearch={(value) => updateDraft('search', value)}/>}
         {category === 'shortcuts' && <ShortcutSection system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
@@ -378,8 +378,10 @@ function MetadataSection() {
   </Stack>
 }
 
-function PluginsSection({ snapshot, providerNetwork, setProviderNetwork, javBus, setJavBus, dmm, setDmm, javDb, setJavDb, setNotice }: {
+function PluginsSection({ snapshot, metaTube, setMetaTube, providerNetwork, setProviderNetwork, javBus, setJavBus, dmm, setDmm, javDb, setJavDb, minnano, setMinnano, wikipediaJp, setWikipediaJp, setNotice }: {
   snapshot: SettingsSnapshot
+  metaTube: MetaTubeSettings
+  setMetaTube: (value: MetaTubeSettings) => void
   providerNetwork?: ProviderNetworkSettings
   setProviderNetwork: (value: ProviderNetworkSettings) => void
   javBus: JavBusSettings
@@ -388,6 +390,10 @@ function PluginsSection({ snapshot, providerNetwork, setProviderNetwork, javBus,
   setDmm: (value: WebMetadataSettings) => void
   javDb: WebMetadataSettings
   setJavDb: (value: WebMetadataSettings) => void
+  minnano: WebMetadataSettings
+  setMinnano: (value: WebMetadataSettings) => void
+  wikipediaJp: WebMetadataSettings
+  setWikipediaJp: (value: WebMetadataSettings) => void
   setNotice: (value: string) => void
 }) {
   const [ffmpeg, setFfmpeg] = useState<FfmpegToolStatus>()
@@ -413,6 +419,16 @@ function PluginsSection({ snapshot, providerNetwork, setProviderNetwork, javBus,
   const groups = [...new Set(snapshot.servers.map(item => item.pluginId || 'legacy'))]
     .map(id => ({ id, servers: snapshot.servers.filter(item => (item.pluginId || 'legacy') === id) }))
   return <Stack spacing={2}>
+    <SurfaceSection title="同步源开关" description="恢复手动启用/停用 Provider；保存设置后生效。网络诊断仍会自动跳过不可达来源。">
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2,minmax(0,1fr))' }, gap: 1.5 }}>
+        <ProviderSwitchCard title="MetaTube" description="影片搜索 / 演员 / 标签 / 图片" checked={metaTube.enabled} onChange={enabled => setMetaTube({ ...metaTube, enabled })}/>
+        <ProviderSwitchCard title="DMM" description="影片搜索 / 演员 / 标签 / 封面" checked={dmm.enabled} onChange={enabled => setDmm({ ...dmm, enabled })}/>
+        <ProviderSwitchCard title="JavDB" description="番号 / 演员 / 标签搜索" checked={javDb.enabled} onChange={enabled => setJavDb({ ...javDb, enabled })}/>
+        <ProviderSwitchCard title="JavBus" description="影片标题 / 演员 / 导演 / 系列 / 标签 / 封面" checked={javBus.enabled} onChange={enabled => setJavBus({ ...javBus, enabled })}/>
+        <ProviderSwitchCard title="Minnano" description="演员生日 / 身高 / 罩杯" checked={minnano.enabled} onChange={enabled => setMinnano({ ...minnano, enabled })}/>
+        <ProviderSwitchCard title="Wikipedia JP" description="演员生日 / 出生地 / 活动时期 / 简介" checked={wikipediaJp.enabled} onChange={enabled => setWikipediaJp({ ...wikipediaJp, enabled })}/>
+      </Box>
+    </SurfaceSection>
     <SurfaceSection title="Provider 网络" description="这里只放影响所有同步源的少量网络选项；保存设置后生效，重新检测可立即查看结果。">
       <Stack spacing={1.5}>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '180px minmax(0,1fr)' }, gap: 1.5 }}>
@@ -478,6 +494,25 @@ function PluginsSection({ snapshot, providerNetwork, setProviderNetwork, javBus,
       </Box> : <Alert severity="info">当前没有兼容 Provider 配置。</Alert>}
     </SurfaceSection>
   </Stack>
+}
+
+function ProviderSwitchCard({ title, description, checked, onChange }: { title: string; description: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return <Card variant="outlined" sx={{ borderRadius: 2.5 }}>
+    <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+      <Stack direction="row" spacing={1.25} sx={{ alignItems: 'center' }}>
+        <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Typography sx={{ fontWeight: 900 }}>{title}</Typography>
+          <Typography variant="body2" color="text.secondary">{description}</Typography>
+        </Box>
+        <FormControlLabel
+          control={<Switch checked={checked} onChange={event => onChange(event.target.checked)}/>}
+          label={checked ? '启用' : '停用'}
+          labelPlacement="start"
+          sx={{ m: 0 }}
+        />
+      </Stack>
+    </CardContent>
+  </Card>
 }
 
 function MirrorField({ label, value, onChange }: { label: string; value?: string[]; onChange: (value: string[]) => void }) {
