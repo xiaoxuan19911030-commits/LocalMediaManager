@@ -1,5 +1,5 @@
 import EditRoundedIcon from '@mui/icons-material/EditRounded'
-import { Divider, MenuItem, Paper, Snackbar, Stack } from '@mui/material'
+import { Divider, MenuItem, MenuList, Paper, Snackbar, Stack } from '@mui/material'
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { useSearchParams } from 'react-router'
 import { SafeDeleteDialog } from '@/components/SafeDeleteDialog'
@@ -140,6 +140,7 @@ export default function MediaPage() {
       }}
       emptyTitle="暂无影片" emptyDescription="当前媒体库还没有可展示的影片。"/>
     {contextMenu && <Paper ref={contextMenuRef} elevation={8} onContextMenu={(event) => event.preventDefault()} sx={{ position: 'fixed', top: contextMenu.mouseY, left: contextMenu.mouseX, zIndex: (theme) => theme.zIndex.modal, minWidth: 148, py: .5, borderRadius: 1.5, '& .MuiMenuItem-root': { minHeight: 34, py: 0.75, fontSize: 14 } }}>
+      <MenuList dense autoFocusItem={false}>
       {editMode && selected.length > 0 ? [
         <MenuItem key="batch-sync" onClick={() => { closeContextMenu(); void createBatchSync() }}>批量同步信息</MenuItem>,
         <MenuItem key="batch-screenshot" onClick={() => { closeContextMenu(); void createBatchImageTasks('Screenshot') }}>批量生成截图</MenuItem>,
@@ -157,6 +158,7 @@ export default function MediaPage() {
         <MenuItem key="location" onClick={openContextLocation}>打开位置</MenuItem>,
         <MenuItem key="delete-file" onClick={() => contextMenu?.item && openSafeDelete([contextMenu.item.dataId])}>删除影片</MenuItem>,
       ]}
+      </MenuList>
     </Paper>}
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>
     <SafeDeleteDialog preview={deletePreview} command={deleteCommand} onClose={closeDeleteDialog} onLaunched={handleDeleteLaunched}/>
