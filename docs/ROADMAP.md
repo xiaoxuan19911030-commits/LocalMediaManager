@@ -30,9 +30,10 @@ Scope:
 Scope:
 
 - Metadata Center, Diagnostics Center, Maintenance, and Duplicate Movies are consolidated into one Data Center navigation entry.
-- Data Center uses three tabs: 概览, 诊断与修复, 重复影片.
+- Data Center uses three tabs: 概览, 问题, 重复影片.
 - Duplicate Movies remains backed by the existing organizer and Safe Delete workflow.
 - Legacy routes redirect to the matching Data Center tab.
+- Polish pass turns the overview into a compact health dashboard and renames 诊断与修复 to 问题 with search, source, reason, status, and recommendation details.
 - No database schema changes, no Details changes, and no AI features.
 
 ## 0.6.1 - Task Center Polish

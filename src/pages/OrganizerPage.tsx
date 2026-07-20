@@ -24,8 +24,8 @@ type OrganizerMode = 'duplicates' | 'batch'
 type DuplicateRule = 'all' | 'code' | 'path' | 'hash'
 type BatchOrganizerKind = 'move' | 'rename'
 
-export default function OrganizerPage() {
-  return <DuplicateOrganizerView/>
+export default function OrganizerPage({ search = '' }: { search?: string }) {
+  return <DuplicateOrganizerView search={search}/>
 }
 
 function OrganizerShell({ mode, onModeChange, children }: { mode: OrganizerMode; onModeChange: (mode: OrganizerMode) => void; children: ReactNode }) {
@@ -48,7 +48,7 @@ function OrganizerShell({ mode, onModeChange, children }: { mode: OrganizerMode;
   </Box>
 }
 
-function DuplicateOrganizerView() {
+function DuplicateOrganizerView({ search }: { search: string }) {
   const navigate = useNavigate()
   const [rule, setRule] = useState<DuplicateRule>('all')
   const [data, setData] = useState<DuplicateResults>()
@@ -85,6 +85,7 @@ function DuplicateOrganizerView() {
   useEffect(load, [load])
 
   const groupsByKey = useMemo(() => new Map((data?.groups ?? []).map((group) => [groupKey(group), group])), [data])
+  const visibleGroups = useMemo(() => filterDuplicateGroups(data?.groups ?? [], search), [data, search])
   const buildPlan = (keys = selectedGroups) => keys.map((key) => {
     const group = groupsByKey.get(key)
     return group ? { groupKey: key, keepMovieId: keepByGroup[key] ?? 0, candidateMovieIds: group.items.map((item) => item.movieId) } : undefined
@@ -144,7 +145,8 @@ function DuplicateOrganizerView() {
         refreshAction(load, '重新扫描')
       ]}>
       {data && (data.groups.length === 0 ? <EmptyState title="未发现重复影片" description="当前规则下没有重复编号、重复文件路径或重复 Hash。"/> :
-        <Stack spacing={1.5}>{data.groups.map(group => {
+        visibleGroups.length === 0 ? <EmptyState title="没有匹配的重复影片" description="当前搜索条件下没有匹配的番号、标题或路径。"/> :
+        <Stack spacing={1.5}>{visibleGroups.map(group => {
           const key = groupKey(group)
           return <DuplicateGroupCard key={key} group={group} expanded={expanded[key] ?? true} keepId={keepByGroup[key] ?? 0} selectedForProcessing={selectedGroups.includes(key)}
             onProcessingChange={(checked) => setSelectedGroups((current) => checked ? uniqueStrings([...current, key]) : current.filter((item) => item !== key))}
@@ -412,6 +414,14 @@ function duplicateReasonLabel(rule: DuplicateGroup['rule']) {
   return '数据库重复'
 }
 function groupKey(group: DuplicateGroup) { return `${group.rule}:${group.key}` }
+function filterDuplicateGroups(groups: DuplicateGroup[], search: string) {
+  const query = search.trim().toLowerCase()
+  if (!query) return groups
+  return groups.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => `${group.key} ${item.code} ${item.title} ${item.fileName} ${item.filePath}`.toLowerCase().includes(query))
+  })).filter((group) => group.key.toLowerCase().includes(query) || group.items.length > 0)
+}
 function unique(values: number[]) { return [...new Set(values)] }
 function uniqueStrings(values: string[]) { return [...new Set(values)] }
 function formatFileSize(value: number) {
