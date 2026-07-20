@@ -23,7 +23,7 @@ import type { MaintenanceIssue, MaintenanceReport, MetadataOverview } from '@/ty
 
 type DataCenterTab = 'overview' | 'problems' | 'duplicates'
 type ProblemStatus = 'all' | 'normal' | 'abnormal' | 'auto' | 'manual'
-type ProblemType = 'all' | 'missing-cover' | 'missing-fanart' | 'missing-preview' | 'missing-screenshot' | 'missing-gif' | 'missing-nfo' | 'missing-actors' | 'missing-directors' | 'missing-description' | 'missing-tags' | 'missing-series' | 'missing-studios' | 'image-path-invalid' | 'image-file-missing' | 'legacy-data' | 'relation-missing'
+type ProblemType = 'all' | 'missing-cover' | 'missing-fanart' | 'missing-preview' | 'missing-screenshot' | 'missing-gif' | 'missing-nfo' | 'missing-actors' | 'actor-profile-missing' | 'missing-directors' | 'missing-description' | 'missing-tags' | 'missing-series' | 'missing-studios' | 'image-path-invalid' | 'image-file-missing' | 'legacy-data' | 'relation-missing'
 
 const problemTypeLabels: Record<ProblemType, string> = {
   all: '全部问题',
@@ -34,6 +34,7 @@ const problemTypeLabels: Record<ProblemType, string> = {
   'missing-gif': '缺 GIF',
   'missing-nfo': '缺 NFO',
   'missing-actors': '缺演员',
+  'actor-profile-missing': '演员资料缺失',
   'missing-directors': '缺导演',
   'missing-description': '缺简介',
   'missing-tags': '缺标签',
@@ -213,8 +214,8 @@ function ProblemsTab({ query, initialType, onClearQuery }: { query: string; init
   const problems = useMemo(() => allProblems.filter((item) => {
     if (status === 'normal') return false
     if (status === 'abnormal' && item.status !== '异常') return false
-    if (status === 'auto' && !item.supportedActions.some((action) => action.kind === 'sync' && action.enabled)) return false
-    if (status === 'manual' && item.supportedActions.some((action) => action.kind === 'sync' && action.enabled)) return false
+    if (status === 'auto' && !item.supportedActions.some((action) => action.enabled)) return false
+    if (status === 'manual' && item.supportedActions.some((action) => action.enabled)) return false
     if (type !== 'all' && item.type !== type) return false
     return matchesQuery(`${item.code} ${item.title} ${item.detail} ${item.path ?? ''} ${item.source} ${item.reason} ${item.stateDescription}`, query)
   }), [allProblems, query, status, type])
@@ -229,6 +230,15 @@ function ProblemsTab({ query, initialType, onClearQuery }: { query: string; init
   const syncOne = (movieId?: number, source?: 'JavBus') => {
     if (!movieId) return
     bridge.syncMovie(movieId, source).then(result => setNotice(`${result.message} 可在任务中心查看。`)).catch((reason: Error) => setNotice(reason.message))
+  }
+  const fillActorProfile = (actorId?: number) => {
+    if (!actorId) return
+    bridge.actorProfilePreview(actorId).then(async preview => {
+      if (preview.candidates.length !== 1) { setNotice(preview.warnings[0] || `找到 ${preview.candidates.length} 个候选，请在演员资料中人工确认。`); return }
+      const result = await bridge.applyActorProfile(actorId, preview.candidates[0])
+      setNotice(result.updatedFields.length ? `已补充：${result.updatedFields.join('、')}` : result.conflicts.length ? '现有资料已保留，检测到来源冲突。' : '没有需要补充的字段。')
+      load()
+    }).catch((reason: Error) => setNotice(reason.message))
   }
   const syncSelected = () => {
     if (!canBatchSync) return
@@ -271,14 +281,14 @@ function ProblemsTab({ query, initialType, onClearQuery }: { query: string; init
       problems.length ? <Stack spacing={1}>
         {visibleProblems.map((item, index) => <ProblemCard key={`${item.movieId}-${item.type}-${index}`} item={item} selected={Boolean(item.movieId && selected.includes(item.movieId))}
           onSelect={(checked) => item.movieId && setSelected((current) => checked ? [...new Set([...current, item.movieId!])] : current.filter(id => id !== item.movieId))}
-          onOpen={() => item.movieId && navigate(`/movies/${item.movieId}`)} onRepair={(source) => syncOne(item.movieId, source)} onCopyPath={() => copyPath(item.path, setNotice)} onOpenPath={() => openPath(item.path, setNotice)}/>)}
+          onOpen={() => item.movieId && navigate(`/movies/${item.movieId}`)} onRepair={(source) => syncOne(item.movieId, source)} onProfile={() => fillActorProfile(item.actorId)} onCopyPath={() => copyPath(item.path, setNotice)} onOpenPath={() => openPath(item.path, setNotice)}/>)}
         {hasMore && <Button variant="outlined" onClick={() => setVisibleCount((current) => current + 60)}>加载更多（{visibleProblems.length} / {problems.length}）</Button>}
       </Stack> : <ProblemEmptyState query={query} type={type} reportIssueCount={allProblems.length} onScan={load} onClear={clearFilters}/>}
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>
   </Stack>
 }
 
-function ProblemCard({ item, selected, onSelect, onOpen, onRepair, onCopyPath, onOpenPath }: { item: ProblemItem; selected: boolean; onSelect: (checked: boolean) => void; onOpen: () => void; onRepair: (source?: 'JavBus') => void; onCopyPath: () => void; onOpenPath: () => void }) {
+function ProblemCard({ item, selected, onSelect, onOpen, onRepair, onProfile, onCopyPath, onOpenPath }: { item: ProblemItem; selected: boolean; onSelect: (checked: boolean) => void; onOpen: () => void; onRepair: (source?: 'JavBus') => void; onProfile: () => void; onCopyPath: () => void; onOpenPath: () => void }) {
   return <Card variant="outlined" sx={{ borderRadius: 2, borderLeft: 4, borderLeftColor: `${item.reasonTone}.main` }}>
     <CardContent sx={{ p: 1.25, '&:last-child': { pb: 1.25 } }}>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'auto minmax(0,1fr)', md: '58px minmax(170px,.75fr) minmax(0,1.4fr) minmax(220px,1fr) minmax(210px,.8fr)' }, gap: 1.25, alignItems: 'center' }}>
@@ -312,7 +322,7 @@ function ProblemCard({ item, selected, onSelect, onOpen, onRepair, onCopyPath, o
         <Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {item.movieId && <Button size="small" variant="outlined" onClick={onOpen}>查看影片</Button>}
           {item.supportedActions.map((action) => <Tooltip key={action.label} title={action.disabledReason ?? ''}>
-            <span><Button size="small" variant={action.primary ? 'contained' : 'outlined'} color={action.color ?? 'primary'} disabled={!action.enabled} onClick={action.kind === 'sync' ? () => onRepair() : action.kind === 'javbus' ? () => onRepair('JavBus') : action.kind === 'copy-path' ? onCopyPath : onOpenPath}>{action.label}</Button></span>
+            <span><Button size="small" variant={action.primary ? 'contained' : 'outlined'} color={action.color ?? 'primary'} disabled={!action.enabled} onClick={action.kind === 'sync' ? () => onRepair() : action.kind === 'javbus' ? () => onRepair('JavBus') : action.kind === 'profile' ? onProfile : action.kind === 'copy-path' ? onCopyPath : onOpenPath}>{action.label}</Button></span>
           </Tooltip>)}
           {item.unsupportedActions.map((action) => <Tooltip key={action.label} title={action.reason}>
             <span><Button size="small" color="inherit" disabled>{action.label}</Button></span>
@@ -353,6 +363,7 @@ function ClickableStat({ label, value, icon, tone = 'primary.main', onClick }: {
 
 interface ProblemItem {
   movieId?: number
+  actorId?: number
   code: string
   title: string
   severityTone: StatusTone
@@ -372,7 +383,7 @@ interface ProblemItem {
 
 interface ProblemAction {
   label: string
-  kind: 'sync' | 'javbus' | 'copy-path' | 'open-path'
+  kind: 'sync' | 'javbus' | 'profile' | 'copy-path' | 'open-path'
   enabled: boolean
   primary?: boolean
   color?: 'primary' | 'inherit'
@@ -397,6 +408,7 @@ function toProblem(item: MaintenanceIssue): ProblemItem {
   const actions = actionsFor(item, type)
   return {
     movieId: item.movieId,
+    actorId: item.actorId,
     code,
     title: name,
     severityTone: item.severity === 'error' ? 'error' : item.severity === 'warning' ? 'warning' : 'info',
@@ -417,6 +429,7 @@ function toProblem(item: MaintenanceIssue): ProblemItem {
 
 function inferProblemType(item: MaintenanceIssue): ProblemType {
   const text = `${item.category} ${item.title} ${item.detail}`.toLowerCase()
+  if (text.includes('演员资料缺失')) return 'actor-profile-missing'
   if (text.includes('fanart') || text.includes('背景')) return 'missing-fanart'
   if (text.includes('preview') || text.includes('预览')) return 'missing-preview'
   if (text.includes('screenshot') || text.includes('截图')) return 'missing-screenshot'
@@ -506,6 +519,7 @@ function actionsFor(item: MaintenanceIssue, type: ProblemType) {
   const hasMovie = Boolean(item.movieId)
   const hasPath = Boolean(item.path)
   const supported: ProblemAction[] = [
+    ...(type === 'actor-profile-missing' ? [{ label: '补全演员资料', kind: 'profile' as const, enabled: Boolean(item.actorId), primary: true, disabledReason: '仅处理明确匹配的单一候选' }] : []),
     { label: '重新同步', kind: 'sync', enabled: hasMovie && canSyncIssue(type), primary: true, disabledReason: '当前问题暂不支持通过元数据同步直接处理' },
     { label: '使用 JavBus 补充', kind: 'javbus', enabled: hasMovie && canJavBusRepair(type), disabledReason: 'JavBus 仅用于补充缺失元数据和封面' },
     { label: '打开所在文件夹', kind: 'open-path', enabled: hasPath, color: 'inherit', disabledReason: '没有可打开的相关路径' },

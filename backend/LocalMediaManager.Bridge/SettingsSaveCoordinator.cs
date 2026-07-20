@@ -40,7 +40,11 @@ public sealed record UnifiedSettingsDto(
     SearchSettingsDto Search,
     DataBackupSettingsDto DataBackup,
     ScanSettingsDto Scan,
-    SystemSettingsDto System);
+    SystemSettingsDto System,
+    WebMetadataSettingsDto? Dmm = null,
+    WebMetadataSettingsDto? JavDb = null,
+    WebMetadataSettingsDto? Minnano = null,
+    WebMetadataSettingsDto? WikipediaJp = null);
 
 public sealed record UnifiedSettingsSaveResult(UnifiedSettingsDto Settings, IReadOnlyList<string> ChangedFields, string Message);
 
@@ -77,7 +81,11 @@ public sealed class SettingsSaveCoordinator(
             search,
             dataBackup,
             scan,
-            system);
+            system,
+            await metadata.ReadDmmAsync(),
+            await metadata.ReadJavDbAsync(),
+            await metadata.ReadMinnanoAsync(),
+            await metadata.ReadWikipediaJpAsync());
     }
 
     public UnifiedSettingsDto DefaultSettings() => SettingsDefaults.UnifiedForEnvironment(installRoot, databasePath);
@@ -100,6 +108,10 @@ public sealed class SettingsSaveCoordinator(
         await StoreAsync(connection, transaction, "metadata.metatube.autoExecute", clean.MetaTube.AutoExecute, "boolean", token);
         await StoreAsync(connection, transaction, "metadata.metatube.nonDestructive", true, "boolean", token);
         await MetadataProviderSettingsService.StoreJavBusAsync(connection, transaction, clean.JavBus);
+        await MetadataProviderSettingsService.StoreWebAsync(connection, transaction, "dmm", clean.Dmm!);
+        await MetadataProviderSettingsService.StoreWebAsync(connection, transaction, "javdb", clean.JavDb!);
+        await MetadataProviderSettingsService.StoreWebAsync(connection, transaction, "minnano", clean.Minnano!);
+        await MetadataProviderSettingsService.StoreWebAsync(connection, transaction, "wikipediaJp", clean.WikipediaJp!);
         await StoreAsync(connection, transaction, "nfo.export.policy", clean.Nfo.ExportPolicy, "string", token);
         await StoreAsync(connection, transaction, "nfo.export.outputDirectory", clean.Nfo.OutputDirectory, "string", token);
         await StoreAsync(connection, transaction, "nfo.import.fillEmptyOnly", true, "boolean", token);
@@ -176,7 +188,11 @@ public sealed class SettingsSaveCoordinator(
             NormalizeSearch(input.Search),
             NormalizeDataBackup(input.DataBackup),
             NormalizeScan(input.Scan),
-            NormalizeSystem(input.System));
+            NormalizeSystem(input.System),
+            MetadataProviderSettingsService.NormalizeWeb(input.Dmm ?? SettingsDefaults.Dmm, "DMM"),
+            MetadataProviderSettingsService.NormalizeWeb(input.JavDb ?? SettingsDefaults.JavDb, "JavDB"),
+            MetadataProviderSettingsService.NormalizeWeb(input.Minnano ?? SettingsDefaults.Minnano, "Minnano"),
+            MetadataProviderSettingsService.NormalizeWeb(input.WikipediaJp ?? SettingsDefaults.WikipediaJp, "Wikipedia JP"));
     }
 
     private static string NormalizeDirectory(string value, string label)
@@ -536,6 +552,10 @@ public sealed class SettingsSaveCoordinator(
     {
         var changed = new List<string>();
         if (before.MetaTube != after.MetaTube) changed.Add("metaTube");
+        if (before.Dmm != after.Dmm) changed.Add("dmm");
+        if (before.JavDb != after.JavDb) changed.Add("javDb");
+        if (before.Minnano != after.Minnano) changed.Add("minnano");
+        if (before.WikipediaJp != after.WikipediaJp) changed.Add("wikipediaJp");
         if (before.Nfo != after.Nfo) changed.Add("nfo");
         if (before.Playback != after.Playback) changed.Add("playback");
         if (before.RatingRetention != after.RatingRetention) changed.Add("ratingRetention");
@@ -739,6 +759,10 @@ public sealed class SettingsSaveCoordinator(
 public static class SettingsDefaults
 {
     public static JavBusSettingsDto JavBus => new(false, 2, JavBusProvider.DefaultBaseUrl, 30, 1, "", true, true);
+    public static WebMetadataSettingsDto Dmm => new(false, 3, DmmProvider.DefaultBaseUrl, 30, 1, "", true, true);
+    public static WebMetadataSettingsDto JavDb => new(false, 4, JavDbProvider.DefaultBaseUrl, 30, 1, "", true, true);
+    public static WebMetadataSettingsDto Minnano => new(false, 1, MinnanoActorProfileProvider.DefaultBaseUrl, 30, 1, "", true, true);
+    public static WebMetadataSettingsDto WikipediaJp => new(false, 2, WikipediaJpActorProfileProvider.DefaultBaseUrl, 30, 1, "", false, true);
     public static UnifiedSettingsDto Unified => UnifiedForEnvironment(null, null);
 
     public static UnifiedSettingsDto UnifiedForEnvironment(string? installRoot, string? databasePath) => new(
@@ -753,7 +777,11 @@ public static class SettingsDefaults
         new("newest", "all"),
         new(true, 3, 10),
         new(0),
-        new("system", "exit", false, 30, true, false, null));
+        new("system", "exit", false, 30, true, false, null),
+        Dmm,
+        JavDb,
+        Minnano,
+        WikipediaJp);
 
     public static MediaStorageSettingsDto MediaStorageForEnvironment(
         string? installRoot,

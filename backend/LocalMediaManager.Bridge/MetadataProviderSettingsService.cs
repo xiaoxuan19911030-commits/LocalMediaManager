@@ -22,13 +22,24 @@ public sealed record JavBusSettingsDto(
     bool DownloadImages,
     bool FillMissingOnly);
 
-public sealed record MetadataProviderContext(MetaTubeSettingsDto MetaTube, JavBusSettingsDto JavBus, string? PreferredSource = null)
+public sealed record WebMetadataSettingsDto(
+    bool Enabled, int Priority, string BaseUrl, int TimeoutSeconds, int RetryCount,
+    string Cookie, bool DownloadImages, bool FillMissingOnly);
+
+public sealed record MetadataProviderContext(MetaTubeSettingsDto MetaTube, JavBusSettingsDto JavBus, string? PreferredSource = null,
+    WebMetadataSettingsDto? Dmm = null, WebMetadataSettingsDto? JavDb = null)
 {
     public int TimeoutSeconds(string provider) =>
-        provider.Equals("JavBus", StringComparison.OrdinalIgnoreCase) ? JavBus.TimeoutSeconds : MetaTube.TimeoutSeconds;
+        provider.Equals("JavBus", StringComparison.OrdinalIgnoreCase) ? JavBus.TimeoutSeconds
+        : provider.Equals("DMM", StringComparison.OrdinalIgnoreCase) ? (Dmm ?? SettingsDefaults.Dmm).TimeoutSeconds
+        : provider.Equals("JavDB", StringComparison.OrdinalIgnoreCase) ? (JavDb ?? SettingsDefaults.JavDb).TimeoutSeconds
+        : MetaTube.TimeoutSeconds;
 
     public bool DownloadImages(string provider) =>
-        provider.Equals("JavBus", StringComparison.OrdinalIgnoreCase) ? JavBus.DownloadImages : MetaTube.DownloadImages;
+        provider.Equals("JavBus", StringComparison.OrdinalIgnoreCase) ? JavBus.DownloadImages
+        : provider.Equals("DMM", StringComparison.OrdinalIgnoreCase) ? (Dmm ?? SettingsDefaults.Dmm).DownloadImages
+        : provider.Equals("JavDB", StringComparison.OrdinalIgnoreCase) ? (JavDb ?? SettingsDefaults.JavDb).DownloadImages
+        : MetaTube.DownloadImages;
 }
 
 public sealed record ProviderConnectionResult(bool Success, string Provider, string Message, long ElapsedMilliseconds);
@@ -73,6 +84,11 @@ public sealed class MetadataProviderSettingsService(string databasePath)
             Bool(values, "metadata.javbus.downloadImages", defaults.DownloadImages),
             true);
     }
+
+    public Task<WebMetadataSettingsDto> ReadDmmAsync() => ReadWebAsync("dmm", SettingsDefaults.Dmm);
+    public Task<WebMetadataSettingsDto> ReadJavDbAsync() => ReadWebAsync("javdb", SettingsDefaults.JavDb);
+    public Task<WebMetadataSettingsDto> ReadMinnanoAsync() => ReadWebAsync("minnano", SettingsDefaults.Minnano);
+    public Task<WebMetadataSettingsDto> ReadWikipediaJpAsync() => ReadWebAsync("wikipediaJp", SettingsDefaults.WikipediaJp);
 
     public async Task<MetaTubeSettingsDto> SaveMetaTubeAsync(MetaTubeSettingsDto input)
     {
@@ -133,6 +149,34 @@ public sealed class MetadataProviderSettingsService(string databasePath)
         await StoreAsync(connection, transaction, "metadata.javbus.fillMissingOnly", true, "boolean");
     }
 
+    public static WebMetadataSettingsDto NormalizeWeb(WebMetadataSettingsDto input, string provider)
+    {
+        if (!Uri.TryCreate(input.BaseUrl, UriKind.Absolute, out Uri? uri) || uri.Scheme is not ("http" or "https"))
+            throw new ArgumentException($"{provider} 地址必须是有效的 HTTP 或 HTTPS URL。");
+        return input with {
+            Priority = Math.Clamp(input.Priority, 1, 99),
+            BaseUrl = NormalizeBaseUrl(uri.ToString()),
+            TimeoutSeconds = Math.Clamp(input.TimeoutSeconds, 10, 180),
+            RetryCount = Math.Clamp(input.RetryCount, 0, 3),
+            Cookie = input.Cookie?.Trim() ?? "",
+            FillMissingOnly = true,
+        };
+    }
+
+    public static async Task StoreWebAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
+        string id, WebMetadataSettingsDto clean)
+    {
+        string prefix = $"metadata.{id}.";
+        await StoreAsync(connection, transaction, prefix + "enabled", clean.Enabled, "boolean");
+        await StoreAsync(connection, transaction, prefix + "priority", clean.Priority, "integer");
+        await StoreAsync(connection, transaction, prefix + "baseUrl", clean.BaseUrl, "string");
+        await StoreAsync(connection, transaction, prefix + "timeoutSeconds", clean.TimeoutSeconds, "integer");
+        await StoreAsync(connection, transaction, prefix + "retryCount", clean.RetryCount, "integer");
+        await StoreAsync(connection, transaction, prefix + "cookie", clean.Cookie, "secret");
+        await StoreAsync(connection, transaction, prefix + "downloadImages", clean.DownloadImages, "boolean");
+        await StoreAsync(connection, transaction, prefix + "fillMissingOnly", true, "boolean");
+    }
+
     public static async Task StoreAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
         string key, object value, string type)
     {
@@ -156,6 +200,22 @@ public sealed class MetadataProviderSettingsService(string databasePath)
         }.ToString());
         await connection.OpenAsync();
         return connection;
+    }
+
+    private async Task<WebMetadataSettingsDto> ReadWebAsync(string id, WebMetadataSettingsDto defaults)
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        await using var connection = await OpenAsync(SqliteOpenMode.ReadOnly);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Key,ValueJson FROM AppSettings WHERE Key LIKE $prefix";
+        command.Parameters.AddWithValue("$prefix", $"metadata.{id}.%");
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) values[reader.GetString(0)] = reader.GetString(1);
+        string key = $"metadata.{id}.";
+        return new(Bool(values, key + "enabled", defaults.Enabled), Math.Clamp(Int(values, key + "priority", defaults.Priority), 1, 99),
+            NormalizeBaseUrl(Text(values, key + "baseUrl", defaults.BaseUrl)), Math.Clamp(Int(values, key + "timeoutSeconds", defaults.TimeoutSeconds), 10, 180),
+            Math.Clamp(Int(values, key + "retryCount", defaults.RetryCount), 0, 3), Text(values, key + "cookie", defaults.Cookie),
+            Bool(values, key + "downloadImages", defaults.DownloadImages), true);
     }
 
     private static string NormalizeBaseUrl(string value) => value.Trim().TrimEnd('/') + "/";

@@ -56,6 +56,18 @@ builder.Services.AddSingleton(serviceProvider => new SettingsSaveCoordinator(
     serviceProvider.GetRequiredService<RatingHistoryService>()));
 builder.Services.AddSingleton<MetaTubeProvider>();
 builder.Services.AddSingleton<JavBusProvider>();
+builder.Services.AddSingleton<DmmProvider>();
+builder.Services.AddSingleton<JavDbProvider>();
+builder.Services.AddSingleton<MinnanoActorProfileProvider>();
+builder.Services.AddSingleton<WikipediaJpActorProfileProvider>();
+builder.Services.AddSingleton(new ActorProfileService(databasePath));
+builder.Services.AddSingleton(serviceProvider => new ActorProfileProviderService(
+    databasePath,
+    serviceProvider.GetRequiredService<MetadataProviderSettingsService>(),
+    serviceProvider.GetRequiredService<MinnanoActorProfileProvider>(),
+    serviceProvider.GetRequiredService<WikipediaJpActorProfileProvider>(),
+    serviceProvider.GetRequiredService<ActorProfileService>()));
+builder.Services.AddSingleton<ProviderDiagnosticsService>();
 builder.Services.AddSingleton<IMetadataProvider, CompositeMetadataProvider>();
 builder.Services.AddSingleton(serviceProvider => new MetadataSyncExecutor(
     databasePath,
@@ -165,6 +177,25 @@ app.MapPost("/api/settings/providers/metatube/test", async (MetaTubeSettingsDto 
     Results.Ok(await provider.TestConnectionAsync(new(input with { BaseUrl = input.BaseUrl.Trim().TrimEnd('/') + "/" }, await settingsService.ReadJavBusAsync()), CancellationToken.None)));
 app.MapPost("/api/settings/providers/javbus/test", async (JavBusSettingsDto input, JavBusProvider provider, MetadataProviderSettingsService settingsService) =>
     Results.Ok(await provider.TestConnectionAsync(new(await settingsService.ReadMetaTubeAsync(), MetadataProviderSettingsService.NormalizeJavBus(input)), CancellationToken.None)));
+app.MapPost("/api/settings/providers/dmm/test", async (WebMetadataSettingsDto input, DmmProvider provider, MetadataProviderSettingsService settingsService) =>
+    Results.Ok(await provider.TestConnectionAsync(new(await settingsService.ReadMetaTubeAsync(), await settingsService.ReadJavBusAsync(), null,
+        MetadataProviderSettingsService.NormalizeWeb(input, "DMM"), await settingsService.ReadJavDbAsync()), CancellationToken.None)));
+app.MapPost("/api/settings/providers/javdb/test", async (WebMetadataSettingsDto input, JavDbProvider provider, MetadataProviderSettingsService settingsService) =>
+    Results.Ok(await provider.TestConnectionAsync(new(await settingsService.ReadMetaTubeAsync(), await settingsService.ReadJavBusAsync(), null,
+        await settingsService.ReadDmmAsync(), MetadataProviderSettingsService.NormalizeWeb(input, "JavDB")), CancellationToken.None)));
+app.MapGet("/api/search/remote", async (string q, string? kind, JavDbProvider provider, MetadataProviderSettingsService settingsService, CancellationToken token) =>
+    Results.Ok(await provider.SearchKeywordAsync(q, kind ?? "code",
+        new(await settingsService.ReadMetaTubeAsync(), await settingsService.ReadJavBusAsync(), null, await settingsService.ReadDmmAsync(), await settingsService.ReadJavDbAsync()), token)));
+app.MapPost("/api/settings/providers/minnano/test", async (WebMetadataSettingsDto input, MinnanoActorProfileProvider provider) =>
+    Results.Ok(await provider.TestConnectionAsync(MetadataProviderSettingsService.NormalizeWeb(input, "Minnano"), CancellationToken.None)));
+app.MapPost("/api/settings/providers/wikipedia-jp/test", async (WebMetadataSettingsDto input, WikipediaJpActorProfileProvider provider) =>
+    Results.Ok(await provider.TestConnectionAsync(MetadataProviderSettingsService.NormalizeWeb(input, "Wikipedia JP"), CancellationToken.None)));
+app.MapPost("/api/settings/providers/diagnostics", async (ProviderDiagnosticsService service, CancellationToken token) =>
+    Results.Ok(await service.ProbeAsync(token)));
+app.MapGet("/api/actors/{actorId:long}/profile-preview", async (long actorId, string? source, ActorProfileProviderService service, CancellationToken token) =>
+    Results.Ok(await service.PreviewAsync(actorId, source, token)));
+app.MapPost("/api/actors/{actorId:long}/profile-apply", async (long actorId, ActorProfileCandidate candidate, ActorProfileProviderService service, CancellationToken token) =>
+    Results.Ok(await service.ApplyAsync(actorId, candidate, token)));
 app.MapGet("/api/plugins/ffmpeg/status", (FfmpegLocator ffmpeg) =>
     Results.Ok(ffmpeg.Status()));
 app.MapGet("/api/settings/data-safety/overview", async (DataSafetyService safety) =>

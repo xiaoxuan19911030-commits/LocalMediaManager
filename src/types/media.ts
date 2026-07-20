@@ -299,7 +299,10 @@ export interface MaintenanceStats {
   emptyDirectories: number
   cacheProblems: number
 }
-export interface MaintenanceIssue { category: string; severity: string; title: string; detail: string; movieId?: number; path?: string }
+export interface MaintenanceIssue { category: string; severity: string; title: string; detail: string; movieId?: number; path?: string; actorId?: number }
+export interface ActorProfileData { birthDate?: string; heightCm?: number; cup?: string; birthPlace?: string; activityPeriod?: string; description?: string; aliases?: string[]; avatarUrl?: string }
+export interface ActorProfileCandidate { source: string; matchedName: string; sourceUrl: string; confidence: number; profile: ActorProfileData }
+export interface ActorProfilePreview { actorId: number; candidates: ActorProfileCandidate[]; warnings: string[] }
 export interface MaintenancePath { kind: string; path: string; reason: string }
 export interface MaintenanceReport {
   stats: MaintenanceStats

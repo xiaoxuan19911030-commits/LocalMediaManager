@@ -1469,3 +1469,30 @@ Official version recovery uses Git release tags. Every stable release must updat
 - Do not keep long-lived `feature/*`, `ui/*`, `migration/*`, `temp/*`, `debug/*`, `test/*`, `experiment/*`, `sprint/*`, or rollback branches after their work is merged and verified.
 - Do not delete release tags.
 - Do not use rollback branches as the long-term release restore mechanism.
+
+---
+
+### DEC-020: Structured Actor Profile Enrichment And Field Provenance
+
+| Field | Value |
+|------|-----|
+| **Decision ID** | DEC-020 |
+| **Module** | Database / Actor Metadata |
+| **Sprint** | 0.6.2 |
+| **Date** | 2026-07-20 |
+| **Status** | Accepted |
+
+#### Decision
+
+Database v1 adds nullable structured actor fields `HeightCm`, `Cup`, `BirthPlace`, and `ActivityPeriod` through checksummed migration 0014. Field-level source, update time, and user-edit state are stored in one extensible JSON object, `ProfileFieldSourcesJson`, rather than per-field source columns.
+
+Actor profile providers must use the existing Bridge, service, and actor repository boundaries. Merge behavior is fill-empty-only: user-edited and existing non-empty values have priority, provider conflicts are logged and never silently overwrite data, aliases are normalized and deduplicated without deleting existing aliases, and birth dates are stored as dates rather than dynamic ages.
+
+Minnano is preferred for `BirthDate`, `HeightCm`, and `Cup`. Wikipedia JP is preferred for `BirthPlace`, `ActivityPeriod`, `Description`, and `BirthDate`. Provenance remains internal to merge decisions, Data Center diagnostics, debug logs, and troubleshooting; actor detail pages do not expose it.
+
+#### Prohibited
+
+- Do not create a second actor persistence path or let React write SQLite.
+- Do not overwrite non-empty or user-edited actor fields automatically.
+- Do not store derived age or embed structured height/cup values in description.
+- Do not display field provenance on actor detail pages in this scope.

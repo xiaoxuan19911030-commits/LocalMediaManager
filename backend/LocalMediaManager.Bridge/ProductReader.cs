@@ -564,7 +564,8 @@ public static class ProductReader
             new("warning","CORRUPT_TEXT","损坏文本","标题、演员或标签包含 Unicode 替换字符。",await ScalarAsync(connection,"SELECT (SELECT COUNT(*) FROM Movies WHERE instr(COALESCE(Title,''),'�')>0)+(SELECT COUNT(*) FROM Actors WHERE instr(Name,'�')>0)+(SELECT COUNT(*) FROM Tags WHERE instr(Name,'�')>0)")),
             new("warning","MIGRATION_WARNING","迁移警告","旧数据迁移时保留的兼容性警告。",await ScalarAsync(connection,"SELECT COUNT(*) FROM MigrationWarnings")),
             new("info","MISSING_COVER","缺少图片","尚未关联任何图片资源的影片。",await ScalarAsync(connection,"SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id)")),
-            new("info","MISSING_ACTOR","缺少演员","尚未关联演员的影片。",await ScalarAsync(connection,"SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id)"))
+            new("info","MISSING_ACTOR","缺少演员","尚未关联演员的影片。",await ScalarAsync(connection,"SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id)")),
+            new("info","INCOMPLETE_ACTOR_PROFILE","演员资料缺失","演员缺少生日、身高或罩杯等可补充资料。",await ScalarAsync(connection,"SELECT COUNT(*) FROM Actors WHERE Id>0 AND (BirthDate IS NULL OR HeightCm IS NULL OR Cup IS NULL)"))
         };
         return new(integrity, foreignKeys, items);
     }

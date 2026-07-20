@@ -23,7 +23,7 @@ import { defaultMovieWallDisplay, normalizeMovieWallDisplay } from '@/components
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
 import type { BridgeHealth, TaskItem } from '@/types/media'
-import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegToolStatus, JavBusSettings, LogCleanupPreview, LogCleanupResult, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, PlaybackSettings, RatingRetentionSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult } from '@/types/settings'
+import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegToolStatus, JavBusSettings, LogCleanupPreview, LogCleanupResult, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, PlaybackSettings, RatingRetentionSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult, WebMetadataSettings } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 
 const categories = [
@@ -281,7 +281,7 @@ export default function SettingsPage() {
         </Paper>
         {category === 'general' && <GeneralSection snapshot={snapshot} system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
         {category === 'metadata' && <MetadataSection/>}
-        {category === 'plugins' && <PluginsSection snapshot={snapshot} metaTube={draft.metaTube} setMetaTube={(value) => updateDraft('metaTube', value)} javBus={draft.javBus} setJavBus={(value) => updateDraft('javBus', value)} busy={busy} testMetaTube={testMetaTube} setNotice={setNotice}/>}
+        {category === 'plugins' && <PluginsSection snapshot={snapshot} metaTube={draft.metaTube} setMetaTube={(value) => updateDraft('metaTube', value)} javBus={draft.javBus} setJavBus={(value) => updateDraft('javBus', value)} dmm={draft.dmm} setDmm={(value) => updateDraft('dmm', value)} javDb={draft.javDb} setJavDb={(value) => updateDraft('javDb', value)} minnano={draft.minnano} setMinnano={(value) => updateDraft('minnano', value)} wikipediaJp={draft.wikipediaJp} setWikipediaJp={(value) => updateDraft('wikipediaJp', value)} busy={busy} testMetaTube={testMetaTube} setNotice={setNotice}/>}
         {category === 'mediaStorage' && <MediaStorageSection mediaStorage={draft.mediaStorage} defaults={defaults.mediaStorage} setMediaStorage={(value) => updateDraft('mediaStorage', value)} setNotice={setNotice}/>}
         {category === 'search' && <SearchSection search={draft.search} setSearch={(value) => updateDraft('search', value)}/>}
         {category === 'shortcuts' && <ShortcutSection system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
@@ -379,12 +379,20 @@ function MetadataSection() {
   </Stack>
 }
 
-function PluginsSection({ snapshot, metaTube, setMetaTube, javBus, setJavBus, testMetaTube, busy, setNotice }: {
+function PluginsSection({ snapshot, metaTube, setMetaTube, javBus, setJavBus, dmm, setDmm, javDb, setJavDb, minnano, setMinnano, wikipediaJp, setWikipediaJp, testMetaTube, busy, setNotice }: {
   snapshot: SettingsSnapshot
   metaTube: MetaTubeSettings
   setMetaTube: (v: MetaTubeSettings) => void
   javBus: JavBusSettings
   setJavBus: (v: JavBusSettings) => void
+  dmm: WebMetadataSettings
+  setDmm: (v: WebMetadataSettings) => void
+  javDb: WebMetadataSettings
+  setJavDb: (v: WebMetadataSettings) => void
+  minnano: WebMetadataSettings
+  setMinnano: (v: WebMetadataSettings) => void
+  wikipediaJp: WebMetadataSettings
+  setWikipediaJp: (v: WebMetadataSettings) => void
   testMetaTube: () => void
   busy: boolean
   setNotice: (value: string) => void
@@ -418,6 +426,10 @@ function PluginsSection({ snapshot, metaTube, setMetaTube, javBus, setJavBus, te
         <Button disabled={busy} variant="outlined" onClick={() => bridge.testJavBus(javBus).then(result => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))}>测试连接</Button>
       </Stack>
     </SurfaceSection>
+    <CompactWebProvider title="DMM" value={dmm} onChange={setDmm} busy={busy} onTest={() => bridge.testDmm(dmm).then(result => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))}/>
+    <CompactWebProvider title="JavDB" value={javDb} onChange={setJavDb} busy={busy} onTest={() => bridge.testJavDb(javDb).then(result => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))}/>
+    <CompactWebProvider title="Minnano" value={minnano} onChange={setMinnano} busy={busy} onTest={() => bridge.testMinnano(minnano).then(result => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))}/>
+    <CompactWebProvider title="Wikipedia JP" value={wikipediaJp} onChange={setWikipediaJp} busy={busy} onTest={() => bridge.testWikipediaJp(wikipediaJp).then(result => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))}/>
     <SurfaceSection title="FFmpeg 截图工具" description="用于截图、缩略图、预览图、GIF 和视频信息读取；软件默认不内置。">
       <Stack spacing={1.25}>
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
@@ -448,6 +460,21 @@ function PluginsSection({ snapshot, metaTube, setMetaTube, javBus, setJavBus, te
     </SurfaceSection>
   </Stack>
 }
+function CompactWebProvider({ title, value, onChange, busy, onTest }: { title: string; value: WebMetadataSettings; onChange: (value: WebMetadataSettings) => void; busy: boolean; onTest: () => void }) {
+  return <SurfaceSection title={title} description="远程影片资料来源；默认只补充缺失字段，Cookie 不会写入日志。">
+    <Stack spacing={1.25}>
+      <FormControlLabel control={<Switch checked={value.enabled} onChange={event => onChange({ ...value, enabled: event.target.checked })}/>} label={`启用 ${title}`}/>
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25}>
+        <TextField fullWidth label="Base URL" size="small" value={value.baseUrl} onChange={event => onChange({ ...value, baseUrl: event.target.value })}/>
+        <TextField type="number" label="优先级" size="small" value={value.priority} onChange={event => onChange({ ...value, priority: Number(event.target.value) || value.priority })}/>
+        <TextField type="number" label="超时（秒）" size="small" value={value.timeoutSeconds} onChange={event => onChange({ ...value, timeoutSeconds: Number(event.target.value) || 30 })}/>
+      </Stack>
+      <TextField type="password" label="Cookie（可选）" size="small" value={value.cookie} onChange={event => onChange({ ...value, cookie: event.target.value })}/>
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}><StatusBadge tone="success" label="仅补充缺失字段"/><Button disabled={busy} variant="outlined" onClick={onTest}>测试连接</Button></Stack>
+    </Stack>
+  </SurfaceSection>
+}
+
 function ImagesSection({ cachePreview, setCachePreview, onClean, onThumbs }: { cachePreview?: ImageCachePreview; setCachePreview: (v: ImageCachePreview) => void; onClean: () => void; onThumbs: () => void }) {
   return <SurfaceSection title="图片与缓存" description="清理只影响 .lmm-cache 中可重建缩略图，不删除源图。"><Stack spacing={1.5}>{cachePreview && <Alert severity="warning">预计可清理 {cachePreview.entries} 条，{size(cachePreview.bytes)}，缺失记录 {cachePreview.missingEntries} 条。</Alert>}<Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}><Button variant="outlined" onClick={() => bridge.imageCachePreview().then(setCachePreview)}>检查缓存</Button><Button color="error" variant="outlined" disabled={!cachePreview} onClick={onClean}>清理缓存</Button><Button variant="outlined" onClick={onThumbs}>重建 Thumbnail</Button></Stack></Stack></SurfaceSection>
 }

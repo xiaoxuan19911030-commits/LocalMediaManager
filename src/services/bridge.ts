@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActorDetail, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateDeleteGroupCommand, DuplicateDeletePreview, DuplicateResults, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageCropCommand, ImageDeletePreview, ImageMutationResult, ImageTaskLaunchResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, PlatformOpenResult, RandomMovieResult, SafeDeleteLaunchResult, SafeDeletePreview, SafeDeletePreviewCommand, ScanLaunchResult, TaskCleanupResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
-import type { JavBusSettings } from '@/types/settings'
+import type { ActorDetail, ActorProfileCandidate, ActorProfilePreview, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateDeleteGroupCommand, DuplicateDeletePreview, DuplicateResults, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageCropCommand, ImageDeletePreview, ImageMutationResult, ImageTaskLaunchResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, PlatformOpenResult, RandomMovieResult, SafeDeleteLaunchResult, SafeDeletePreview, SafeDeletePreviewCommand, ScanLaunchResult, TaskCleanupResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
+import type { JavBusSettings, WebMetadataSettings } from '@/types/settings'
 import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, FfmpegToolStatus, LogCleanupPreview, LogCleanupResult, MetaTubeSettings, ProviderConnectionResult, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings, UnifiedSettingsSaveResult, UpdateCheckResult } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
@@ -82,6 +82,10 @@ export const bridge = {
   checkUpdates: () => request<UpdateCheckResult>('/api/system/update/check', { method: 'POST' }),
   testMetaTube: (value: MetaTubeSettings) => request<ProviderConnectionResult>('/api/settings/providers/metatube/test', { method: 'POST', body: JSON.stringify(value) }),
   testJavBus: (value: JavBusSettings) => request<ProviderConnectionResult>('/api/settings/providers/javbus/test', { method: 'POST', body: JSON.stringify(value) }),
+  testDmm: (value: WebMetadataSettings) => request<ProviderConnectionResult>('/api/settings/providers/dmm/test', { method: 'POST', body: JSON.stringify(value) }),
+  testJavDb: (value: WebMetadataSettings) => request<ProviderConnectionResult>('/api/settings/providers/javdb/test', { method: 'POST', body: JSON.stringify(value) }),
+  testMinnano: (value: WebMetadataSettings) => request<ProviderConnectionResult>('/api/settings/providers/minnano/test', { method: 'POST', body: JSON.stringify(value) }),
+  testWikipediaJp: (value: WebMetadataSettings) => request<ProviderConnectionResult>('/api/settings/providers/wikipedia-jp/test', { method: 'POST', body: JSON.stringify(value) }),
   ffmpegStatus: () => request<FfmpegToolStatus>('/api/plugins/ffmpeg/status'),
   movie: (id: number) => request<MovieDetail>(`/api/videos/${id}`),
   movieImages: (id: number) => request<ImageAsset[]>(`/api/videos/${id}/images`),
@@ -136,6 +140,8 @@ export const bridge = {
     return request<EntityPageResult>(`/api/entities/${type}?${query}`)
   },
   actor: (id: number) => request<ActorDetail>(`/api/actors/${id}`),
+  actorProfilePreview: (id: number, source?: 'Minnano' | 'Wikipedia JP') => request<ActorProfilePreview>(`/api/actors/${id}/profile-preview${source ? `?${new URLSearchParams({ source })}` : ''}`),
+  applyActorProfile: (id: number, candidate: ActorProfileCandidate) => request<{ actorId: number; updatedFields: string[]; conflicts: string[] }>(`/api/actors/${id}/profile-apply`, { method: 'POST', body: JSON.stringify(candidate) }),
   entityMovies: (type: 'actors' | 'directors' | 'series' | 'studios' | 'genres' | 'tags' | 'custom-tags' | 'movie-tags', id: number, limit = 48, offset = 0) => request<MediaPageResult>(`/api/entities/${type}/${id}/movies?${new URLSearchParams({ limit: String(limit), offset: String(offset) })}`),
   collection: (kind: 'favorites' | 'history', limit = 48, offset = 0) => request<MediaPageResult>(`/api/collections/${kind}?${new URLSearchParams({ limit: String(limit), offset: String(offset) })}`),
   advancedSearch: (filters: AdvancedSearchFilters) => {

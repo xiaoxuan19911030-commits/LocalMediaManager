@@ -1436,6 +1436,12 @@ React → bridge.ts → Bridge
 | HTTP 线程全库同步 | Tasks + HostedService |
 | NFO/图片写 Legacy 路径 | DEC-009 |
 
+### 13.7 Multi-source actor profile enrichment
+
+Actor profile enrichment reuses the Bridge and existing actor repository. Database v1 stores nullable structured fields `HeightCm`, `Cup`, `BirthPlace`, and `ActivityPeriod`, plus compact JSON field provenance in `ProfileFieldSourcesJson`.
+
+Merge policy is fill-empty-only: user edits and existing non-empty values win; conflicting provider values are reported rather than overwritten. Minnano primarily supplies birth date, height, and cup; Wikipedia JP primarily supplies birthplace, activity period, description, and birth date. Provenance is used by merge decisions, diagnostics, and debug logging only, and is not displayed on actor detail pages. See DEC-020.
+
 ---
 
 ## 14. UI Design System

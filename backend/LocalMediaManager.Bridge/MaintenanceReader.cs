@@ -5,7 +5,7 @@ namespace LocalMediaManager.Bridge;
 
 public sealed record MaintenanceStatsDto(long TotalMovies, long HealthyMovies, long ProblemMovies, long DuplicateMovies,
     long MissingImages, long MissingNfo, long MissingMetadata, long OrphanFiles, long EmptyDirectories, long CacheProblems);
-public sealed record MaintenanceIssueDto(string Category, string Severity, string Title, string Detail, long? MovieId, string? Path);
+public sealed record MaintenanceIssueDto(string Category, string Severity, string Title, string Detail, long? MovieId, string? Path, long? ActorId = null);
 public sealed record MaintenancePathDto(string Kind, string Path, string Reason);
 public sealed record MaintenanceReportDto(MaintenanceStatsDto Stats, IReadOnlyList<MaintenanceIssueDto> Issues,
     IReadOnlyList<MaintenancePathDto> OrphanFiles, IReadOnlyList<MaintenancePathDto> Directories, DuplicateResultsDto Duplicates,
@@ -72,17 +72,17 @@ public static class MaintenanceReader
             if (reader.GetInt64(11) == 0) issues.Add(new("演员缺失", "warning", "演员缺失", name, id, path));
             if (reader.GetInt64(12) == 0) issues.Add(new("标签缺失", "warning", "标签缺失", name, id, path));
         }
-        if (await TableExistsAsync(connection, "Actors"))
-            foreach (var issue in await ActorAvatarIssuesAsync(connection)) issues.Add(issue);
+        if (await ColumnExistsAsync(connection, "Actors", "ProfileFieldSourcesJson"))
+            foreach (var issue in await ActorProfileIssuesAsync(connection)) issues.Add(issue);
     }
 
-    private static async Task<IReadOnlyList<MaintenanceIssueDto>> ActorAvatarIssuesAsync(SqliteConnection connection)
+    private static async Task<IReadOnlyList<MaintenanceIssueDto>> ActorProfileIssuesAsync(SqliteConnection connection)
     {
         var result = new List<MaintenanceIssueDto>();
         await using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT a.Id,a.Name FROM Actors a WHERE NOT EXISTS(SELECT 1 FROM Images i WHERE i.ActorId=a.Id AND i.ImageType='ActorAvatar' AND {ActiveImageSql("i")}) LIMIT 200";
+        command.CommandText = "SELECT a.Id,a.Name FROM Actors a WHERE a.Id>0 AND (a.BirthDate IS NULL OR a.HeightCm IS NULL OR a.Cup IS NULL) LIMIT 200";
         await using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync()) result.Add(new("演员头像缺失", "info", "演员头像缺失", reader.GetString(1), null, null));
+        while (await reader.ReadAsync()) result.Add(new("演员资料缺失", "info", "演员资料缺失", reader.GetString(1), null, null, reader.GetInt64(0)));
         return result;
     }
 
@@ -187,6 +187,14 @@ public static class MaintenanceReader
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync()) if (!reader.IsDBNull(0)) result.Add(reader.GetString(0));
         return result;
+    }
+
+    private static async Task<bool> ColumnExistsAsync(SqliteConnection connection, string table, string column)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table.Replace("'", "''")}') WHERE name=$column";
+        command.Parameters.AddWithValue("$column", column);
+        return Convert.ToInt64(await command.ExecuteScalarAsync()) > 0;
     }
 
     private static async Task<HashSet<long>> ReadLongSetAsync(SqliteConnection connection, string sql)
