@@ -30,6 +30,7 @@ public sealed record MediaStorageSettingsDto(
 
 public sealed record UnifiedSettingsDto(
     MetaTubeSettingsDto MetaTube,
+    JavBusSettingsDto JavBus,
     NfoSettingsDto Nfo,
     PlaybackSettingsDto Playback,
     RatingRetentionSettingsDto RatingRetention,
@@ -66,6 +67,7 @@ public sealed class SettingsSaveCoordinator(
         SystemSettingsDto system = await ReadSystemAsync(token);
         return new(
             await metadata.ReadMetaTubeAsync(),
+            await metadata.ReadJavBusAsync(),
             await nfo.ReadSettingsAsync(token),
             await playback.ReadAsync(token),
             await ratings.ReadSettingsAsync(token),
@@ -97,6 +99,7 @@ public sealed class SettingsSaveCoordinator(
         await StoreAsync(connection, transaction, "metadata.metatube.writeNfo", clean.MetaTube.WriteNfo, "boolean", token);
         await StoreAsync(connection, transaction, "metadata.metatube.autoExecute", clean.MetaTube.AutoExecute, "boolean", token);
         await StoreAsync(connection, transaction, "metadata.metatube.nonDestructive", true, "boolean", token);
+        await MetadataProviderSettingsService.StoreJavBusAsync(connection, transaction, clean.JavBus);
         await StoreAsync(connection, transaction, "nfo.export.policy", clean.Nfo.ExportPolicy, "string", token);
         await StoreAsync(connection, transaction, "nfo.export.outputDirectory", clean.Nfo.OutputDirectory, "string", token);
         await StoreAsync(connection, transaction, "nfo.import.fillEmptyOnly", true, "boolean", token);
@@ -163,6 +166,7 @@ public sealed class SettingsSaveCoordinator(
                 WriteNfo = true,
                 NonDestructive = true,
             },
+            MetadataProviderSettingsService.NormalizeJavBus(input.JavBus ?? SettingsDefaults.JavBus),
             new(nfoPolicy, nfoOutput, true, true),
             new(player, useSystemDefault),
             new(input.RatingRetention.Enabled),
@@ -561,6 +565,7 @@ public sealed class SettingsSaveCoordinator(
             await StoreIfMissingOrDefaultAsync(connection, transaction, "metadata.metatube.timeoutSeconds", Math.Clamp((int)Math.Round(ReadLegacyDouble(legacy, "ProxyConfig", "HttpTimeout", SettingsDefaults.Unified.MetaTube.TimeoutSeconds)), 15, 180), SettingsDefaults.Unified.MetaTube.TimeoutSeconds, "integer", migratedKeys, token);
             await StoreIfMissingOrDefaultAsync(connection, transaction, "metadata.metatube.writeNfo", ReadLegacyBool(legacy, "WindowConfig.Settings", "SaveInfoToNFO", SettingsDefaults.Unified.MetaTube.WriteNfo), SettingsDefaults.Unified.MetaTube.WriteNfo, "boolean", migratedKeys, token);
             await StoreIfMissingOrDefaultAsync(connection, transaction, "metadata.metatube.autoExecute", ReadLegacyBool(legacy, "DownloadConfig", "AutoDownloadAfterScan", SettingsDefaults.Unified.MetaTube.AutoExecute), SettingsDefaults.Unified.MetaTube.AutoExecute, "boolean", migratedKeys, token);
+            await StoreIfMissingOrDefaultAsync(connection, transaction, "metadata.javbus.baseUrl", JavBusProvider.DefaultBaseUrl, SettingsDefaults.JavBus.BaseUrl, "string", migratedKeys, token);
             string legacyPlayer = ReadLegacyText(legacy, "WindowConfig.Settings", "VideoPlayerPath", "");
             if (!string.IsNullOrWhiteSpace(legacyPlayer) && File.Exists(legacyPlayer))
                 await StoreIfMissingOrDefaultAsync(connection, transaction, "playback.playerPath", Path.GetFullPath(legacyPlayer), "", "string", migratedKeys, token);
@@ -733,10 +738,12 @@ public sealed class SettingsSaveCoordinator(
 
 public static class SettingsDefaults
 {
+    public static JavBusSettingsDto JavBus => new(false, 2, JavBusProvider.DefaultBaseUrl, 30, 1, "", true, true);
     public static UnifiedSettingsDto Unified => UnifiedForEnvironment(null, null);
 
     public static UnifiedSettingsDto UnifiedForEnvironment(string? installRoot, string? databasePath) => new(
         new(true, "http://127.0.0.1:8080/", 30, true, true, true, true),
+        JavBus,
         new("SkipExisting", "", true, true),
         new("", true),
         new(true),

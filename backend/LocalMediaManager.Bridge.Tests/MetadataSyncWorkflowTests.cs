@@ -34,9 +34,10 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         });
         var provider = new MetaTubeProvider(factory);
         var settings = new MetaTubeSettingsDto(true, "http://127.0.0.1:8080/", 30, true, false, true, true);
-        IReadOnlyList<MetadataSearchResult> results = await provider.SearchAsync("abp_001", settings, CancellationToken.None);
+        MetadataProviderContext context = Context(settings);
+        IReadOnlyList<MetadataSearchResult> results = await provider.SearchAsync("abp_001", context, CancellationToken.None);
         Assert.Equal("FANZA", results[0].Provider);
-        ProviderMetadata? metadata = await provider.GetMetadataAsync(results[0], settings, CancellationToken.None);
+        ProviderMetadata? metadata = await provider.GetMetadataAsync(results[0], context, CancellationToken.None);
         Assert.NotNull(metadata);
         Assert.Equal("ABP-001", metadata.Code);
         Assert.Equal(7200, metadata.DurationSeconds);
@@ -54,7 +55,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         }));
         var settings = new MetaTubeSettingsDto(true, "http://127.0.0.1:8080/", 30, true, false, true, true);
 
-        IReadOnlyList<MetadataSearchResult> results = await provider.SearchAsync("NO-RESULT", settings, CancellationToken.None);
+        IReadOnlyList<MetadataSearchResult> results = await provider.SearchAsync("NO-RESULT", Context(settings), CancellationToken.None);
 
         Assert.Empty(results);
         Assert.Equal(1, requests);
@@ -116,6 +117,74 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         Assert.Equal(180, read.TimeoutSeconds);
         Assert.True(read.NonDestructive);
         Assert.Equal(saved, read);
+    }
+
+    [Fact]
+    public async Task JavBusNormalizesCodeAndParsesMovieHtml()
+    {
+        string html = JavBusHtml();
+        var provider = new JavBusProvider(new FakeHttpClientFactory(_ => new(HttpStatusCode.OK) { Content = new StringContent(html, Encoding.UTF8, "text/html") }));
+        MetadataProviderContext context = Context(javBus: new(true, 2, "https://www.javbus.com/", 30, 1, "secret-cookie", true, true));
+
+        IReadOnlyList<MetadataSearchResult> results = await provider.SearchAsync("abp001", context, CancellationToken.None);
+        ProviderMetadata? metadata = await provider.GetMetadataAsync(results[0], context, CancellationToken.None);
+
+        Assert.Equal("ABP-001", results[0].Code);
+        Assert.NotNull(metadata);
+        Assert.Equal("JavBus", metadata.Provider);
+        Assert.Equal("ABP-001", metadata.Code);
+        Assert.Equal("Sample Title", metadata.Title);
+        Assert.Equal("Director A", metadata.Director);
+        Assert.Equal("Studio A", metadata.Studio);
+        Assert.Equal("Series A", metadata.Series);
+        Assert.Equal(7200, metadata.DurationSeconds);
+        Assert.Contains("Actor A", metadata.Actors);
+        Assert.Contains("Drama", metadata.Genres);
+        Assert.Contains(metadata.Images, image => image.Type == "Poster" && image.Url == "https://www.javbus.com/cover.jpg");
+    }
+
+    [Fact]
+    public async Task JavBusMissingFieldsAndMissingImagesDoNotCrash()
+    {
+        string html = """<html><body><h3>ABP-002 Sparse</h3><p><span class="header">識別碼:</span> ABP-002</p></body></html>""";
+        var provider = new JavBusProvider(new FakeHttpClientFactory(_ => new(HttpStatusCode.OK) { Content = new StringContent(html, Encoding.UTF8, "text/html") }));
+
+        ProviderMetadata? metadata = await provider.GetMetadataAsync(new("JavBus", "ABP-002", "ABP-002", null), Context(), CancellationToken.None);
+
+        Assert.NotNull(metadata);
+        Assert.Empty(metadata.Images);
+        Assert.Empty(metadata.Actors);
+        Assert.Empty(metadata.Genres);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound, "未找到")]
+    [InlineData(HttpStatusCode.Forbidden, "请求被拒绝")]
+    [InlineData((HttpStatusCode)429, "请求过于频繁")]
+    public async Task JavBusClassifiesHttpFailures(HttpStatusCode status, string expected)
+    {
+        var provider = new JavBusProvider(new FakeHttpClientFactory(_ => new(status) { Content = new StringContent("") }));
+
+        InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetMetadataAsync(new("JavBus", "ABP-404", "ABP-404", null), Context(), CancellationToken.None));
+
+        Assert.Contains(expected, error.Message);
+    }
+
+    [Fact]
+    public async Task JavBusSettingsPersistAndCookieIsNotLogged()
+    {
+        var service = new MetadataProviderSettingsService(Database);
+        JavBusSettingsDto saved = await service.SaveJavBusAsync(new(true, 3, "https://www.javbus.com", 500, 5, "adult=secret", true, false));
+        JavBusSettingsDto read = await service.ReadJavBusAsync();
+
+        Assert.True(read.Enabled);
+        Assert.Equal(3, read.Priority);
+        Assert.Equal("https://www.javbus.com/", read.BaseUrl);
+        Assert.Equal(180, read.TimeoutSeconds);
+        Assert.Equal(3, read.RetryCount);
+        Assert.Equal("adult=secret", read.Cookie);
+        Assert.True(saved.FillMissingOnly);
     }
 
     [Fact]
@@ -249,6 +318,26 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         return new(Database, resolver, new ImageWorkflowService(Database, root, resolver), new TaskLogService(Database), new FfmpegLocator(Database, root));
     }
     private async Task<SqliteConnection> Open() { var c = new SqliteConnection($"Data Source={Database}"); await c.OpenAsync(); return c; }
+    private static MetadataProviderContext Context(MetaTubeSettingsDto? metaTube = null, JavBusSettingsDto? javBus = null, string? preferredSource = null) =>
+        new(metaTube ?? new(true, "http://127.0.0.1:8080/", 30, true, false, true, true),
+            javBus ?? SettingsDefaults.JavBus,
+            preferredSource);
+    private static string JavBusHtml() => """
+        <html><body>
+        <h3>ABP-001 Sample Title</h3>
+        <a class="bigImage" href="/cover.jpg"><img src="/thumb.jpg"></a>
+        <p><span class="header">識別碼:</span> ABP-001</p>
+        <p><span class="header">發行日期:</span> 2024-01-02</p>
+        <p><span class="header">長度:</span> 120分鐘</p>
+        <p><span class="header">導演:</span> <a>Director A</a></p>
+        <p><span class="header">製作商:</span> <a>Studio A</a></p>
+        <p><span class="header">發行商:</span> <a>Publisher A</a></p>
+        <p><span class="header">系列:</span> <a>Series A</a></p>
+        <a href="/star/abc">Actor A</a><a href="/star/def">Actor B</a>
+        <a href="/genre/drama">Drama</a><a href="/genre/hd">HD</a>
+        <a class="sample-box" href="/sample1.jpg">sample</a>
+        </body></html>
+        """;
     private static Task InsertMovie(SqliteConnection c, long id, string code)
     {
         string at = DateTimeOffset.UtcNow.ToString("O");

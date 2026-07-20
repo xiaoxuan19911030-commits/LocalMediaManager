@@ -27,6 +27,10 @@ export interface MetaTubeSettings {
   enabled: boolean; baseUrl: string; timeoutSeconds: number; downloadImages: boolean
   writeNfo: boolean; autoExecute: boolean; nonDestructive: boolean
 }
+export interface JavBusSettings {
+  enabled: boolean; priority: number; baseUrl: string; timeoutSeconds: number; retryCount: number
+  cookie: string; downloadImages: boolean; fillMissingOnly: boolean
+}
 
 export interface ProviderConnectionResult { success: boolean; provider: string; message: string; elapsedMilliseconds: number }
 export interface NfoSettings { exportPolicy: 'SkipExisting' | 'SeparateFile'; outputDirectory: string; fillEmptyOnly: boolean; includeImages: boolean }
@@ -68,6 +72,7 @@ export interface MediaStorageSettings {
 }
 export interface UnifiedSettings {
   metaTube: MetaTubeSettings
+  javBus: JavBusSettings
   nfo: NfoSettings
   playback: PlaybackSettings
   ratingRetention: RatingRetentionSettings

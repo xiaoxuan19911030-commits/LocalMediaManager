@@ -12,6 +12,25 @@ public sealed record MetaTubeSettingsDto(
     bool AutoExecute,
     bool NonDestructive);
 
+public sealed record JavBusSettingsDto(
+    bool Enabled,
+    int Priority,
+    string BaseUrl,
+    int TimeoutSeconds,
+    int RetryCount,
+    string Cookie,
+    bool DownloadImages,
+    bool FillMissingOnly);
+
+public sealed record MetadataProviderContext(MetaTubeSettingsDto MetaTube, JavBusSettingsDto JavBus, string? PreferredSource = null)
+{
+    public int TimeoutSeconds(string provider) =>
+        provider.Equals("JavBus", StringComparison.OrdinalIgnoreCase) ? JavBus.TimeoutSeconds : MetaTube.TimeoutSeconds;
+
+    public bool DownloadImages(string provider) =>
+        provider.Equals("JavBus", StringComparison.OrdinalIgnoreCase) ? JavBus.DownloadImages : MetaTube.DownloadImages;
+}
+
 public sealed record ProviderConnectionResult(bool Success, string Provider, string Message, long ElapsedMilliseconds);
 
 public sealed class MetadataProviderSettingsService(string databasePath)
@@ -33,6 +52,26 @@ public sealed class MetadataProviderSettingsService(string databasePath)
             true,
             Bool(values, "metadata.metatube.autoExecute", defaults.AutoExecute),
             Bool(values, "metadata.metatube.nonDestructive", defaults.NonDestructive));
+    }
+
+    public async Task<JavBusSettingsDto> ReadJavBusAsync()
+    {
+        JavBusSettingsDto defaults = SettingsDefaults.JavBus;
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        await using var connection = await OpenAsync(SqliteOpenMode.ReadOnly);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Key,ValueJson FROM AppSettings WHERE Key LIKE 'metadata.javbus.%'";
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) values[reader.GetString(0)] = reader.GetString(1);
+        return new(
+            Bool(values, "metadata.javbus.enabled", defaults.Enabled),
+            Math.Clamp(Int(values, "metadata.javbus.priority", defaults.Priority), 1, 99),
+            NormalizeBaseUrl(Text(values, "metadata.javbus.baseUrl", defaults.BaseUrl)),
+            Math.Clamp(Int(values, "metadata.javbus.timeoutSeconds", defaults.TimeoutSeconds), 10, 180),
+            Math.Clamp(Int(values, "metadata.javbus.retryCount", defaults.RetryCount), 0, 3),
+            Text(values, "metadata.javbus.cookie", defaults.Cookie),
+            Bool(values, "metadata.javbus.downloadImages", defaults.DownloadImages),
+            true);
     }
 
     public async Task<MetaTubeSettingsDto> SaveMetaTubeAsync(MetaTubeSettingsDto input)
@@ -58,7 +97,43 @@ public sealed class MetadataProviderSettingsService(string databasePath)
         return clean;
     }
 
-    private static async Task StoreAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
+    public async Task<JavBusSettingsDto> SaveJavBusAsync(JavBusSettingsDto input)
+    {
+        JavBusSettingsDto clean = NormalizeJavBus(input);
+        await using var connection = await OpenAsync(SqliteOpenMode.ReadWrite);
+        await using var transaction = await connection.BeginTransactionAsync();
+        await StoreJavBusAsync(connection, transaction, clean);
+        await transaction.CommitAsync();
+        return clean;
+    }
+
+    public static JavBusSettingsDto NormalizeJavBus(JavBusSettingsDto input)
+    {
+        if (!Uri.TryCreate(input.BaseUrl, UriKind.Absolute, out Uri? uri) || uri.Scheme is not ("http" or "https"))
+            throw new ArgumentException("JavBus 地址必须是有效的 HTTP 或 HTTPS URL。");
+        return input with {
+            Priority = Math.Clamp(input.Priority, 1, 99),
+            BaseUrl = NormalizeBaseUrl(uri.ToString()),
+            TimeoutSeconds = Math.Clamp(input.TimeoutSeconds, 10, 180),
+            RetryCount = Math.Clamp(input.RetryCount, 0, 3),
+            Cookie = input.Cookie?.Trim() ?? "",
+            FillMissingOnly = true,
+        };
+    }
+
+    public static async Task StoreJavBusAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction, JavBusSettingsDto clean)
+    {
+        await StoreAsync(connection, transaction, "metadata.javbus.enabled", clean.Enabled, "boolean");
+        await StoreAsync(connection, transaction, "metadata.javbus.priority", clean.Priority, "integer");
+        await StoreAsync(connection, transaction, "metadata.javbus.baseUrl", clean.BaseUrl, "string");
+        await StoreAsync(connection, transaction, "metadata.javbus.timeoutSeconds", clean.TimeoutSeconds, "integer");
+        await StoreAsync(connection, transaction, "metadata.javbus.retryCount", clean.RetryCount, "integer");
+        await StoreAsync(connection, transaction, "metadata.javbus.cookie", clean.Cookie, "secret");
+        await StoreAsync(connection, transaction, "metadata.javbus.downloadImages", clean.DownloadImages, "boolean");
+        await StoreAsync(connection, transaction, "metadata.javbus.fillMissingOnly", true, "boolean");
+    }
+
+    public static async Task StoreAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
         string key, object value, string type)
     {
         await using var command = connection.CreateCommand();

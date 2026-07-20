@@ -23,7 +23,7 @@ import { defaultMovieWallDisplay, normalizeMovieWallDisplay } from '@/components
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
 import type { BridgeHealth, TaskItem } from '@/types/media'
-import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegToolStatus, LogCleanupPreview, LogCleanupResult, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, PlaybackSettings, RatingRetentionSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult } from '@/types/settings'
+import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegToolStatus, JavBusSettings, LogCleanupPreview, LogCleanupResult, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, PlaybackSettings, RatingRetentionSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 
 const categories = [
@@ -281,7 +281,7 @@ export default function SettingsPage() {
         </Paper>
         {category === 'general' && <GeneralSection snapshot={snapshot} system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
         {category === 'metadata' && <MetadataSection/>}
-        {category === 'plugins' && <PluginsSection snapshot={snapshot} metaTube={draft.metaTube} setMetaTube={(value) => updateDraft('metaTube', value)} busy={busy} testMetaTube={testMetaTube} setNotice={setNotice}/>}
+        {category === 'plugins' && <PluginsSection snapshot={snapshot} metaTube={draft.metaTube} setMetaTube={(value) => updateDraft('metaTube', value)} javBus={draft.javBus} setJavBus={(value) => updateDraft('javBus', value)} busy={busy} testMetaTube={testMetaTube} setNotice={setNotice}/>}
         {category === 'mediaStorage' && <MediaStorageSection mediaStorage={draft.mediaStorage} defaults={defaults.mediaStorage} setMediaStorage={(value) => updateDraft('mediaStorage', value)} setNotice={setNotice}/>}
         {category === 'search' && <SearchSection search={draft.search} setSearch={(value) => updateDraft('search', value)}/>}
         {category === 'shortcuts' && <ShortcutSection system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
@@ -379,10 +379,12 @@ function MetadataSection() {
   </Stack>
 }
 
-function PluginsSection({ snapshot, metaTube, setMetaTube, testMetaTube, busy, setNotice }: {
+function PluginsSection({ snapshot, metaTube, setMetaTube, javBus, setJavBus, testMetaTube, busy, setNotice }: {
   snapshot: SettingsSnapshot
   metaTube: MetaTubeSettings
   setMetaTube: (v: MetaTubeSettings) => void
+  javBus: JavBusSettings
+  setJavBus: (v: JavBusSettings) => void
   testMetaTube: () => void
   busy: boolean
   setNotice: (value: string) => void
@@ -401,6 +403,19 @@ function PluginsSection({ snapshot, metaTube, setMetaTube, testMetaTube, busy, s
         <TextField type="number" label="请求超时（秒）" size="small" value={metaTube.timeoutSeconds} onChange={event => setMetaTube({ ...metaTube, timeoutSeconds: Number(event.target.value) || 30 })}/>
         <FormControlLabel control={<Switch checked={metaTube.downloadImages} onChange={event => setMetaTube({ ...metaTube, downloadImages: event.target.checked })}/>} label="同步图片资源"/>
         <Button disabled={busy} variant="outlined" onClick={testMetaTube}>测试连接</Button>
+      </Stack>
+    </SurfaceSection>
+    <SurfaceSection title="JavBus" description="用于补充影片标题、演员、导演、系列、标签、厂商、发行信息和封面。实际可用字段以来源页面为准。">
+      <Stack spacing={1.25}>
+        <FormControlLabel control={<Switch checked={javBus.enabled} onChange={event => setJavBus({ ...javBus, enabled: event.target.checked })}/>} label="启用 JavBus"/>
+        <TextField type="number" label="数据源优先级" size="small" value={javBus.priority} onChange={event => setJavBus({ ...javBus, priority: Number(event.target.value) || 2 })}/>
+        <TextField label="Base URL" size="small" value={javBus.baseUrl} onChange={event => setJavBus({ ...javBus, baseUrl: event.target.value })}/>
+        <TextField type="number" label="请求超时（秒）" size="small" value={javBus.timeoutSeconds} onChange={event => setJavBus({ ...javBus, timeoutSeconds: Number(event.target.value) || 30 })}/>
+        <TextField type="number" label="重试次数" size="small" value={javBus.retryCount} onChange={event => setJavBus({ ...javBus, retryCount: Number(event.target.value) || 0 })}/>
+        <TextField type="password" label="Cookie（可选）" size="small" value={javBus.cookie} onChange={event => setJavBus({ ...javBus, cookie: event.target.value })} helperText={javBus.cookie ? '已配置，保存和日志不会明文展示。' : '可留空；仅在站点要求登录或区域校验时填写。'}/>
+        <FormControlLabel control={<Switch checked={javBus.downloadImages} onChange={event => setJavBus({ ...javBus, downloadImages: event.target.checked })}/>} label="同步封面"/>
+        <StatusBadge tone="success" label="仅补充缺失字段"/>
+        <Button disabled={busy} variant="outlined" onClick={() => bridge.testJavBus(javBus).then(result => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))}>测试连接</Button>
       </Stack>
     </SurfaceSection>
     <SurfaceSection title="FFmpeg 截图工具" description="用于截图、缩略图、预览图、GIF 和视频信息读取；软件默认不内置。">

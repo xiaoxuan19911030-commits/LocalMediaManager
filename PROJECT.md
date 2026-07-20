@@ -522,7 +522,7 @@ Impact Preview → User Confirmation → Backup/Audit → Execute → Verify →
 | `RatingHistoryService` | 评分历史 |
 | `PlaybackSettingsService` | 播放设置 |
 | `LogMaintenanceService` / `UpdateCheckService` | 日志清理与更新检查 |
-| `MetaTubeProvider` | MetaTube 元数据 Provider |
+| `MetaTubeProvider` / `JavBusProvider` | 元数据 Provider；通过统一同步任务管线写入 |
 
 **Session 鉴权：**
 
@@ -707,7 +707,9 @@ Program.cs（路由 + DI 注册）
 │   └── FfmpegLocator               FFmpeg 路径
 │
 └── Provider
-    └── MetaTubeProvider : IMetadataProvider
+    ├── CompositeMetadataProvider : IMetadataProvider
+    ├── MetaTubeProvider
+    └── JavBusProvider
 ```
 
 **规则：**
@@ -977,6 +979,7 @@ React 更新 original + draft（两者同步为 saved 状态）
 | 域 | DTO | AppSettings 键前缀 | 说明 |
 |----|-----|-------------------|------|
 | **MetaTube** | `MetaTubeSettingsDto` | `metadata.metatube.*` | Provider 地址、超时、下载图片、写 NFO |
+| **JavBus** | `JavBusSettingsDto` | `metadata.javbus.*` | 启用、优先级、Base URL、超时、重试、Cookie、下载封面、只补缺失 |
 | **Nfo** | `NfoSettingsDto` | `nfo.*` | 导出策略、输出目录、包含图片 |
 | **Playback** | `PlaybackSettingsDto` | `playback.*` | 播放器路径或系统默认 |
 | **RatingRetention** | `RatingRetentionSettingsDto` | `ratingHistory.*` | Safe Delete 后评分记忆 |
@@ -1387,7 +1390,9 @@ Bridge 以 `SqliteOpenMode.ReadOnly` 打开 Legacy 库（迁移工具除外）�
 
 ```text
 React → bridge.ts → Bridge
-  MetaTubeProvider (IMetadataProvider)
+  CompositeMetadataProvider (IMetadataProvider)
+    ├── MetaTubeProvider
+    └── JavBusProvider
   MetadataSyncExecutor (HostedService + Tasks)
   MetadataWriteService（补空合并）
   ImageDownloadService → MediaStoragePathResolver
@@ -1395,17 +1400,21 @@ React → bridge.ts → Bridge
   SettingsSaveCoordinator.metaTube / .nfo
 ```
 
-### 13.2 MetaTube Provider
+### 13.2 Metadata Providers
 
 **配置：** `UnifiedSettings.metaTube` — enabled · baseUrl · timeout · downloadImages · writeNfo · autoExecute · **nonDestructive（强制 true）**
 
 **测试：** `POST /api/settings/providers/metatube/test`（Draft 值，不 Save）
 
+**JavBus：** `UnifiedSettings.javBus` — enabled · priority · baseUrl · timeout · retry · cookie · downloadImages · fillMissingOnly（强制 true）。默认 Base URL 为 `https://www.javbus.com/`；Cookie 不写入日志。JavBus 只补充页面实际存在的标题、演员、导演、系列、标签、厂商、发行信息和封面，不伪造背景图。
+
+**测试：** `POST /api/settings/providers/javbus/test`（Draft 值，不 Save）
+
 ### 13.3 同步工作流
 
 **触发：** `POST /api/videos/{id}/sync` · batch · 扫描后入队 · autoExecute
 
-**执行：** Enqueue → Provider 详情 → MetadataWriteService 补空 → 下载图片 → 可选写 NFO → TaskLog
+**执行：** Enqueue → Provider 搜索/详情 → MetadataWriteService 补空 → 下载图片 → 可选写 NFO → TaskLog
 
 **原则：** 不覆盖手工字段 · 锁定图不覆盖 · 关系事务写入
 

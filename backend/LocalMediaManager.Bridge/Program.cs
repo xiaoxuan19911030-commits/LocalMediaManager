@@ -54,7 +54,9 @@ builder.Services.AddSingleton(serviceProvider => new SettingsSaveCoordinator(
     serviceProvider.GetRequiredService<NfoService>(),
     serviceProvider.GetRequiredService<PlaybackSettingsService>(),
     serviceProvider.GetRequiredService<RatingHistoryService>()));
-builder.Services.AddSingleton<IMetadataProvider, MetaTubeProvider>();
+builder.Services.AddSingleton<MetaTubeProvider>();
+builder.Services.AddSingleton<JavBusProvider>();
+builder.Services.AddSingleton<IMetadataProvider, CompositeMetadataProvider>();
 builder.Services.AddSingleton(serviceProvider => new MetadataSyncExecutor(
     databasePath,
     serviceProvider.GetRequiredService<MediaStoragePathResolver>(),
@@ -159,8 +161,10 @@ app.MapPut("/api/settings/all", async (UnifiedSettingsDto input, bool? createMis
     Results.Ok(await coordinator.SaveAsync(input, createMissingMediaStorageRoot == true, token)));
 app.MapPut("/api/settings/providers/metatube", async (MetaTubeSettingsDto input, MetadataProviderSettingsService settings) =>
     Results.Ok(await settings.SaveMetaTubeAsync(input)));
-app.MapPost("/api/settings/providers/metatube/test", async (MetaTubeSettingsDto input, IMetadataProvider provider) =>
-    Results.Ok(await provider.TestConnectionAsync(input with { BaseUrl = input.BaseUrl.Trim().TrimEnd('/') + "/" }, CancellationToken.None)));
+app.MapPost("/api/settings/providers/metatube/test", async (MetaTubeSettingsDto input, MetaTubeProvider provider, MetadataProviderSettingsService settingsService) =>
+    Results.Ok(await provider.TestConnectionAsync(new(input with { BaseUrl = input.BaseUrl.Trim().TrimEnd('/') + "/" }, await settingsService.ReadJavBusAsync()), CancellationToken.None)));
+app.MapPost("/api/settings/providers/javbus/test", async (JavBusSettingsDto input, JavBusProvider provider, MetadataProviderSettingsService settingsService) =>
+    Results.Ok(await provider.TestConnectionAsync(new(await settingsService.ReadMetaTubeAsync(), MetadataProviderSettingsService.NormalizeJavBus(input)), CancellationToken.None)));
 app.MapGet("/api/plugins/ffmpeg/status", (FfmpegLocator ffmpeg) =>
     Results.Ok(ffmpeg.Status()));
 app.MapGet("/api/settings/data-safety/overview", async (DataSafetyService safety) =>
@@ -221,7 +225,7 @@ app.MapDelete("/api/tasks/{taskId:long}", async (long taskId, TaskCommandService
 app.MapPost("/api/tasks/cleanup", async (TaskCleanupCommand command, TaskCommandService service) => Results.Ok(await service.CleanupAsync(command.Status)));
 app.MapPost("/api/tasks/batch/cancel", async (IReadOnlyList<long> taskIds, TaskCommandService service) => Results.Ok(await service.CancelBatchAsync(taskIds)));
 app.MapPost("/api/tasks/batch/cancel-sync", async (IReadOnlyList<long> taskIds, TaskCommandService service) => Results.Ok(await service.CancelSyncBatchAsync(taskIds)));
-app.MapPost("/api/videos/{movieId:long}/sync", async (long movieId, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Manual")));
+app.MapPost("/api/videos/{movieId:long}/sync", async (long movieId, string? source, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Manual", source: source)));
 app.MapPost("/api/videos/{movieId:long}/rescrape", async (long movieId, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Rescrape", overwrite: true)));
 app.MapPost("/api/videos/batch/sync", async (IReadOnlyList<long> movieIds, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueBatchAsync(movieIds)));
 app.MapPost("/api/delete/preview", async (SafeDeletePreviewCommand command, SafeDeleteWorkflowService service, CancellationToken token) =>

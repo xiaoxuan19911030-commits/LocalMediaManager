@@ -34,6 +34,7 @@ Scope:
 - Duplicate Movies remains backed by the existing organizer and Safe Delete workflow.
 - Legacy routes redirect to the matching Data Center tab.
 - Polish pass turns the overview into a compact health dashboard and renames 诊断与修复 to 问题 with search, source, reason, status, and recommendation details.
+- JavBus is restored as an optional metadata source and wired into the existing Sync task pipeline, settings plugin center, and Data Center repair guidance.
 - No database schema changes, no Details changes, and no AI features.
 
 ## 0.6.1 - Task Center Polish

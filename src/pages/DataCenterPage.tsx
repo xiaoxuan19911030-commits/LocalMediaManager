@@ -226,9 +226,9 @@ function ProblemsTab({ query, initialType, onClearQuery }: { query: string; init
   const visibleProblems = problems.slice(0, visibleCount)
   const hasMore = visibleProblems.length < problems.length
   const clearFilters = () => { setStatus('all'); setType('all'); onClearQuery() }
-  const syncOne = (movieId?: number) => {
+  const syncOne = (movieId?: number, source?: 'JavBus') => {
     if (!movieId) return
-    bridge.syncMovie(movieId).then(result => setNotice(`${result.message} 可在任务中心查看。`)).catch((reason: Error) => setNotice(reason.message))
+    bridge.syncMovie(movieId, source).then(result => setNotice(`${result.message} 可在任务中心查看。`)).catch((reason: Error) => setNotice(reason.message))
   }
   const syncSelected = () => {
     if (!canBatchSync) return
@@ -271,14 +271,14 @@ function ProblemsTab({ query, initialType, onClearQuery }: { query: string; init
       problems.length ? <Stack spacing={1}>
         {visibleProblems.map((item, index) => <ProblemCard key={`${item.movieId}-${item.type}-${index}`} item={item} selected={Boolean(item.movieId && selected.includes(item.movieId))}
           onSelect={(checked) => item.movieId && setSelected((current) => checked ? [...new Set([...current, item.movieId!])] : current.filter(id => id !== item.movieId))}
-          onOpen={() => item.movieId && navigate(`/movies/${item.movieId}`)} onRepair={() => syncOne(item.movieId)} onCopyPath={() => copyPath(item.path, setNotice)} onOpenPath={() => openPath(item.path, setNotice)}/>)}
+          onOpen={() => item.movieId && navigate(`/movies/${item.movieId}`)} onRepair={(source) => syncOne(item.movieId, source)} onCopyPath={() => copyPath(item.path, setNotice)} onOpenPath={() => openPath(item.path, setNotice)}/>)}
         {hasMore && <Button variant="outlined" onClick={() => setVisibleCount((current) => current + 60)}>加载更多（{visibleProblems.length} / {problems.length}）</Button>}
       </Stack> : <ProblemEmptyState query={query} type={type} reportIssueCount={allProblems.length} onScan={load} onClear={clearFilters}/>}
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>
   </Stack>
 }
 
-function ProblemCard({ item, selected, onSelect, onOpen, onRepair, onCopyPath, onOpenPath }: { item: ProblemItem; selected: boolean; onSelect: (checked: boolean) => void; onOpen: () => void; onRepair: () => void; onCopyPath: () => void; onOpenPath: () => void }) {
+function ProblemCard({ item, selected, onSelect, onOpen, onRepair, onCopyPath, onOpenPath }: { item: ProblemItem; selected: boolean; onSelect: (checked: boolean) => void; onOpen: () => void; onRepair: (source?: 'JavBus') => void; onCopyPath: () => void; onOpenPath: () => void }) {
   return <Card variant="outlined" sx={{ borderRadius: 2, borderLeft: 4, borderLeftColor: `${item.reasonTone}.main` }}>
     <CardContent sx={{ p: 1.25, '&:last-child': { pb: 1.25 } }}>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'auto minmax(0,1fr)', md: '58px minmax(170px,.75fr) minmax(0,1.4fr) minmax(220px,1fr) minmax(210px,.8fr)' }, gap: 1.25, alignItems: 'center' }}>
@@ -312,7 +312,7 @@ function ProblemCard({ item, selected, onSelect, onOpen, onRepair, onCopyPath, o
         <Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {item.movieId && <Button size="small" variant="outlined" onClick={onOpen}>查看影片</Button>}
           {item.supportedActions.map((action) => <Tooltip key={action.label} title={action.disabledReason ?? ''}>
-            <span><Button size="small" variant={action.primary ? 'contained' : 'outlined'} color={action.color ?? 'primary'} disabled={!action.enabled} onClick={action.kind === 'sync' ? onRepair : action.kind === 'copy-path' ? onCopyPath : onOpenPath}>{action.label}</Button></span>
+            <span><Button size="small" variant={action.primary ? 'contained' : 'outlined'} color={action.color ?? 'primary'} disabled={!action.enabled} onClick={action.kind === 'sync' ? () => onRepair() : action.kind === 'javbus' ? () => onRepair('JavBus') : action.kind === 'copy-path' ? onCopyPath : onOpenPath}>{action.label}</Button></span>
           </Tooltip>)}
           {item.unsupportedActions.map((action) => <Tooltip key={action.label} title={action.reason}>
             <span><Button size="small" color="inherit" disabled>{action.label}</Button></span>
@@ -372,7 +372,7 @@ interface ProblemItem {
 
 interface ProblemAction {
   label: string
-  kind: 'sync' | 'copy-path' | 'open-path'
+  kind: 'sync' | 'javbus' | 'copy-path' | 'open-path'
   enabled: boolean
   primary?: boolean
   color?: 'primary' | 'inherit'
@@ -507,11 +507,16 @@ function actionsFor(item: MaintenanceIssue, type: ProblemType) {
   const hasPath = Boolean(item.path)
   const supported: ProblemAction[] = [
     { label: '重新同步', kind: 'sync', enabled: hasMovie && canSyncIssue(type), primary: true, disabledReason: '当前问题暂不支持通过元数据同步直接处理' },
+    { label: '使用 JavBus 补充', kind: 'javbus', enabled: hasMovie && canJavBusRepair(type), disabledReason: 'JavBus 仅用于补充缺失元数据和封面' },
     { label: '打开所在文件夹', kind: 'open-path', enabled: hasPath, color: 'inherit', disabledReason: '没有可打开的相关路径' },
     { label: '复制路径', kind: 'copy-path', enabled: hasPath, color: 'inherit', disabledReason: '没有可复制的相关路径' },
   ]
   const unsupported: UnsupportedProblemAction[] = unsupportedActionsFor(type)
   return { supported, unsupported }
+}
+
+function canJavBusRepair(type: ProblemType) {
+  return ['missing-cover', 'missing-directors', 'missing-actors', 'missing-series', 'missing-studios', 'missing-tags', 'missing-description'].includes(type)
 }
 
 function unsupportedActionsFor(type: ProblemType): UnsupportedProblemAction[] {

@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Features
+
+- 恢复并接入 JavBus 作为可选元数据来源，复用现有同步任务、图片下载、NFO 和非破坏写入管线。
+- 插件中心新增 JavBus 设置：启用、优先级、Base URL、超时、重试、Cookie、同步封面和连接测试。
+- 数据中心“问题”页对缺封面、缺演员、缺导演、缺系列、缺厂商、缺标签和缺简介显示“使用 JavBus 补充”入口，任务继续进入任务中心。
+
 ### UI Improvements
 
 - 元数据中心、诊断中心和重复影片统一归并为“数据中心”，左侧工具区只保留一个数据维护入口。
@@ -16,6 +22,7 @@
 
 - 旧 `/metadata`、`/diagnostics`、`/duplicates`、`/maintenance` 路由保留兼容重定向，不删除用户数据，不修改数据库 Schema。
 - 本轮不修改详情页、数据库 Schema、Safe Delete 工作流或重复影片算法。
+- JavBus Cookie 不写入日志，不进入示例配置；字段合并继续保护评分、收藏、自定义标签、播放记录和已有手工数据。
 
 ### Bug Fixes
 
