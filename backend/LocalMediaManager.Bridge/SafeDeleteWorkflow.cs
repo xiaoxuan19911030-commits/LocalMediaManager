@@ -118,7 +118,9 @@ public sealed class SafeDeleteWorkflowService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await RecoverInterruptedAsync(stoppingToken);
+        try { await RecoverInterruptedAsync(stoppingToken); }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+        catch (Exception error) { Console.Error.WriteLine($"Safe delete recovery skipped: {error}"); }
         while (!stoppingToken.IsCancellationRequested) {
             try {
                 long? taskId = await ClaimAsync(stoppingToken);

@@ -46,7 +46,9 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await RecoverInterruptedScansAsync(stoppingToken);
+        try { await RecoverInterruptedScansAsync(stoppingToken); }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+        catch (Exception error) { Console.Error.WriteLine($"Library scan recovery skipped: {error}"); }
         while (!stoppingToken.IsCancellationRequested) {
             try {
                 long? taskId = await ClaimScanAsync(stoppingToken);

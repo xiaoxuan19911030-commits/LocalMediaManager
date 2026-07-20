@@ -24,7 +24,9 @@ public sealed class FileOrganizerService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await RecoverInterruptedAsync(stoppingToken);
+        try { await RecoverInterruptedAsync(stoppingToken); }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+        catch (Exception error) { Console.Error.WriteLine($"File organizer recovery skipped: {error}"); }
         while (!stoppingToken.IsCancellationRequested) {
             try {
                 long? taskId = await ClaimAsync(stoppingToken);

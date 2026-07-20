@@ -263,7 +263,9 @@ public sealed class MetadataSyncExecutor(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await RecoverInterruptedAsync(stoppingToken);
+        try { await RecoverInterruptedAsync(stoppingToken); }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+        catch (Exception error) { Console.Error.WriteLine($"Metadata sync recovery skipped: {error}"); }
         var running = new List<Task>();
         while (!stoppingToken.IsCancellationRequested) {
             try {
