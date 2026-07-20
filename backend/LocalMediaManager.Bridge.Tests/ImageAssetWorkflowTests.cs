@@ -154,7 +154,7 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
     [Fact]
     public async Task LockPersistsAndCacheCleanupNeverDeletesSource()
     {
-        string source = Path.Combine(ImageRoot, "BigPic", "LOCK-001.png");
+        string source = Path.Combine(root, "MediaStorage", "Covers", "LOCK-001", "LOCK-001.png");
         Directory.CreateDirectory(Path.GetDirectoryName(source)!);
         await File.WriteAllBytesAsync(source, CreatePng(80, 120, SKColors.Orange));
         await using (SqliteConnection connection = await Open()) {
@@ -179,7 +179,7 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
     [Fact]
     public async Task RebuildTaskImportsLegacyActorPortraitAndCompletesThroughTaskCenter()
     {
-        string source = Path.Combine(ImageRoot, "BigPic", "TASK-001.png");
+        string source = Path.Combine(root, "MediaStorage", "Covers", "TASK-001", "TASK-001.png");
         string portrait = Path.Combine(ImageRoot, "Actresses", "7_Alice.png");
         Directory.CreateDirectory(Path.GetDirectoryName(source)!);
         Directory.CreateDirectory(Path.GetDirectoryName(portrait)!);
@@ -211,6 +211,34 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
         Assert.True(await Scalar(verify, $"SELECT COUNT(*) FROM TaskLogs WHERE TaskId={launch.TaskId}") >= 2);
         Assert.True(File.Exists(source));
         Assert.True(File.Exists(portrait));
+    }
+
+    [Fact]
+    public async Task LegacyImageRecordsAreIgnoredForRuntimeDisplay()
+    {
+        string legacy = Path.Combine(ImageRoot, "BigPic", "OLD-001.png");
+        string current = Path.Combine(root, "MediaStorage", "Covers", "OLD-001", "OLD-001.png");
+        Directory.CreateDirectory(Path.GetDirectoryName(legacy)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(current)!);
+        await File.WriteAllBytesAsync(legacy, CreatePng(80, 120, SKColors.Gray));
+        await File.WriteAllBytesAsync(current, CreatePng(80, 120, SKColors.Goldenrod));
+        await using (SqliteConnection connection = await Open()) {
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES(20,'OLD-001','Old',0,0,'pending','Test',$at,$at)", ("$at", at));
+            await Execute(connection, "INSERT INTO Images(Id,MovieId,ImageType,FilePath,IsPrimary,SourceProvider,CreatedAt,UpdatedAt,Ownership,IsLocked,IsDerived,ValidationStatus) VALUES(201,20,'Poster',$path,1,'LegacyFile',$at,$at,'Legacy',0,0,'Unknown')", ("$path", legacy), ("$at", at));
+            await Execute(connection, "INSERT INTO Images(Id,MovieId,ImageType,FilePath,IsPrimary,SourceProvider,CreatedAt,UpdatedAt,Ownership,IsLocked,IsDerived,ValidationStatus) VALUES(202,20,'Poster',$path,1,'MetaTube',$at,$at,'Provider',0,0,'Unknown')", ("$path", current), ("$at", at));
+        }
+        var service = new ImageAssetService(Database, ImageRoot);
+
+        IReadOnlyList<ImageAssetDto> assets = await service.ReadMovieAssetsAsync(20, "http://localhost");
+        ImageAssetContent? oldAsset = await service.ResolveAssetAsync(201);
+        ImageAssetContent? currentAsset = await service.ResolveMovieAsync(20, "original");
+
+        Assert.Single(assets);
+        Assert.Equal(202, assets[0].Id);
+        Assert.Null(oldAsset);
+        Assert.NotNull(currentAsset);
+        Assert.Equal(current, currentAsset!.Path);
     }
 
     [Fact]

@@ -16,6 +16,7 @@ public static class MaintenanceReader
     private static readonly string[] VideoExtensions = [".mp4",".mkv",".avi",".wmv",".mov",".ts",".m2ts",".flv",".webm",".vob",".mpg",".mpeg"];
     private static readonly string[] SidecarExtensions = [".jpg",".jpeg",".png",".webp",".gif",".nfo",".srt",".ass",".ssa",".vtt"];
     private const int FileSystemScanBudgetMs = 3500;
+    private static string ActiveImageSql(string alias) => $"COALESCE({alias}.SourceProvider,'')<>'LegacyFile' AND NOT (COALESCE({alias}.FilePath,'') LIKE '%JVDIO%' OR COALESCE({alias}.FilePath,'') LIKE '%Jvedio%' OR COALESCE({alias}.FilePath,'') LIKE '%BigPic%' OR COALESCE({alias}.FilePath,'') LIKE '%SmallPic%' OR COALESCE({alias}.FilePath,'') LIKE '%ExtraPic%')";
 
     public static async Task<MaintenanceReportDto> ReadAsync(string databasePath, string imageRoot, string bridgeUrl, int limit, int offset)
     {
@@ -31,7 +32,7 @@ public static class MaintenanceReader
             issues.Add(new("图片缓存失效", "warning", "图片缓存失效", "缓存记录对应的文件不存在或超出缓存目录。", null, cache));
         DuplicateResultsDto duplicates = await ProductReader.ReadDuplicateResultsAsync(databasePath, "all", 100);
         long duplicateMovies = duplicates.Groups.SelectMany(group => group.Items.Select(item => item.MovieId)).Distinct().LongCount();
-        long missingImages = await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id)");
+        long missingImages = await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")})");
         long missingNfo = await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies WHERE trim(COALESCE(NfoPath,''))=''");
         long missingMetadata = await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies WHERE COALESCE(IsScraped,0)=0 OR trim(COALESCE(Description,''))=''");
         long problemMovies = issues.Where(item => item.MovieId.HasValue).Select(item => item.MovieId!.Value).Distinct().LongCount();
@@ -43,12 +44,12 @@ public static class MaintenanceReader
     private static async Task AddMovieIssuesAsync(SqliteConnection connection, List<MaintenanceIssueDto> issues)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
             SELECT m.Id,COALESCE(m.Code,''),COALESCE(m.Title,''),COALESCE(f.FilePath,''),COALESCE(f.ExistsState,''),
                    COALESCE(m.NfoPath,''),COALESCE(m.IsScraped,0),COALESCE(m.Description,''),
-                   EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND i.ImageType IN ('Poster','GeneratedCard','Thumbnail')),
-                   EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND i.ImageType IN ('Fanart','BigPic')),
-                   EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND i.ImageType IN ('Preview','ExtraPic','Screenshot')),
+                   EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType IN ('Poster','GeneratedCard','Thumbnail')),
+                   EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType IN ('Fanart','BigPic')),
+                   EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType IN ('Preview','ExtraPic','Screenshot')),
                    EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id),
                    EXISTS(SELECT 1 FROM MovieTags mt WHERE mt.MovieId=m.Id)
               FROM Movies m LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video'
@@ -64,8 +65,8 @@ public static class MaintenanceReader
             if (reader.GetString(5).Length == 0) issues.Add(new("NFO 缺失", "warning", "NFO 缺失", name, id, path));
             if (reader.GetInt64(6) == 0 || reader.GetString(7).Trim().Length == 0) issues.Add(new("Metadata 状态异常", "warning", "Metadata 状态异常", name, id, path));
             if (reader.GetInt64(8) == 0) issues.Add(new("封面缺失", "warning", "封面缺失", name, id, path));
-            if (reader.GetInt64(9) == 0) issues.Add(new("Fanart 缺失", "warning", "Fanart 缺失", name, id, path));
-            if (reader.GetInt64(10) == 0) issues.Add(new("ExtraPic 缺失", "warning", "ExtraPic 缺失", name, id, path));
+            if (reader.GetInt64(9) == 0) issues.Add(new("背景图缺失", "warning", "背景图缺失", name, id, path));
+            if (reader.GetInt64(10) == 0) issues.Add(new("预览图缺失", "warning", "预览图缺失", name, id, path));
             if (reader.GetInt64(11) == 0) issues.Add(new("演员缺失", "warning", "演员缺失", name, id, path));
             if (reader.GetInt64(12) == 0) issues.Add(new("标签缺失", "warning", "标签缺失", name, id, path));
         }
@@ -77,7 +78,7 @@ public static class MaintenanceReader
     {
         var result = new List<MaintenanceIssueDto>();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT a.Id,a.Name FROM Actors a WHERE NOT EXISTS(SELECT 1 FROM Images i WHERE i.ActorId=a.Id AND i.ImageType='ActorAvatar') LIMIT 200";
+        command.CommandText = $"SELECT a.Id,a.Name FROM Actors a WHERE NOT EXISTS(SELECT 1 FROM Images i WHERE i.ActorId=a.Id AND i.ImageType='ActorAvatar' AND {ActiveImageSql("i")}) LIMIT 200";
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync()) result.Add(new("演员头像缺失", "info", "演员头像缺失", reader.GetString(1), null, null));
         return result;

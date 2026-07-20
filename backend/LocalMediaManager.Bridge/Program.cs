@@ -521,9 +521,9 @@ static string? FindCover(string imageRoot, string code)
 {
     if (string.IsNullOrWhiteSpace(code) || Path.GetFileName(code) != code)
         return null;
-    foreach (string folder in new[] { "CardCovers", "SmallPic" })
+    foreach (string folder in new[] { "Covers", "Posters", "Thumbnails", "WallCrops" })
         foreach (string extension in new[] { ".jpg", ".jpeg", ".png", ".webp" }) {
-            string candidate = Path.Combine(imageRoot, folder, code + extension);
+            string candidate = Path.Combine(imageRoot, folder, code, code + extension);
             if (File.Exists(candidate))
                 return candidate;
         }

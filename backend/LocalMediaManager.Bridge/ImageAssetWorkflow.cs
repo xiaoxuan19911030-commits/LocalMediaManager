@@ -76,17 +76,21 @@ public static class ImageFileValidator
 public sealed class ImageAssetService(string databasePath, string imageRoot)
 {
     private string CacheRoot => Path.GetFullPath(Path.Combine(imageRoot, ".lmm-cache", "thumbnails"));
+    private const string ActiveImagePredicate = "COALESCE(SourceProvider,'')<>'LegacyFile' AND NOT (COALESCE(FilePath,'') LIKE '%JVDIO%' OR COALESCE(FilePath,'') LIKE '%Jvedio%' OR COALESCE(FilePath,'') LIKE '%BigPic%' OR COALESCE(FilePath,'') LIKE '%SmallPic%' OR COALESCE(FilePath,'') LIKE '%ExtraPic%')";
+    private const string ActiveCachePredicate = "NOT (COALESCE(SourceImagePath,'') LIKE '%JVDIO%' OR COALESCE(SourceImagePath,'') LIKE '%Jvedio%' OR COALESCE(SourceImagePath,'') LIKE '%BigPic%' OR COALESCE(SourceImagePath,'') LIKE '%SmallPic%' OR COALESCE(SourceImagePath,'') LIKE '%ExtraPic%')";
 
     public async Task<IReadOnlyList<ImageAssetDto>> ReadMovieAssetsAsync(long movieId, string bridgeUrl,
         CancellationToken cancellationToken = default)
     {
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadOnly, cancellationToken);
         await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
             SELECT Id,ImageType,Ownership,IsLocked,IsDerived,IsPrimary,ValidationStatus,
                    COALESCE(Width,0),COALESCE(Height,0),COALESCE(FileSize,0),SourceProvider,DownloadedAt
                    ,FilePath
-              FROM Images WHERE MovieId=$movie ORDER BY IsLocked DESC,IsPrimary DESC,Id
+              FROM Images
+             WHERE MovieId=$movie AND {ActiveImagePredicate}
+             ORDER BY IsLocked DESC,IsPrimary DESC,Id
             """;
         command.Parameters.AddWithValue("$movie", movieId);
         var items = new List<ImageAssetDto>();
@@ -108,9 +112,11 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadOnly, cancellationToken);
         var assets = new List<ImageAssetStatusDto>();
         await using (SqliteCommand command = connection.CreateCommand()) {
-            command.CommandText = """
+            command.CommandText = $"""
                 SELECT Id,ImageType,FilePath,ValidationStatus
-                  FROM Images WHERE MovieId=$movie ORDER BY IsLocked DESC,IsPrimary DESC,Id
+                  FROM Images
+                 WHERE MovieId=$movie AND {ActiveImagePredicate}
+                 ORDER BY IsLocked DESC,IsPrimary DESC,Id
                 """;
             command.Parameters.AddWithValue("$movie", movieId);
             await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -127,7 +133,7 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
         }
         long invalidCache = 0;
         await using (SqliteCommand cache = connection.CreateCommand()) {
-            cache.CommandText = "SELECT CachePath FROM ImageCacheEntries WHERE MovieId=$movie";
+            cache.CommandText = $"SELECT CachePath FROM ImageCacheEntries WHERE MovieId=$movie AND {ActiveCachePredicate}";
             cache.Parameters.AddWithValue("$movie", movieId);
             await using SqliteDataReader reader = await cache.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken)) {
@@ -151,17 +157,16 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
         string normalized = variant.Equals("thumbnail", StringComparison.OrdinalIgnoreCase) ? "thumbnail" : "original";
         string normalizedSource = NormalizeSource(source);
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, cancellationToken);
-        if (normalized == "thumbnail") {
-            ImageAssetContent? cached = await ReadCachedAsync(connection, movieId, cancellationToken);
-            if (cached is not null && normalizedSource == "poster") return cached;
-        }
-
         (long Id, string Path, string? ContentType)? image = await ReadBestSourceAsync(connection, movieId, normalized, normalizedSource, cancellationToken);
         if (image is null) return null;
         ImageValidationResult validation = await ImageFileValidator.ValidateAsync(image.Value.Path, null, cancellationToken);
         await UpdateValidationAsync(connection, image.Value.Id, validation, cancellationToken);
         if (!validation.Valid) return null;
         if (normalized == "original") return new(image.Value.Path, validation.ContentType!);
+        if (normalizedSource == "poster") {
+            ImageAssetContent? cached = await ReadCachedAsync(connection, movieId, image.Value.Path, cancellationToken);
+            if (cached is not null) return cached;
+        }
         return await CreateThumbnailAsync(connection, movieId, image.Value.Id, image.Value.Path, validation, cancellationToken);
     }
 
@@ -169,7 +174,7 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
     {
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, cancellationToken);
         await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT FilePath FROM Images WHERE Id=$id";
+        command.CommandText = $"SELECT FilePath FROM Images WHERE Id=$id AND {ActiveImagePredicate}";
         command.Parameters.AddWithValue("$id", imageId);
         string? path = (await command.ExecuteScalarAsync(cancellationToken))?.ToString();
         if (string.IsNullOrWhiteSpace(path)) return null;
@@ -182,7 +187,7 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
     {
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, cancellationToken);
         await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT Id,FilePath FROM Images WHERE ActorId=$id AND FilePath IS NOT NULL ORDER BY IsLocked DESC,IsPrimary DESC,Id LIMIT 1";
+        command.CommandText = $"SELECT Id,FilePath FROM Images WHERE ActorId=$id AND FilePath IS NOT NULL AND {ActiveImagePredicate} ORDER BY IsLocked DESC,IsPrimary DESC,Id LIMIT 1";
         command.Parameters.AddWithValue("$id", actorId);
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
@@ -252,7 +257,7 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
     {
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadOnly, cancellationToken);
         await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT DISTINCT MovieId FROM Images WHERE MovieId IS NOT NULL AND IsDerived=0 AND FilePath IS NOT NULL ORDER BY MovieId";
+        command.CommandText = $"SELECT DISTINCT MovieId FROM Images WHERE MovieId IS NOT NULL AND IsDerived=0 AND FilePath IS NOT NULL AND {ActiveImagePredicate} ORDER BY MovieId";
         var result = new List<long>();
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) result.Add(reader.GetInt64(0));
@@ -316,11 +321,12 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
         return imported;
     }
 
-    private async Task<ImageAssetContent?> ReadCachedAsync(SqliteConnection connection, long movieId, CancellationToken token)
+    private async Task<ImageAssetContent?> ReadCachedAsync(SqliteConnection connection, long movieId, string sourcePath, CancellationToken token)
     {
         await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT Id,CachePath FROM ImageCacheEntries WHERE MovieId=$movie AND CacheKind='CardThumbnail' ORDER BY Id DESC LIMIT 1";
+        command.CommandText = "SELECT Id,CachePath FROM ImageCacheEntries WHERE MovieId=$movie AND CacheKind='CardThumbnail' AND SourceImagePath=$source ORDER BY Id DESC LIMIT 1";
         command.Parameters.AddWithValue("$movie", movieId);
+        command.Parameters.AddWithValue("$source", sourcePath);
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(token);
         if (!await reader.ReadAsync(token)) return null;
         long id = reader.GetInt64(0); string path = reader.GetString(1);
@@ -339,9 +345,10 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
         long movieId, string variant, string source, CancellationToken token)
     {
         await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
             SELECT Id,FilePath,ContentType FROM Images
              WHERE MovieId=$movie AND FilePath IS NOT NULL
+               AND {ActiveImagePredicate}
                AND (IsDerived=0 OR ($variant='thumbnail' AND ImageType='GeneratedCard'))
                AND ($source<>'fanart' OR ImageType IN ('Fanart','BigPic'))
                AND ($source<>'poster' OR ImageType IN ('Poster','GeneratedCard','Thumbnail'))

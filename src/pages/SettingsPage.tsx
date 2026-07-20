@@ -753,7 +753,7 @@ function confirmDescription(value?: string) {
 }
 function confirmWarnings(value?: string) {
   if (value === 'restore') return ['恢复前会先创建当前状态安全备份。', '应用可能需要重启。', '输入 CONFIRM 后才会创建计划。']
-  if (value === 'cache') return ['只删除 .lmm-cache 中的生成缓存。', '不删除 Poster、Fanart、ExtraPic。']
+  if (value === 'cache') return ['只删除 .lmm-cache 中的生成缓存。', '不删除海报、背景图、预览图。']
   return []
 }
 
@@ -763,12 +763,12 @@ function buildMediaStoragePreview(settings: MediaStorageSettings) {
   const root = settings.rootPath || '<RootPath>'
   const join = (...parts: string[]) => parts.map(part => part.trim().replace(/^\\+|\\+$/g, '')).filter(Boolean).join('\\')
   return [
-    { label: 'WallCrop', path: join(root, settings.wallCropsDirectory, movieFolder, `${fileName}.jpg`) },
-    { label: 'Poster', path: join(root, settings.postersDirectory, movieFolder, `${fileName}.jpg`) },
-    { label: 'Thumbnail', path: join(root, settings.thumbnailsDirectory, movieFolder, `${fileName}.jpg`) },
-    { label: 'Fanart', path: join(root, settings.fanartDirectory, movieFolder, `${fileName}.jpg`) },
-    { label: 'Preview', path: join(root, settings.previewsDirectory, movieFolder, `${fileName}.jpg`) },
-    { label: 'Screenshot', path: join(root, settings.screenshotsDirectory, movieFolder, `${fileName}_001.jpg`) },
+    { label: '卡图裁切', path: join(root, settings.wallCropsDirectory, movieFolder, `${fileName}.jpg`) },
+    { label: '海报', path: join(root, settings.postersDirectory, movieFolder, `${fileName}.jpg`) },
+    { label: '缩略图', path: join(root, settings.thumbnailsDirectory, movieFolder, `${fileName}.jpg`) },
+    { label: '背景图', path: join(root, settings.fanartDirectory, movieFolder, `${fileName}.jpg`) },
+    { label: '预览图', path: join(root, settings.previewsDirectory, movieFolder, `${fileName}.jpg`) },
+    { label: '截图', path: join(root, settings.screenshotsDirectory, movieFolder, `${fileName}_001.jpg`) },
     { label: 'GIF', path: join(root, settings.gifDirectory, movieFolder, `${fileName}_001.gif`) },
     { label: 'NFO', path: join(root, settings.nfoDirectory, movieFolder, `${fileName}.nfo`) },
   ]

@@ -919,9 +919,10 @@ public static class ProductReader
         await using var connection = await OpenAsync(databasePath);
         return await TableExistsAsync(connection, table);
     }
-    private static string MissingCoverSql() => "NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND i.ImageType IN ('Poster','GeneratedCard','Thumbnail'))";
-    private static string MissingFanartSql() => "NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND i.ImageType IN ('Fanart','BigPic'))";
-    private static string MissingPreviewSql() => "NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND i.ImageType IN ('Preview','ExtraPic','Screenshot'))";
+    private static string ActiveImageSql(string alias) => $"COALESCE({alias}.SourceProvider,'')<>'LegacyFile' AND NOT (COALESCE({alias}.FilePath,'') LIKE '%JVDIO%' OR COALESCE({alias}.FilePath,'') LIKE '%Jvedio%' OR COALESCE({alias}.FilePath,'') LIKE '%BigPic%' OR COALESCE({alias}.FilePath,'') LIKE '%SmallPic%' OR COALESCE({alias}.FilePath,'') LIKE '%ExtraPic%')";
+    private static string MissingCoverSql() => $"NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType IN ('Poster','GeneratedCard','Thumbnail'))";
+    private static string MissingFanartSql() => $"NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType IN ('Fanart','BigPic'))";
+    private static string MissingPreviewSql() => $"NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType IN ('Preview','ExtraPic','Screenshot'))";
     private static string MissingDirectorSql(bool hasDirectors) => hasDirectors ? "NOT EXISTS(SELECT 1 FROM MovieDirectors md WHERE md.MovieId=m.Id)" : "1=1";
     private static string MetadataColumnsSql(bool hasDirectors) => $"""
         CASE WHEN COALESCE(m.IsScraped,0)=1 THEN 1 ELSE 0 END AS MetadataScraped,
