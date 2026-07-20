@@ -44,7 +44,7 @@ public sealed record MovieDetailDto(long Id, string? Code, string? Title, string
 public sealed record EntityCardDto(long Id, string Name, long MovieCount, string? ImageUrl);
 public sealed record ActorDetailDto(long Id, string Name, string? Alias, int? Gender, string? BirthDate, string? Description);
 public sealed record EntityPageDto(IReadOnlyList<EntityCardDto> Items, long Total, int Limit, int Offset);
-public sealed record RandomMovieDto(MediaCardDto? Item, long Total);
+public sealed record RandomMovieDto(MediaCardDto? Item, IReadOnlyList<MediaCardDto> Items, long Total, int Limit);
 internal sealed record AdvancedSearchPlan(string Condition, IReadOnlyList<(string Name, object Value)> Parameters, string OrderBy);
 internal sealed record EntityConfig(string Table, string Relation, string Key, string EntityCondition, Func<long, string?> ImageUrl)
 {
@@ -358,15 +358,43 @@ public static class ProductReader
 
     public static async Task<RandomMovieDto> ReadRandomMovieAsync(string databasePath, string bridgeUrl,
         string query, long? actorId, long? tagId, long? directorId, long? movieTagId, long? customTagId, long? seriesId, bool? favorite, bool? watched, double ratingMin, string ratingFilter, string metadata,
-        string fileStatus, string metadataStatus, long? libraryId, string sort, long? genreId = null, long? studioId = null)
+        string fileStatus, string metadataStatus, long? libraryId, string sort, int limit = 24, long? genreId = null, long? studioId = null)
     {
         AdvancedSearchPlan plan = await BuildAdvancedSearchPlanAsync(databasePath, query, actorId, tagId, directorId, movieTagId, customTagId, seriesId, favorite, watched,
             ratingMin, ratingFilter, metadata, fileStatus, metadataStatus, libraryId, sort, genreId, studioId);
         long total = await CountFilteredMoviesAsync(databasePath, plan.Condition, plan.Parameters);
-        if (total <= 0) return new(null, 0);
-        int offset = checked((int)Random.Shared.NextInt64(total));
-        MediaPageDto page = await ReadFilteredCardsAsync(databasePath, bridgeUrl, plan.Condition, plan.Parameters, plan.OrderBy, 1, offset);
-        return new(page.Items.FirstOrDefault(), total);
+        int safeLimit = Math.Clamp(limit, 1, 96);
+        if (total <= 0) return new(null, Array.Empty<MediaCardDto>(), 0, safeLimit);
+
+        int searchableTotal = checked((int)Math.Min(total, int.MaxValue));
+        int take = Math.Min(safeLimit, searchableTotal);
+        var offsets = new List<int>(take);
+        if (searchableTotal <= take) {
+            offsets.AddRange(Enumerable.Range(0, searchableTotal));
+        } else {
+            var seen = new HashSet<int>();
+            while (offsets.Count < take) {
+                int offset = Random.Shared.Next(searchableTotal);
+                if (seen.Add(offset)) offsets.Add(offset);
+            }
+        }
+        Shuffle(offsets);
+
+        var items = new List<MediaCardDto>(take);
+        foreach (int offset in offsets) {
+            MediaPageDto page = await ReadFilteredCardsAsync(databasePath, bridgeUrl, plan.Condition, plan.Parameters, plan.OrderBy, 1, offset);
+            MediaCardDto? item = page.Items.FirstOrDefault();
+            if (item is not null) items.Add(item);
+        }
+        return new(items.FirstOrDefault(), items, total, safeLimit);
+    }
+
+    private static void Shuffle<T>(IList<T> values)
+    {
+        for (int i = values.Count - 1; i > 0; i--) {
+            int j = Random.Shared.Next(i + 1);
+            (values[i], values[j]) = (values[j], values[i]);
+        }
     }
 
     private static async Task<AdvancedSearchPlan> BuildAdvancedSearchPlanAsync(string databasePath,

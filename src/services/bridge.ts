@@ -104,8 +104,8 @@ export const bridge = {
   executeOrganizer: (taskId: number, confirmationToken: string) => request<OrganizerLaunchResult>(`/api/organizer/${taskId}/execute`, { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
   previewDuplicateDelete: (groups: DuplicateDeleteGroupCommand[], mode: 'metadata' | 'media' = 'media', deleteDatabaseInfo = true) =>
     request<DuplicateDeletePreview>('/api/organizer/duplicates/preview-delete', { method: 'POST', body: JSON.stringify({ groups, mode, deleteDatabaseInfo }) }),
-  executeDuplicateDelete: (groups: DuplicateDeleteGroupCommand[], mode: 'metadata' | 'media', deleteDatabaseInfo: boolean, confirmationToken: string, confirmOriginalMedia = false, confirmCount?: number) =>
-    request<SafeDeleteLaunchResult>('/api/organizer/duplicates/execute-delete', { method: 'POST', body: JSON.stringify({ groups, mode, deleteDatabaseInfo, confirmationToken, confirmOriginalMedia, confirmCount }) }),
+  executeDuplicateDelete: (groups: DuplicateDeleteGroupCommand[], mode: 'metadata' | 'media', deleteDatabaseInfo: boolean, confirmationToken: string, confirmOriginalMedia = false) =>
+    request<SafeDeleteLaunchResult>('/api/organizer/duplicates/execute-delete', { method: 'POST', body: JSON.stringify({ groups, mode, deleteDatabaseInfo, confirmationToken, confirmOriginalMedia }) }),
   syncMovie: (id: number) => request<ScanLaunchResult>(`/api/videos/${id}/sync`, { method: 'POST' }),
   rescrapeMovie: (id: number) => request<ScanLaunchResult>(`/api/videos/${id}/rescrape`, { method: 'POST' }),
   neighbors: (id: number, search = '', sort = 'newest') => request<NeighborResult>(`/api/videos/${id}/neighbors?${new URLSearchParams({ search, sort })}`),
@@ -139,7 +139,7 @@ export const bridge = {
   advancedSearch: (filters: AdvancedSearchFilters) => {
     return request<MediaPageResult>(`/api/search/advanced?${searchParams(filters)}`)
   },
-  randomMovie: (filters: AdvancedSearchFilters) => request<RandomMovieResult>(`/api/search/random?${searchParams(filters, false)}`),
+  randomMovie: (filters: AdvancedSearchFilters) => request<RandomMovieResult>(`/api/search/random?${searchParams(filters)}`),
   metadataOverview: () => request<MetadataOverview>('/api/metadata/overview'),
   diagnostics: () => request<DiagnosticsResult>('/api/diagnostics'),
   duplicates: (rule: 'all' | 'code' | 'path' | 'hash' = 'all', limit = 100) => request<DuplicateResults>(`/api/duplicates?${new URLSearchParams({ rule, limit: String(limit) })}`),
@@ -154,8 +154,8 @@ export const bridge = {
   setBatchRating: (movieIds: number[], rating?: number, clearRating = false) => request<MutationResult>('/api/videos/batch/rating', { method: 'POST', body: JSON.stringify({ movieIds, rating: rating ?? null, clearRating }) }),
   createBatchSync: (movieIds: number[]) => request<{ count: number; message: string }>('/api/videos/batch/sync', { method: 'POST', body: JSON.stringify(movieIds) }),
   previewSafeDelete: (value: SafeDeletePreviewCommand) => request<SafeDeletePreview>('/api/delete/preview', { method: 'POST', body: JSON.stringify(value) }),
-  executeSafeDelete: (preview: SafeDeletePreviewCommand, confirmationToken: string, confirmOriginalMedia = false, confirmCount?: number) =>
-    request<SafeDeleteLaunchResult>('/api/delete/execute', { method: 'POST', body: JSON.stringify({ ...preview, confirmationToken, confirmOriginalMedia, confirmCount }) }),
+  executeSafeDelete: (preview: SafeDeletePreviewCommand, confirmationToken: string, confirmOriginalMedia = false) =>
+    request<SafeDeleteLaunchResult>('/api/delete/execute', { method: 'POST', body: JSON.stringify({ ...preview, confirmationToken, confirmOriginalMedia }) }),
   createTag: (value: { name: string; description?: string; color?: string }) => request<MutationResult & { id: number }>('/api/tags', { method: 'POST', body: JSON.stringify(value) }),
   updateTag: (tagId: number, value: { name: string; description?: string; color?: string }) => request<MutationResult>(`/api/tags/${tagId}`, { method: 'PUT', body: JSON.stringify(value) }),
   previewDeleteTag: (tagId: number) => request<ImpactPreview>(`/api/tags/${tagId}/delete-preview`),

@@ -232,16 +232,17 @@ export function MovieWall({
   const openRandomMovie = () => {
     if (randomLoading) return
     setRandomLoading(true)
-    bridge.randomMovie(buildSearchFilters(1, 0))
+    bridge.randomMovie(buildSearchFilters(pageSize, 0))
       .then((result) => {
-        if (!result.item) {
+        if (result.items.length === 0) {
           setNotice('当前条件下没有可随机的影片')
           return
         }
-        setItems([result.item])
-        setTotal(1)
+        setItems(result.items)
+        setTotal(result.total)
         setPage(1)
-        setNotice(`已随机到：${result.item.code || result.item.title || result.item.dataId}`)
+        const first = result.items[0]
+        setNotice(`已随机显示 ${result.items.length} 部影片${first ? `，首部：${first.code || first.title || first.dataId}` : ''}`)
       })
       .catch((reason: Error) => setNotice(reason.message))
       .finally(() => setRandomLoading(false))

@@ -249,8 +249,10 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
         RandomMovieDto single = await RandomMovie(query: "SONE-105");
 
         Assert.Null(empty.Item);
+        Assert.Empty(empty.Items);
         Assert.Equal(0, empty.Total);
         Assert.Equal(2, single.Item?.DataId);
+        Assert.Equal([2], single.Items.Select(item => item.DataId).ToArray());
         Assert.Equal(1, single.Total);
     }
 
@@ -278,12 +280,13 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
     private Task<RandomMovieDto> RandomMovie(string query = "", long? directorId = null, long? movieTagId = null, long? customTagId = null, long? seriesId = null,
         bool? favorite = null, string ratingFilter = "all", long? libraryId = null, long? genreId = null, long? studioId = null) =>
         ProductReader.ReadRandomMovieAsync(Database, "http://localhost",
-            query, null, null, directorId, movieTagId, customTagId, seriesId, favorite, null, 0, ratingFilter, "all", "all", "all", libraryId, "newest", genreId, studioId);
+            query, null, null, directorId, movieTagId, customTagId, seriesId, favorite, null, 0, ratingFilter, "all", "all", "all", libraryId, "newest", 24, genreId, studioId);
 
     private static Task AssertRandomInSet(RandomMovieDto result, long[] expected)
     {
         Assert.NotNull(result.Item);
         Assert.Contains(result.Item!.DataId, expected);
+        Assert.Equal(expected.Order().ToArray(), result.Items.Select(item => item.DataId).Order().ToArray());
         Assert.Equal(expected.Length, result.Total);
         return Task.CompletedTask;
     }

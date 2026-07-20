@@ -1,5 +1,5 @@
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded'
-import { Alert, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControlLabel, Stack, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControlLabel, Stack, Typography } from '@mui/material'
 import { useMemo, useState } from 'react'
 import type { SafeDeleteLaunchResult, SafeDeletePreview, SafeDeletePreviewCommand } from '@/types/media'
 import { bridge } from '@/services/bridge'
@@ -17,19 +17,17 @@ export function SafeDeleteDialog({ preview, command, onClose, onLaunched }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [confirmOriginal, setConfirmOriginal] = useState(false)
-  const [countText, setCountText] = useState('')
   const canSubmit = useMemo(() => {
     if (!preview || !command) return false
     if (preview.deletesOriginalMedia && !confirmOriginal) return false
-    if (preview.deletesOriginalMedia && preview.movieCount > 1 && Number(countText) !== preview.movieCount) return false
     return true
-  }, [command, confirmOriginal, countText, preview])
+  }, [command, confirmOriginal, preview])
 
   const execute = async () => {
     if (!preview || !command) return
     setBusy(true); setError('')
     try {
-      const result = await bridge.executeSafeDelete(command, preview.confirmationToken, confirmOriginal, preview.movieCount > 1 ? Number(countText) : undefined)
+      const result = await bridge.executeSafeDelete(command, preview.confirmationToken, confirmOriginal)
       onLaunched(result)
     } catch (reason) {
       setError((reason as Error).message)
@@ -68,7 +66,6 @@ export function SafeDeleteDialog({ preview, command, onClose, onLaunched }: {
         </Stack>
         {preview.deletesOriginalMedia && <Stack spacing={1}>
           <FormControlLabel control={<Checkbox checked={confirmOriginal} onChange={(_, checked) => setConfirmOriginal(checked)}/>} label="我确认删除原始影片文件"/>
-          {preview.movieCount > 1 && <TextField size="small" label={`输入数量 ${preview.movieCount} 以确认批量删除`} value={countText} onChange={event => setCountText(event.target.value)} />}
         </Stack>}
         {error && <Alert severity="error">{error}</Alert>}
       </Stack>}

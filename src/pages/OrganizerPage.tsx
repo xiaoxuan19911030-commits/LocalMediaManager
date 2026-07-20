@@ -61,7 +61,6 @@ function DuplicateOrganizerView() {
   const [deletePreview, setDeletePreview] = useState<DuplicateDeletePreview>()
   const [deletePlan, setDeletePlan] = useState<DuplicateDeleteGroupCommand[]>([])
   const [confirmOriginal, setConfirmOriginal] = useState(false)
-  const [countText, setCountText] = useState('')
 
   const load = useCallback(() => {
     setData(undefined)
@@ -99,7 +98,6 @@ function DuplicateOrganizerView() {
       setDeletePlan(plan)
       setDeletePreview(preview)
       setConfirmOriginal(false)
-      setCountText('')
     }).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(''))
   }
   const previewAllUnkept = () => {
@@ -110,7 +108,7 @@ function DuplicateOrganizerView() {
   const executeDuplicateDelete = () => {
     if (!deletePreview || busy) return
     setBusy('duplicate-execute')
-    bridge.executeDuplicateDelete(deletePlan, 'media', true, deletePreview.confirmationToken, confirmOriginal, deletePreview.safeDelete.movieCount > 1 ? Number(countText) : undefined)
+    bridge.executeDuplicateDelete(deletePlan, 'media', true, deletePreview.confirmationToken, confirmOriginal)
       .then((result) => {
         setNotice(result.message)
         setDeletePreview(undefined)
@@ -155,7 +153,7 @@ function DuplicateOrganizerView() {
             onOpen={(id) => navigate(`/movies/${id}`)}/>
         })}</Stack>)}
     </WorkspacePage>
-    <DuplicateDeleteDialog preview={deletePreview} busy={Boolean(busy)} confirmOriginal={confirmOriginal} countText={countText} onConfirmOriginal={setConfirmOriginal} onCountText={setCountText} onClose={() => setDeletePreview(undefined)} onExecute={executeDuplicateDelete}/>
+    <DuplicateDeleteDialog preview={deletePreview} busy={Boolean(busy)} confirmOriginal={confirmOriginal} onConfirmOriginal={setConfirmOriginal} onClose={() => setDeletePreview(undefined)} onExecute={executeDuplicateDelete}/>
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>
   </>
 }
@@ -225,18 +223,16 @@ function DuplicateMovieRow({ item, rule, keep, onKeep, onOpen }: { item: Duplica
   </Paper>
 }
 
-function DuplicateDeleteDialog({ preview, busy, confirmOriginal, countText, onConfirmOriginal, onCountText, onClose, onExecute }: {
+function DuplicateDeleteDialog({ preview, busy, confirmOriginal, onConfirmOriginal, onClose, onExecute }: {
   preview?: DuplicateDeletePreview
   busy: boolean
   confirmOriginal: boolean
-  countText: string
   onConfirmOriginal: (value: boolean) => void
-  onCountText: (value: string) => void
   onClose: () => void
   onExecute: () => void
 }) {
   const safe = preview?.safeDelete
-  const canExecute = Boolean(preview?.canExecute && safe && (!safe.deletesOriginalMedia || confirmOriginal) && (!safe.deletesOriginalMedia || safe.movieCount <= 1 || Number(countText) === safe.movieCount))
+  const canExecute = Boolean(preview?.canExecute && safe && (!safe.deletesOriginalMedia || confirmOriginal))
   return <Dialog open={Boolean(preview)} onClose={busy ? undefined : onClose} maxWidth="md" fullWidth>
     <DialogTitle>重复影片 Safe Delete 预览</DialogTitle>
     <DialogContent dividers>
@@ -267,7 +263,6 @@ function DuplicateDeleteDialog({ preview, busy, confirmOriginal, countText, onCo
         </Paper>)}
         {safe.deletesOriginalMedia && <Stack spacing={1}>
           <FormControlLabel control={<Checkbox checked={confirmOriginal} onChange={(_, checked) => onConfirmOriginal(checked)}/>} label="我确认将待处理影片文件移入系统回收站"/>
-          {safe.movieCount > 1 && <TextField size="small" label={`输入数量 ${safe.movieCount} 以确认批量 Safe Delete`} value={countText} onChange={(event) => onCountText(event.target.value)}/>}
         </Stack>}
       </Stack>}
     </DialogContent>

@@ -70,9 +70,6 @@ public sealed class SafeDeleteWorkflowService(
         VerifyToken(preview, executeCommand.ConfirmationToken);
         if (preview.DeletesOriginalMedia && !executeCommand.ConfirmOriginalMedia)
             throw new UnauthorizedAccessException("删除原始影片文件需要额外确认。");
-        if (preview.MovieCount > 1 && preview.DeletesOriginalMedia && executeCommand.ConfirmCount != preview.MovieCount)
-            throw new UnauthorizedAccessException("批量删除影片需要输入正确数量确认。");
-
         string taskType = preview.Mode == "media" ? "DeleteMedia" : "DeleteMetadata";
         string payload = JsonSerializer.Serialize(new SafeDeleteTaskPayload(preview.Mode, preview.DeleteDatabaseInfo,
             preview.Items.Select(item => item.MovieId).ToArray(), preview.Items));

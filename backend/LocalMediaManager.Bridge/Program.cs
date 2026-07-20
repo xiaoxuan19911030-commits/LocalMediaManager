@@ -272,10 +272,10 @@ app.MapGet("/api/search/advanced", async (string? q, long? actorId, long? tagId,
     : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
 
 app.MapGet("/api/search/random", async (string? q, long? actorId, long? tagId, long? directorId, long? movieTagId, long? customTagId, long? genreId, long? seriesId, long? studioId, bool? favorite, bool? watched, double? ratingMin,
-    string? metadata, string? fileStatus, string? metadataStatus, string? ratingFilter, long? libraryId, string? sort) => File.Exists(databasePath)
+    string? metadata, string? fileStatus, string? metadataStatus, string? ratingFilter, long? libraryId, string? sort, int? limit) => File.Exists(databasePath)
     ? Results.Ok(await ProductReader.ReadRandomMovieAsync(databasePath, bridgeUrl, q ?? "", actorId, tagId, directorId, movieTagId, customTagId, seriesId, favorite,
         watched, Math.Clamp(ratingMin ?? 0, 0, 5), ratingFilter ?? "all", metadata ?? "all", fileStatus ?? "all", metadataStatus ?? "all", libraryId, sort ?? "newest",
-        genreId, studioId))
+        Math.Clamp(limit ?? 24, 1, 96), genreId, studioId))
     : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
 
 app.MapGet("/api/metadata/overview", async () => File.Exists(databasePath)

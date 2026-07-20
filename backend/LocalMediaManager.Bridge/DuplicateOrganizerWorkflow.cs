@@ -54,7 +54,7 @@ public sealed class DuplicateOrganizerWorkflowService(string databasePath, SafeD
         await ApplyMergesAsync(preview.Merges, token);
         long[] deleteIds = preview.Merges.SelectMany(merge => merge.DeleteMovieIds).Distinct().Order().ToArray();
         return await safeDelete.ExecuteAsync(new(deleteIds, request.Mode, request.DeleteDatabaseInfo),
-            new(preview.SafeDelete.ConfirmationToken, request.ConfirmOriginalMedia, request.ConfirmCount), token);
+            new(preview.SafeDelete.ConfirmationToken, request.ConfirmOriginalMedia), token);
     }
 
     private async Task<DuplicateMergePreview> BuildMergePreviewAsync(SqliteConnection connection, DuplicateDeleteGroupCommand group, CancellationToken token)

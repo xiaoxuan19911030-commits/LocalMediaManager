@@ -1,6 +1,6 @@
 import EditRoundedIcon from '@mui/icons-material/EditRounded'
-import { Divider, Menu, MenuItem, Snackbar, Stack } from '@mui/material'
-import { useEffect, useMemo, useState, type MouseEvent } from 'react'
+import { Divider, MenuItem, Paper, Snackbar, Stack } from '@mui/material'
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { useSearchParams } from 'react-router'
 import { SafeDeleteDialog } from '@/components/SafeDeleteDialog'
 import { MovieWall, type MovieWallDefaults } from '@/components/workspace/MovieWall'
@@ -39,25 +39,42 @@ export default function MediaPage() {
   const [editMode, setEditMode] = useState(false)
   const [reloadSignal, setReloadSignal] = useState(0)
   const [contextMenu, setContextMenu] = useState<{ mouseX: number; mouseY: number; item: MediaItem }>()
+  const contextMenuRef = useRef<HTMLDivElement>(null)
   const [deletePreview, setDeletePreview] = useState<SafeDeletePreview>()
   const [deleteCommand, setDeleteCommand] = useState<SafeDeletePreviewCommand>()
   const refresh = () => setReloadSignal((value) => value + 1)
   const closeContextMenu = () => setContextMenu(undefined)
   const openContextMenu = (event: MouseEvent, item: MediaItem) => {
     event.preventDefault()
-    setContextMenu(undefined)
-    window.requestAnimationFrame(() => setContextMenu({ mouseX: event.clientX + 2, mouseY: event.clientY - 6, item }))
+    setContextMenu({
+      mouseX: Math.min(event.clientX + 2, window.innerWidth - 180),
+      mouseY: Math.min(event.clientY - 6, window.innerHeight - 260),
+      item,
+    })
   }
   useEffect(() => {
     if (!contextMenu) return
     const close = () => closeContextMenu()
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button === 2) return
+      if (contextMenuRef.current?.contains(event.target as Node)) return
+      close()
+    }
+    const onContextMenu = (event: globalThis.MouseEvent) => {
+      if (contextMenuRef.current?.contains(event.target as Node)) event.preventDefault()
+      else close()
+    }
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') close() }
     window.addEventListener('blur', close)
     window.addEventListener('wheel', close, { passive: true })
+    window.addEventListener('pointerdown', onPointerDown, true)
+    window.addEventListener('contextmenu', onContextMenu, true)
     window.addEventListener('keydown', onKeyDown)
     return () => {
       window.removeEventListener('blur', close)
       window.removeEventListener('wheel', close)
+      window.removeEventListener('pointerdown', onPointerDown, true)
+      window.removeEventListener('contextmenu', onContextMenu, true)
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [contextMenu])
@@ -122,8 +139,7 @@ export default function MediaPage() {
           ]
       }}
       emptyTitle="暂无影片" emptyDescription="当前媒体库还没有可展示的影片。"/>
-    <Menu open={Boolean(contextMenu)} onClose={closeContextMenu} anchorReference="anchorPosition" anchorPosition={contextMenu ? { top: contextMenu.mouseY, left: contextMenu.mouseX } : undefined}
-      slotProps={{ paper: { sx: { minWidth: 148, '& .MuiMenuItem-root': { minHeight: 34, py: 0.75, fontSize: 14 } } } }}>
+    {contextMenu && <Paper ref={contextMenuRef} elevation={8} onContextMenu={(event) => event.preventDefault()} sx={{ position: 'fixed', top: contextMenu.mouseY, left: contextMenu.mouseX, zIndex: (theme) => theme.zIndex.modal, minWidth: 148, py: .5, borderRadius: 1.5, '& .MuiMenuItem-root': { minHeight: 34, py: 0.75, fontSize: 14 } }}>
       {editMode && selected.length > 0 ? [
         <MenuItem key="batch-sync" onClick={() => { closeContextMenu(); void createBatchSync() }}>批量同步信息</MenuItem>,
         <MenuItem key="batch-screenshot" onClick={() => { closeContextMenu(); void createBatchImageTasks('Screenshot') }}>批量生成截图</MenuItem>,
@@ -141,7 +157,7 @@ export default function MediaPage() {
         <MenuItem key="location" onClick={openContextLocation}>打开位置</MenuItem>,
         <MenuItem key="delete-file" onClick={() => contextMenu?.item && openSafeDelete([contextMenu.item.dataId])}>删除影片</MenuItem>,
       ]}
-    </Menu>
+    </Paper>}
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>
     <SafeDeleteDialog preview={deletePreview} command={deleteCommand} onClose={closeDeleteDialog} onLaunched={handleDeleteLaunched}/>
   </>
