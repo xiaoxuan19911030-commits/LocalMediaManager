@@ -17,13 +17,14 @@ public static class MaintenanceReader
     private static readonly string[] SidecarExtensions = [".jpg",".jpeg",".png",".webp",".gif",".nfo",".srt",".ass",".ssa",".vtt"];
     private const int FileSystemScanBudgetMs = 3500;
     private static string ActiveImageSql(string alias) => $"COALESCE({alias}.SourceProvider,'')<>'LegacyFile' AND NOT (COALESCE({alias}.FilePath,'') LIKE '%JVDIO%' OR COALESCE({alias}.FilePath,'') LIKE '%Jvedio%' OR COALESCE({alias}.FilePath,'') LIKE '%BigPic%' OR COALESCE({alias}.FilePath,'') LIKE '%SmallPic%' OR COALESCE({alias}.FilePath,'') LIKE '%ExtraPic%')";
+    private static string ActiveMovieSql(string alias) => $"EXISTS(SELECT 1 FROM MediaFiles af WHERE af.MovieId={alias}.Id AND af.IsPrimary=1 AND af.MediaType='Video' AND COALESCE(af.ExistsState,'')<>'Missing')";
 
     public static async Task<MaintenanceReportDto> ReadAsync(string databasePath, string imageRoot, string bridgeUrl, int limit, int offset)
     {
         await using var connection = await OpenAsync(databasePath);
         var issues = new List<MaintenanceIssueDto>();
         var fileSystemBudget = Stopwatch.StartNew();
-        long total = await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies");
+        long total = await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")}");
         await AddMovieIssuesAsync(connection, issues);
         var orphans = await ReadOrphanFilesAsync(connection, imageRoot, limit, offset, fileSystemBudget);
         var directories = await ReadDirectoryIssuesAsync(connection, imageRoot, limit, offset, fileSystemBudget);
@@ -32,10 +33,11 @@ public static class MaintenanceReader
             issues.Add(new("图片缓存失效", "warning", "图片缓存失效", "缓存记录对应的文件不存在或超出缓存目录。", null, cache));
         DuplicateResultsDto duplicates = await ProductReader.ReadDuplicateResultsAsync(databasePath, "all", 100);
         long duplicateMovies = duplicates.Groups.SelectMany(group => group.Items.Select(item => item.MovieId)).Distinct().LongCount();
-        long missingImages = await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")})");
-        long missingNfo = await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies WHERE trim(COALESCE(NfoPath,''))=''");
-        long missingMetadata = await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies WHERE COALESCE(IsScraped,0)=0 OR trim(COALESCE(Description,''))=''");
-        long problemMovies = issues.Where(item => item.MovieId.HasValue).Select(item => item.MovieId!.Value).Distinct().LongCount();
+        long missingImages = await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")})");
+        long missingNfo = await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND trim(COALESCE(NfoPath,''))=''");
+        long missingMetadata = await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND (COALESCE(IsScraped,0)=0 OR trim(COALESCE(Description,''))='')");
+        HashSet<long> activeMovieIds = await ReadLongSetAsync(connection, $"SELECT Id FROM Movies m WHERE {ActiveMovieSql("m")}");
+        long problemMovies = issues.Where(item => item.MovieId.HasValue && activeMovieIds.Contains(item.MovieId.Value)).Select(item => item.MovieId!.Value).Distinct().LongCount();
         var stats = new MaintenanceStatsDto(total, Math.Max(0, total - problemMovies), problemMovies, duplicateMovies,
             missingImages, missingNfo, missingMetadata, orphans.Count, directories.Count, cacheProblems);
         return new(stats, issues.Skip(offset).Take(limit).ToList(), orphans, directories, duplicates, limit, offset);
@@ -184,6 +186,15 @@ public static class MaintenanceReader
         await using var command = connection.CreateCommand(); command.CommandText = sql;
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync()) if (!reader.IsDBNull(0)) result.Add(reader.GetString(0));
+        return result;
+    }
+
+    private static async Task<HashSet<long>> ReadLongSetAsync(SqliteConnection connection, string sql)
+    {
+        var result = new HashSet<long>();
+        await using var command = connection.CreateCommand(); command.CommandText = sql;
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) if (!reader.IsDBNull(0)) result.Add(reader.GetInt64(0));
         return result;
     }
 

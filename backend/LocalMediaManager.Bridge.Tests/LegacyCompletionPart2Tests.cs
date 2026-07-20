@@ -137,6 +137,29 @@ public sealed class LegacyCompletionPart2Tests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DataCenterCountsOnlyAvailablePrimaryVideos()
+    {
+        await using var connection = await Open();
+        string at = DateTimeOffset.UtcNow.ToString("O");
+        for (int id = 1; id <= 4; id++)
+            await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt,ImportedAt) VALUES($id,$code,$code,0,0,'pending','Test',$at,$at,$at)", ("$id", id), ("$code", $"COUNT-{id:000}"), ("$at", at));
+        await Execute(connection, """
+            INSERT INTO MediaFiles(MovieId,FilePath,NormalizedPath,FileName,Extension,FileSize,MediaType,SourceType,IsPrimary,ExistsState,CreatedAt,UpdatedAt)
+            VALUES(1,$path1,$path1,'COUNT-001.mp4','.mp4',1,'Video','Test',1,'Present',$at,$at),
+                  (2,$path2,$path2,'COUNT-002.mp4','.mp4',1,'Video','Test',1,'Present',$at,$at),
+                  (3,$path3,$path3,'COUNT-003.mp4','.mp4',1,'Video','Test',1,'Missing',$at,$at)
+            """, ("$path1", Path.Combine(root, "COUNT-001.mp4")), ("$path2", Path.Combine(root, "COUNT-002.mp4")),
+            ("$path3", Path.Combine(root, "COUNT-003.mp4")), ("$at", at));
+
+        MetadataOverviewDto overview = await ProductReader.ReadMetadataOverviewAsync(Database);
+        MaintenanceReportDto maintenance = await MaintenanceReader.ReadAsync(Database, root, "http://127.0.0.1:47831", 50, 0);
+
+        Assert.Equal(2, overview.TotalMovies);
+        Assert.Equal(1, overview.MissingFiles);
+        Assert.Equal(2, maintenance.Stats.TotalMovies);
+    }
+
+    [Fact]
     public async Task MovieMetadataStatusUsesGenresForScrapedTags()
     {
         await using var connection = await Open();

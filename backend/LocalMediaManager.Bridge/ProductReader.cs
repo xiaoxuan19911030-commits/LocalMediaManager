@@ -91,10 +91,10 @@ public static class ProductReader
         long tags = await ScalarAsync(connection, "SELECT COUNT(*) FROM Tags");
         long series = await ScalarAsync(connection, "SELECT COUNT(*) FROM Series");
         long studios = await ScalarAsync(connection, "SELECT COUNT(*) FROM Studios");
-        long missingImages = await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id)");
-        long missingNfo = await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies WHERE trim(COALESCE(NfoPath,''))=''");
-        long missingActors = await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id)");
-        long missingTags = await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieTags mt WHERE mt.MovieId=m.Id)");
+        long missingImages = await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id)");
+        long missingNfo = await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND trim(COALESCE(NfoPath,''))=''");
+        long missingActors = await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND NOT EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id)");
+        long missingTags = await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND NOT EXISTS(SELECT 1 FROM MovieTags mt WHERE mt.MovieId=m.Id)");
         var maintenance = new DashboardMaintenanceDto(
             Math.Max(0, movies - pending),
             pending,
@@ -529,26 +529,26 @@ public static class ProductReader
         (long complete, long pending, long unscraped) = await ReadMetadataCountsAsync(connection);
         bool hasDirectors = await HasDirectorsAsync(connection);
         return new(
-            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies"),
-            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies WHERE IsScraped=1"),
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")}"),
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND IsScraped=1"),
             complete,
             pending,
             unscraped,
-            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies WHERE trim(COALESCE(Title,''))=''"),
-            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE " + MissingCoverSql()),
-            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE " + MissingFanartSql()),
-            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE " + MissingPreviewSql()),
-            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id)"),
-            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieGenres mg WHERE mg.MovieId=m.Id)"),
-            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies WHERE trim(COALESCE(Description,''))=''"),
-            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies WHERE trim(COALESCE(NfoPath,''))=''"),
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND trim(COALESCE(Title,''))=''"),
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND " + MissingCoverSql()),
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND " + MissingFanartSql()),
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND " + MissingPreviewSql()),
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND NOT EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id)"),
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND NOT EXISTS(SELECT 1 FROM MovieGenres mg WHERE mg.MovieId=m.Id)"),
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND trim(COALESCE(Description,''))=''"),
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND trim(COALESCE(NfoPath,''))=''"),
             await ScalarAsync(connection, "SELECT COUNT(DISTINCT MovieId) FROM MediaFiles WHERE ExistsState='Missing'"),
-            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType='Screenshot')"),
-            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType='GIF')"),
-            hasDirectors ? await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieDirectors md WHERE md.MovieId=m.Id)") : await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies"),
-            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieSeries ms WHERE ms.MovieId=m.Id)"),
-            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieStudios mst WHERE mst.MovieId=m.Id)"),
-            await ScalarAsync(connection, "SELECT COUNT(*) FROM Movies m WHERE NOT EXISTS(SELECT 1 FROM MovieTags mt WHERE mt.MovieId=m.Id)"));
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType='Screenshot')"),
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType='GIF')"),
+            hasDirectors ? await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND NOT EXISTS(SELECT 1 FROM MovieDirectors md WHERE md.MovieId=m.Id)") : await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")}"),
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND NOT EXISTS(SELECT 1 FROM MovieSeries ms WHERE ms.MovieId=m.Id)"),
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND NOT EXISTS(SELECT 1 FROM MovieStudios mst WHERE mst.MovieId=m.Id)"),
+            await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {ActiveMovieSql("m")} AND NOT EXISTS(SELECT 1 FROM MovieTags mt WHERE mt.MovieId=m.Id)"));
     }
 
     public static async Task<DiagnosticsDto> ReadDiagnosticsAsync(string databasePath)
@@ -928,6 +928,7 @@ public static class ProductReader
         return await TableExistsAsync(connection, table);
     }
     private static string ActiveImageSql(string alias) => $"COALESCE({alias}.SourceProvider,'')<>'LegacyFile' AND NOT (COALESCE({alias}.FilePath,'') LIKE '%JVDIO%' OR COALESCE({alias}.FilePath,'') LIKE '%Jvedio%' OR COALESCE({alias}.FilePath,'') LIKE '%BigPic%' OR COALESCE({alias}.FilePath,'') LIKE '%SmallPic%' OR COALESCE({alias}.FilePath,'') LIKE '%ExtraPic%')";
+    private static string ActiveMovieSql(string alias) => $"EXISTS(SELECT 1 FROM MediaFiles af WHERE af.MovieId={alias}.Id AND af.IsPrimary=1 AND af.MediaType='Video' AND COALESCE(af.ExistsState,'')<>'Missing')";
     private static string MissingCoverSql() => $"NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType IN ('Poster','GeneratedCard','Thumbnail'))";
     private static string MissingFanartSql() => $"NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType IN ('Fanart','BigPic'))";
     private static string MissingPreviewSql() => $"NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType IN ('Preview','ExtraPic','Screenshot'))";
