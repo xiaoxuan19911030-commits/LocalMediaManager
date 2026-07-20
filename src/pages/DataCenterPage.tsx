@@ -45,6 +45,14 @@ const problemTypeLabels: Record<ProblemType, string> = {
   'relation-missing': '数据库关联缺失',
 }
 
+const problemStatusLabels: Record<ProblemStatus, string> = {
+  all: '全部',
+  normal: '正常',
+  abnormal: '异常',
+  auto: '可自动处理',
+  manual: '需要人工处理',
+}
+
 export default function DataCenterPage() {
   const [params, setParams] = useSearchParams()
   const tab = normalizeTab(params.get('tab'))
@@ -88,7 +96,7 @@ export default function DataCenterPage() {
       </Box>
     </Paper>
     {tab === 'overview' && <OverviewTab query={query} onOpenIssue={openIssue} onOpenDuplicates={openDuplicates}/>}
-    {tab === 'problems' && <ProblemsTab query={query} initialType={normalizeProblemType(params.get('type'))}/>}
+    {tab === 'problems' && <ProblemsTab query={query} initialType={normalizeProblemType(params.get('type'))} onClearQuery={() => setQuery('')}/>}
     {tab === 'duplicates' && <OrganizerPage search={query}/>}
   </WorkspacePage>
 }
@@ -179,7 +187,7 @@ function OverviewTab({ query, onOpenIssue, onOpenDuplicates }: { query: string; 
   </Stack>
 }
 
-function ProblemsTab({ query, initialType }: { query: string; initialType: ProblemType }) {
+function ProblemsTab({ query, initialType, onClearQuery }: { query: string; initialType: ProblemType; onClearQuery: () => void }) {
   const navigate = useNavigate()
   const [report, setReport] = useState<MaintenanceReport>()
   const [error, setError] = useState('')
@@ -187,30 +195,44 @@ function ProblemsTab({ query, initialType }: { query: string; initialType: Probl
   const [status, setStatus] = useState<ProblemStatus>('all')
   const [type, setType] = useState<ProblemType>(initialType)
   const [selected, setSelected] = useState<number[]>([])
+  const [visibleCount, setVisibleCount] = useState(60)
+  const [loading, setLoading] = useState(false)
   const load = useCallback(() => {
     setError('')
-    bridge.maintenanceReport(500, 0).then(setReport).catch((reason: Error) => setError(reason.message))
+    setLoading(true)
+    bridge.maintenanceReport(500, 0)
+      .then((next) => { setReport(next); setNotice(`发现 ${next.issues.length} 个问题`) })
+      .catch((reason: Error) => setError(reason.message))
+      .finally(() => setLoading(false))
   }, [])
   useEffect(load, [load])
   useEffect(() => setType(initialType), [initialType])
+  useEffect(() => { setVisibleCount(60); setSelected([]) }, [query, status, type])
 
-  const problems = useMemo(() => (report?.issues ?? []).map(toProblem).filter((item) => {
+  const allProblems = useMemo(() => (report?.issues ?? []).map(toProblem), [report])
+  const problems = useMemo(() => allProblems.filter((item) => {
     if (status === 'normal') return false
     if (status === 'abnormal' && item.status !== '异常') return false
-    if (status === 'auto' && item.repairDisabled) return false
-    if (status === 'manual' && !item.repairDisabled) return false
+    if (status === 'auto' && !item.supportedActions.some((action) => action.kind === 'sync' && action.enabled)) return false
+    if (status === 'manual' && item.supportedActions.some((action) => action.kind === 'sync' && action.enabled)) return false
     if (type !== 'all' && item.type !== type) return false
-    return matchesQuery(`${item.code} ${item.title} ${item.detail} ${item.path ?? ''} ${item.source}`, query)
-  }), [report, query, status, type])
+    return matchesQuery(`${item.code} ${item.title} ${item.detail} ${item.path ?? ''} ${item.source} ${item.reason} ${item.stateDescription}`, query)
+  }), [allProblems, query, status, type])
   const activeFilterCount = (status === 'all' ? 0 : 1) + (type === 'all' ? 0 : 1) + (query.trim() ? 1 : 0)
   const selectedProblems = problems.filter((item) => item.movieId && selected.includes(item.movieId))
-  const canBatchSync = selectedProblems.some((item) => !item.repairDisabled)
+  const selectedTypes = [...new Set(selectedProblems.map((item) => item.type))]
+  const isMixedSelection = selectedTypes.length > 1
+  const canBatchSync = selectedProblems.length > 0 && !isMixedSelection && selectedProblems.every((item) => canSyncIssue(item.type) && item.movieId)
+  const visibleProblems = problems.slice(0, visibleCount)
+  const hasMore = visibleProblems.length < problems.length
+  const clearFilters = () => { setStatus('all'); setType('all'); onClearQuery() }
   const syncOne = (movieId?: number) => {
     if (!movieId) return
     bridge.syncMovie(movieId).then(result => setNotice(`${result.message} 可在任务中心查看。`)).catch((reason: Error) => setNotice(reason.message))
   }
   const syncSelected = () => {
-    const ids = selectedProblems.filter((item) => !item.repairDisabled && item.movieId).map((item) => item.movieId!)
+    if (!canBatchSync) return
+    const ids = selectedProblems.map((item) => item.movieId!)
     if (!ids.length) return
     bridge.createBatchSync(ids).then(result => { setNotice(`${result.message} 可在任务中心查看。`); setSelected([]) }).catch((reason: Error) => setNotice(reason.message))
   }
@@ -225,30 +247,41 @@ function ProblemsTab({ query, initialType }: { query: string; initialType: Probl
     <TextField select size="small" label="问题类型" value={type} onChange={(event) => setType(event.target.value as ProblemType)} sx={{ width: { xs: '100%', sm: 190 } }}>
       {Object.entries(problemTypeLabels).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
     </TextField>
-    <Button variant="outlined" disabled={!canBatchSync} onClick={syncSelected}>批量同步缺失元数据</Button>
+    <Button variant="outlined" disabled={!canBatchSync} onClick={syncSelected}>批量重新同步</Button>
     <Button variant="outlined" disabled={!selected.length} onClick={() => setSelected([])}>取消选择</Button>
-    {activeFilterCount > 0 && <Button color="inherit" onClick={() => { setStatus('all'); setType('all') }}>清空问题筛选</Button>}
+    {activeFilterCount > 0 && <Button color="inherit" onClick={clearFilters}>清除筛选</Button>}
   </Stack>
   return <Stack spacing={1.5}>
-    <SurfaceSection title="问题" description="发现问题、查看原因并执行现有修复能力。耗时操作继续进入任务中心。" action={<Button size="small" variant="outlined" onClick={load}>重新诊断</Button>}>
+    <SurfaceSection title="问题" description="发现问题、查看原因并执行现有修复能力。耗时操作继续进入任务中心。" action={<Button size="small" variant="outlined" disabled={loading} onClick={load}>{loading ? '正在扫描问题…' : '扫描问题'}</Button>}>
       {filters}
     </SurfaceSection>
+    <Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap' }}>
+      <Chip size="small" label={`当前：${problemTypeLabels[type]}`}/>
+      <Chip size="small" label={`状态：${problemStatusLabels[status]}`}/>
+      {query.trim() && <Chip size="small" label={`搜索：${query.trim()}`}/>}
+      <Chip size="small" label={`结果：${problems.length}`}/>
+      {selectedProblems.length > 0 && <Chip size="small" color="primary" label={`已选择 ${selectedProblems.length} 项`}/>}
+    </Stack>
+    {selectedProblems.length > 0 && <Alert severity={canBatchSync ? 'info' : 'warning'}>
+      {canBatchSync ? `将对 ${selectedProblems.length} 项执行“批量重新同步”，任务会进入任务中心。` : isMixedSelection ? '当前选择包含多种问题类型，请只选择同一种问题后再执行批量操作。' : '当前选择的问题暂不支持批量自动处理。'}
+    </Alert>}
     {error && <Alert severity="error">{error}</Alert>}
-    {!report && !error ? <Box sx={{ minHeight: 240, display: 'grid', placeItems: 'center' }}><Typography color="text.secondary">正在诊断...</Typography></Box> :
+    {!report && !error ? <Stack spacing={1} sx={{ alignItems: 'center' }}><EmptyState title="尚未完成问题扫描" description="请先扫描媒体库问题。"/><Button variant="contained" onClick={load}>扫描问题</Button></Stack> :
       status === 'normal' ? <EmptyState title="正常影片不在问题列表展示" description="当前页面聚焦异常诊断与修复；概览中可查看正常数量。"/> :
       problems.length ? <Stack spacing={1}>
-        {problems.map((item, index) => <ProblemCard key={`${item.movieId}-${item.type}-${index}`} item={item} selected={Boolean(item.movieId && selected.includes(item.movieId))}
+        {visibleProblems.map((item, index) => <ProblemCard key={`${item.movieId}-${item.type}-${index}`} item={item} selected={Boolean(item.movieId && selected.includes(item.movieId))}
           onSelect={(checked) => item.movieId && setSelected((current) => checked ? [...new Set([...current, item.movieId!])] : current.filter(id => id !== item.movieId))}
-          onOpen={() => item.movieId && navigate(`/movies/${item.movieId}`)} onRepair={() => syncOne(item.movieId)}/>)}
-      </Stack> : <EmptyState title="没有匹配的问题" description="当前筛选条件下没有诊断项。"/>}
+          onOpen={() => item.movieId && navigate(`/movies/${item.movieId}`)} onRepair={() => syncOne(item.movieId)} onCopyPath={() => copyPath(item.path, setNotice)} onOpenPath={() => openPath(item.path, setNotice)}/>)}
+        {hasMore && <Button variant="outlined" onClick={() => setVisibleCount((current) => current + 60)}>加载更多（{visibleProblems.length} / {problems.length}）</Button>}
+      </Stack> : <ProblemEmptyState query={query} type={type} reportIssueCount={allProblems.length} onScan={load} onClear={clearFilters}/>}
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>
   </Stack>
 }
 
-function ProblemCard({ item, selected, onSelect, onOpen, onRepair }: { item: ProblemItem; selected: boolean; onSelect: (checked: boolean) => void; onOpen: () => void; onRepair: () => void }) {
+function ProblemCard({ item, selected, onSelect, onOpen, onRepair, onCopyPath, onOpenPath }: { item: ProblemItem; selected: boolean; onSelect: (checked: boolean) => void; onOpen: () => void; onRepair: () => void; onCopyPath: () => void; onOpenPath: () => void }) {
   return <Card variant="outlined" sx={{ borderRadius: 2, borderLeft: 4, borderLeftColor: `${item.reasonTone}.main` }}>
     <CardContent sx={{ p: 1.25, '&:last-child': { pb: 1.25 } }}>
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'auto minmax(0,1fr)', md: '58px minmax(170px,.9fr) minmax(0,1.45fr) minmax(230px,1fr) auto' }, gap: 1.25, alignItems: 'center' }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'auto minmax(0,1fr)', md: '58px minmax(170px,.75fr) minmax(0,1.4fr) minmax(220px,1fr) minmax(210px,.8fr)' }, gap: 1.25, alignItems: 'center' }}>
         <Stack direction="row" spacing={.5} sx={{ alignItems: 'center' }}>
           {item.movieId && <Checkbox checked={selected} onChange={(event) => onSelect(event.target.checked)}/>}
           <ProblemPoster movieId={item.movieId} title={item.code || item.title}/>
@@ -258,7 +291,7 @@ function ProblemCard({ item, selected, onSelect, onOpen, onRepair }: { item: Pro
           <Typography variant="body2" color="text.secondary" noWrap>{item.title || '无标题'}</Typography>
           <Stack direction="row" spacing={.5} useFlexGap sx={{ flexWrap: 'wrap', mt: .6 }}>
             <StatusBadge label={item.source} tone="neutral"/>
-            <StatusBadge label={item.status} tone={item.repairDisabled ? 'warning' : 'info'}/>
+            <StatusBadge label={item.status} tone={item.supportedActions.some((action) => action.enabled) ? 'info' : 'warning'}/>
           </Stack>
         </Stack>
         <Stack spacing={.45} sx={{ minWidth: 0 }}>
@@ -269,6 +302,7 @@ function ProblemCard({ item, selected, onSelect, onOpen, onRepair }: { item: Pro
           <InfoLine label="问题" value={problemTypeLabels[item.type]}/>
           <InfoLine label="原因" value={item.reason}/>
           <InfoLine label="状态" value={item.stateDescription}/>
+          <InfoLine label="来源" value={item.source}/>
           {item.path && <InfoLine label="路径" value={item.path} mono/>}
         </Stack>
         <Stack spacing={.35} sx={{ minWidth: 0 }}>
@@ -277,10 +311,12 @@ function ProblemCard({ item, selected, onSelect, onOpen, onRepair }: { item: Pro
         </Stack>
         <Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {item.movieId && <Button size="small" variant="outlined" onClick={onOpen}>查看影片</Button>}
-          <Tooltip title={item.repairDisabled ? '当前问题暂不支持一键修复' : ''}>
-            <span><Button size="small" variant="contained" disabled={item.repairDisabled || !item.movieId} onClick={onRepair}>单项修复</Button></span>
-          </Tooltip>
-          <Button size="small" color="inherit" disabled>忽略此问题</Button>
+          {item.supportedActions.map((action) => <Tooltip key={action.label} title={action.disabledReason ?? ''}>
+            <span><Button size="small" variant={action.primary ? 'contained' : 'outlined'} color={action.color ?? 'primary'} disabled={!action.enabled} onClick={action.kind === 'sync' ? onRepair : action.kind === 'copy-path' ? onCopyPath : onOpenPath}>{action.label}</Button></span>
+          </Tooltip>)}
+          {item.unsupportedActions.map((action) => <Tooltip key={action.label} title={action.reason}>
+            <span><Button size="small" color="inherit" disabled>{action.label}</Button></span>
+          </Tooltip>)}
         </Stack>
       </Box>
     </CardContent>
@@ -298,6 +334,16 @@ function InfoLine({ label, value, mono = false }: { label: string; value?: strin
   return <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere', fontFamily: mono ? 'monospace' : undefined }}>
     <Box component="span" sx={{ color: 'text.primary', fontWeight: 800 }}>{label}：</Box>{value}
   </Typography>
+}
+
+function ProblemEmptyState({ query, type, reportIssueCount, onScan, onClear }: { query: string; type: ProblemType; reportIssueCount: number; onScan: () => void; onClear: () => void }) {
+  if (reportIssueCount === 0) {
+    return <Stack spacing={1} sx={{ alignItems: 'center' }}><EmptyState title="未发现问题" description="当前媒体库没有已识别的问题项。"/><Button variant="outlined" onClick={onScan}>重新扫描问题</Button></Stack>
+  }
+  if (!query.trim() && type !== 'all') {
+    return <EmptyState title={`未发现“${problemTypeLabels[type]}”问题`} description="当前媒体库中没有符合该条件的项目。"/>
+  }
+  return <Stack spacing={1} sx={{ alignItems: 'center' }}><EmptyState title="没有匹配的结果" description="请调整搜索词或清除筛选条件。"/><Button variant="outlined" onClick={onClear}>清除筛选</Button></Stack>
 }
 
 function ClickableStat({ label, value, icon, tone = 'primary.main', onClick }: { label: string; value: string | number; icon: ReactNode; tone?: string; onClick?: () => void }) {
@@ -320,7 +366,22 @@ interface ProblemItem {
   stateDescription: string
   suggestion: string
   source: string
-  repairDisabled: boolean
+  supportedActions: ProblemAction[]
+  unsupportedActions: UnsupportedProblemAction[]
+}
+
+interface ProblemAction {
+  label: string
+  kind: 'sync' | 'copy-path' | 'open-path'
+  enabled: boolean
+  primary?: boolean
+  color?: 'primary' | 'inherit'
+  disabledReason?: string
+}
+
+interface UnsupportedProblemAction {
+  label: string
+  reason: string
 }
 
 function toProblem(item: MaintenanceIssue): ProblemItem {
@@ -333,6 +394,7 @@ function toProblem(item: MaintenanceIssue): ProblemItem {
   const code = item.detail?.match(/[A-Z]{2,10}-\d{2,6}/i)?.[0] ?? name
   const reason = reasonFor(item, type)
   const source = sourceFor(item, type)
+  const actions = actionsFor(item, type)
   return {
     movieId: item.movieId,
     code,
@@ -348,7 +410,8 @@ function toProblem(item: MaintenanceIssue): ProblemItem {
     stateDescription: stateDescription(item, type),
     suggestion: repairSuggestion(type),
     source,
-    repairDisabled: repairDisabled(type),
+    supportedActions: actions.supported,
+    unsupportedActions: actions.unsupported,
   }
 }
 
@@ -371,18 +434,23 @@ function inferProblemType(item: MaintenanceIssue): ProblemType {
 }
 
 function reasonFor(item: MaintenanceIssue, type: ProblemType) {
-  if (type === 'legacy-data') return '历史迁移路径或旧资源记录不再作为运行时资源使用。'
-  if (type === 'image-file-missing') return '数据库存在路径信息，但本地文件当前不可访问。'
+  if (type === 'legacy-data') return item.path ? '历史迁移路径失效。' : '历史迁移数据未包含此字段。'
+  if (type === 'image-file-missing') return '数据库有记录，但本地文件不存在。'
+  if (type === 'image-path-invalid') return '文件路径不可访问。'
   if (type === 'relation-missing') return '数据库缺少对应关联记录。'
-  if (type === 'missing-nfo') return '影片没有登记独立 .nfo 文件。'
-  if (type.startsWith('missing-')) return '当前数据库或媒体资源索引中没有可用记录。'
-  return item.detail || item.title || '原因未知。'
+  if (type === 'missing-nfo') return 'NFO 未生成。'
+  if (type === 'missing-cover' || type === 'missing-fanart' || type === 'missing-preview' || type === 'missing-screenshot' || type === 'missing-gif') return '图片索引中没有可用记录。'
+  if (type.startsWith('missing-')) return '数据库没有记录，或当前刮削数据源未返回。'
+  return item.detail || item.title || '暂时无法确定。'
 }
 
 function reasonLabel(type: ProblemType) {
   if (type === 'legacy-data') return '历史迁移'
   if (type === 'relation-missing') return '关联缺失'
-  if (type === 'image-file-missing' || type === 'image-path-invalid') return '文件不存在'
+  if (type === 'image-path-invalid') return '路径不可访问'
+  if (type === 'image-file-missing') return '文件不存在'
+  if (type === 'missing-cover' || type === 'missing-fanart' || type === 'missing-preview' || type === 'missing-screenshot' || type === 'missing-gif') return '图片索引失效'
+  if (type === 'missing-nfo') return 'NFO 未生成'
   if (type === 'all') return '未知'
   return '数据库记录缺失'
 }
@@ -396,9 +464,11 @@ function reasonTone(type: ProblemType): StatusTone {
 }
 
 function stateDescription(item: MaintenanceIssue, type: ProblemType) {
-  if (type === 'image-file-missing') return '数据库有记录，本地文件不存在或路径不可访问。'
-  if (type === 'legacy-data') return '检测到旧版来源或旧图片目录痕迹。'
+  if (type === 'image-file-missing') return '数据库记录存在；本地文件不存在。'
+  if (type === 'image-path-invalid') return '数据库记录存在；路径当前不可访问。'
+  if (type === 'legacy-data') return item.path ? '数据库仍记录旧版路径；运行时不再使用旧图。' : '历史迁移数据中缺少该字段。'
   if (type === 'relation-missing') return '影片存在，但关联表中没有对应关系。'
+  if (type === 'missing-nfo') return '数据库未记录可用 NFO 文件。'
   if (item.path) return '影片记录存在，相关资源未完整登记。'
   return '数据库当前未提供可用记录。'
 }
@@ -413,21 +483,60 @@ function sourceFor(item: MaintenanceIssue, type: ProblemType) {
 }
 
 function repairSuggestion(type: ProblemType) {
-  if (type === 'missing-cover') return '重新下载封面或重新同步缺失元数据。'
-  if (type === 'missing-fanart') return '重新下载背景图，若数据源没有背景图则保持缺失。'
-  if (type === 'missing-preview') return '重新检测本地图片或重新生成预览图。'
+  if (type === 'missing-cover') return '重新获取封面；当前可先重新同步元数据。'
+  if (type === 'missing-fanart') return '重新检测本地背景图；仍未找到时重新获取背景图。'
+  if (type === 'missing-preview') return '重新检测本地图片；仍未找到时重新生成预览图。'
   if (type === 'missing-screenshot') return '提交生成截图任务。'
   if (type === 'missing-gif') return '提交生成 GIF 任务。'
-  if (type === 'missing-nfo') return '重新生成 NFO。'
-  if (type === 'legacy-data') return '建议重新同步元数据或重新刮削资源。'
-  if (type === 'relation-missing') return '建议重新同步对应关联数据。'
-  if (type === 'image-file-missing' || type === 'image-path-invalid') return '重新检测本地图片索引，必要时重新下载资源。'
+  if (type === 'missing-nfo') return '根据当前数据库元数据生成 NFO。'
+  if (type === 'missing-directors') return '重新同步导演信息。'
+  if (type === 'missing-actors') return '重新建立演员关联或重新同步演员信息。'
+  if (type === 'legacy-data') return '重新定位文件或重新获取对应资源。'
+  if (type === 'relation-missing') return '重新建立关联。'
+  if (type === 'image-file-missing' || type === 'image-path-invalid') return '重新检测本地图片路径；必要时重新获取对应资源。'
   if (type.startsWith('missing-')) return '重新同步缺失元数据。'
-  return '重新诊断后按问题类型处理。'
+  return '扫描问题后按问题类型处理。'
 }
 
-function repairDisabled(type: ProblemType) {
-  return type === 'image-path-invalid' || type === 'image-file-missing' || type === 'legacy-data'
+function canSyncIssue(type: ProblemType) {
+  return !['image-path-invalid', 'image-file-missing', 'legacy-data', 'missing-nfo', 'missing-screenshot', 'missing-gif', 'missing-preview', 'all'].includes(type)
+}
+
+function actionsFor(item: MaintenanceIssue, type: ProblemType) {
+  const hasMovie = Boolean(item.movieId)
+  const hasPath = Boolean(item.path)
+  const supported: ProblemAction[] = [
+    { label: '重新同步', kind: 'sync', enabled: hasMovie && canSyncIssue(type), primary: true, disabledReason: '当前问题暂不支持通过元数据同步直接处理' },
+    { label: '打开所在文件夹', kind: 'open-path', enabled: hasPath, color: 'inherit', disabledReason: '没有可打开的相关路径' },
+    { label: '复制路径', kind: 'copy-path', enabled: hasPath, color: 'inherit', disabledReason: '没有可复制的相关路径' },
+  ]
+  const unsupported: UnsupportedProblemAction[] = unsupportedActionsFor(type)
+  return { supported, unsupported }
+}
+
+function unsupportedActionsFor(type: ProblemType): UnsupportedProblemAction[] {
+  const unsupportedReason = '暂不支持：当前没有稳定的单项修复接口，需复用已有同步或详情页流程。'
+  if (type === 'missing-cover') return [{ label: '重新获取封面', reason: unsupportedReason }]
+  if (type === 'missing-fanart') return [{ label: '重新检测', reason: unsupportedReason }, { label: '重新获取背景图', reason: unsupportedReason }]
+  if (type === 'missing-preview') return [{ label: '重新检测', reason: unsupportedReason }]
+  if (type === 'missing-nfo') return [{ label: '生成 NFO', reason: '暂不支持：NFO 生成需要沿用详情页预览和确认流程。' }]
+  if (type === 'missing-actors') return [{ label: '重建演员关联', reason: unsupportedReason }]
+  if (type === 'missing-directors') return [{ label: '重新获取导演', reason: unsupportedReason }]
+  if (type === 'relation-missing') return [{ label: '重建关联', reason: unsupportedReason }]
+  if (type === 'image-file-missing' || type === 'image-path-invalid' || type === 'legacy-data') return [{ label: '重新检测', reason: unsupportedReason }]
+  return [{ label: '忽略问题', reason: '暂不支持：忽略状态尚未进入已验证的任务闭环。' }]
+}
+
+function copyPath(path: string | undefined, setNotice: (value: string) => void) {
+  if (!path) { setNotice('没有可复制的路径'); return }
+  navigator.clipboard.writeText(path).then(() => setNotice('已复制路径')).catch(() => setNotice('复制路径失败'))
+}
+
+function openPath(path: string | undefined, setNotice: (value: string) => void) {
+  if (!path) { setNotice('没有可打开的路径'); return }
+  const target = path.includes('.') ? path : `${path}\\`
+  const action = path.includes('.') ? bridge.revealFile(target) : bridge.openDirectory(target)
+  action.then((result) => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))
 }
 
 function isLegacyIssue(item: MaintenanceIssue) {
