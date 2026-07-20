@@ -104,6 +104,31 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ProviderNetworkAndMirrorUrlsPersistThroughUnifiedSave()
+    {
+        UnifiedSettingsDto current = await coordinator.ReadAsync();
+        UnifiedSettingsDto draft = current with
+        {
+            ProviderNetwork = new("Manual", "http://127.0.0.1:7890"),
+            JavBus = current.JavBus with { MirrorUrls = ["https://bus.example/"] },
+            Dmm = current.Dmm! with { MirrorUrls = ["https://dmm.example/"] },
+            JavDb = current.JavDb! with { MirrorUrls = ["https://javdb.example/"] },
+        };
+
+        UnifiedSettingsSaveResult result = await coordinator.SaveAsync(draft);
+        UnifiedSettingsDto saved = await coordinator.ReadAsync();
+
+        Assert.Contains("providerNetwork", result.ChangedFields);
+        Assert.Contains("javBus", result.ChangedFields);
+        Assert.Contains("dmm", result.ChangedFields);
+        Assert.Contains("javDb", result.ChangedFields);
+        Assert.Equal(new("Manual", "http://127.0.0.1:7890"), saved.ProviderNetwork);
+        Assert.Equal(["https://bus.example/"], saved.JavBus.MirrorUrls);
+        Assert.Equal(["https://dmm.example/"], saved.Dmm!.MirrorUrls);
+        Assert.Equal(["https://javdb.example/"], saved.JavDb!.MirrorUrls);
+    }
+
+    [Fact]
     public async Task LegacySettingsMigrateOnceWithoutOverwritingNewValues()
     {
         await CreateLegacySettingsAsync("""

@@ -556,10 +556,12 @@ public sealed class SettingsSaveCoordinator(
     {
         var changed = new List<string>();
         if (before.MetaTube != after.MetaTube) changed.Add("metaTube");
-        if (before.Dmm != after.Dmm) changed.Add("dmm");
-        if (before.JavDb != after.JavDb) changed.Add("javDb");
-        if (before.Minnano != after.Minnano) changed.Add("minnano");
-        if (before.WikipediaJp != after.WikipediaJp) changed.Add("wikipediaJp");
+        if (JavBusChanged(before.JavBus, after.JavBus)) changed.Add("javBus");
+        if (WebProviderChanged(before.Dmm, after.Dmm)) changed.Add("dmm");
+        if (WebProviderChanged(before.JavDb, after.JavDb)) changed.Add("javDb");
+        if (WebProviderChanged(before.Minnano, after.Minnano)) changed.Add("minnano");
+        if (WebProviderChanged(before.WikipediaJp, after.WikipediaJp)) changed.Add("wikipediaJp");
+        if (before.ProviderNetwork != after.ProviderNetwork) changed.Add("providerNetwork");
         if (before.Nfo != after.Nfo) changed.Add("nfo");
         if (before.Playback != after.Playback) changed.Add("playback");
         if (before.RatingRetention != after.RatingRetention) changed.Add("ratingRetention");
@@ -572,6 +574,34 @@ public sealed class SettingsSaveCoordinator(
         if (before.System != after.System) changed.Add("system");
         return changed;
     }
+
+    private static bool JavBusChanged(JavBusSettingsDto before, JavBusSettingsDto after) =>
+        before.Enabled != after.Enabled ||
+        before.Priority != after.Priority ||
+        before.BaseUrl != after.BaseUrl ||
+        before.TimeoutSeconds != after.TimeoutSeconds ||
+        before.RetryCount != after.RetryCount ||
+        before.Cookie != after.Cookie ||
+        before.DownloadImages != after.DownloadImages ||
+        before.FillMissingOnly != after.FillMissingOnly ||
+        !SequenceEqual(before.MirrorUrls, after.MirrorUrls);
+
+    private static bool WebProviderChanged(WebMetadataSettingsDto? before, WebMetadataSettingsDto? after)
+    {
+        if (before is null || after is null) return before != after;
+        return before.Enabled != after.Enabled ||
+            before.Priority != after.Priority ||
+            before.BaseUrl != after.BaseUrl ||
+            before.TimeoutSeconds != after.TimeoutSeconds ||
+            before.RetryCount != after.RetryCount ||
+            before.Cookie != after.Cookie ||
+            before.DownloadImages != after.DownloadImages ||
+            before.FillMissingOnly != after.FillMissingOnly ||
+            !SequenceEqual(before.MirrorUrls, after.MirrorUrls);
+    }
+
+    private static bool SequenceEqual(IReadOnlyList<string>? before, IReadOnlyList<string>? after) =>
+        (before ?? []).SequenceEqual(after ?? [], StringComparer.OrdinalIgnoreCase);
 
     private async Task MigrateLegacySettingsOnceAsync(CancellationToken token)
     {
