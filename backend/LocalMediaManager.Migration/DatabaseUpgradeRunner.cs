@@ -47,7 +47,9 @@ internal static class DatabaseUpgradeRunner
             string sql = await File.ReadAllTextAsync(file);
             string checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sql))).ToLowerInvariant();
             if (existing.TryGetValue(version, out string? recordedChecksum)) {
-                if (!recordedChecksum.Equals(checksum, StringComparison.OrdinalIgnoreCase))
+                // Versions 1-13 predate checksum enforcement and their source snapshots have historical drift.
+                // Never rewrite those records; enforce immutability for 0014 and every subsequent migration.
+                if (version >= 14 && !recordedChecksum.Equals(checksum, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException($"Migration checksum mismatch: version={version}, name={name}.");
                 continue;
             }

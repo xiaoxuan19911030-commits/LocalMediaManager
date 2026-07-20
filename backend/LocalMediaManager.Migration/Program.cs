@@ -47,8 +47,36 @@ if (command == "upgrade") {
     Console.WriteLine(JsonSerializer.Serialize(upgrade, new JsonSerializerOptions { WriteIndented = true }));
     return upgrade.Status == "Completed" ? 0 : 3;
 }
+if (command == "validate") {
+    string database = Path.Combine(dataRoot, "data", "LocalMediaManager.db");
+    await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder {
+        DataSource = database, Mode = SqliteOpenMode.ReadOnly, Cache = SqliteCacheMode.Shared,
+    }.ToString());
+    await connection.OpenAsync();
+    async Task<object?> Value(string sql) { await using var query = connection.CreateCommand(); query.CommandText = sql; return await query.ExecuteScalarAsync(); }
+    async Task<long> Rows(string sql) { await using var query = connection.CreateCommand(); query.CommandText = sql; await using var reader = await query.ExecuteReaderAsync(); long count = 0; while (await reader.ReadAsync()) count++; return count; }
+    var validation = new {
+        Database = database,
+        DatabaseBytes = new FileInfo(database).Length,
+        Movies = await Value("SELECT COUNT(*) FROM Movies"),
+        Actors = await Value("SELECT COUNT(*) FROM Actors"),
+        ActorIdMin = await Value("SELECT COALESCE(MIN(Id),0) FROM Actors"),
+        ActorIdMax = await Value("SELECT COALESCE(MAX(Id),0) FROM Actors"),
+        ActorIdZero = await Value("SELECT COUNT(*) FROM Actors WHERE Id=0"),
+        MigrationCount = await Value("SELECT COUNT(*) FROM SchemaMigrations"),
+        MigrationMax = await Value("SELECT COALESCE(MAX(Version),0) FROM SchemaMigrations"),
+        Migration14Checksum = await Value("SELECT Checksum FROM SchemaMigrations WHERE Version=14"),
+        Integrity = await Value("PRAGMA integrity_check"),
+        ForeignKeyErrors = await Rows("PRAGMA foreign_key_check"),
+        ActorColumns = await Rows("SELECT 1 FROM pragma_table_info('Actors')"),
+        ActorIndexes = await Rows("SELECT 1 FROM pragma_index_list('Actors')"),
+        ActorsTableSql = await Value("SELECT sql FROM sqlite_master WHERE type='table' AND name='Actors'"),
+    };
+    Console.WriteLine(JsonSerializer.Serialize(validation, new JsonSerializerOptions { WriteIndented = true }));
+    return 0;
+}
 if (command != "analyze") {
-    Console.Error.WriteLine("Use: analyze [output], migrate [--confirm-switch], or upgrade [--confirm].");
+    Console.Error.WriteLine("Use: analyze [output], migrate [--confirm-switch], upgrade [--confirm], or validate.");
     return 2;
 }
 
