@@ -1,4 +1,5 @@
 import AccessTimeRoundedIcon from '@mui/icons-material/AccessTimeRounded'
+import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded'
 import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded'
 import CameraAltRoundedIcon from '@mui/icons-material/CameraAltRounded'
@@ -23,6 +24,7 @@ import {
   Avatar,
   Box,
   Button,
+  Checkbox,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -30,7 +32,9 @@ import {
   DialogContentText,
   DialogTitle,
   Divider,
+  FormControlLabel,
   Paper,
+  Rating,
   Snackbar,
   Stack,
   TextField,
@@ -200,10 +204,14 @@ export default function MovieDetailPage() {
     setImageTab(stills.length ? 'stills' : screenshots.length ? 'screenshots' : 'stills')
   }, [screenshots.length, stills.length])
 
-  const heroPosterUrl = imageAssets.find(asset => asset.type === 'Poster' && asset.primary && asset.url)?.url
+  const heroImageUrl = imageAssets.find(asset => asset.type === 'Fanart' && asset.primary && asset.url)?.url
+    ?? imageAssets.find(asset => asset.type === 'Fanart' && asset.url)?.url
+    ?? imageAssets.find(asset => ['Landscape', 'Banner'].includes(asset.type) && asset.url)?.url
+    ?? imageAssets.find(asset => asset.type === 'Preview' && asset.url)?.url
+    ?? imageAssets.find(asset => asset.type === 'Poster' && asset.primary && asset.url)?.url
     ?? imageAssets.find(asset => asset.type === 'Poster' && asset.url)?.url
     ?? movie?.coverUrl
-  useEffect(() => { setPosterFailed(false) }, [heroPosterUrl])
+  useEffect(() => { setPosterFailed(false) }, [heroImageUrl])
 
   const displayedImages = imageTab === 'stills' ? stills : screenshots
   const primaryFile = movie?.mediaFiles.find(file => file.primary) ?? movie?.mediaFiles[0]
@@ -212,7 +220,7 @@ export default function MovieDetailPage() {
   const hasImageType = (type: string) => imageAssets.some(asset => asset.type === type && asset.url)
   const statusRows = movie ? [
     { label: '元数据', complete: movie.scraped || movie.metadataStatus?.state === 'complete' },
-    { label: 'Poster', complete: Boolean(heroPosterUrl) || hasImageType('Poster') },
+    { label: 'Poster', complete: hasImageType('Poster') || Boolean(movie.coverUrl) },
     { label: 'Fanart', complete: hasImageType('Fanart') },
     { label: '演员', complete: movie.actors.length > 0 || metadataComplete(value => value.includes('actor') || value.includes('演员')) },
     { label: '剧照', complete: stills.length > 0 },
@@ -258,7 +266,7 @@ export default function MovieDetailPage() {
     setSelectedTags(movie.tags ?? [])
     setTagSearch('')
     setTagDialog(true)
-    bridge.entities('tags', '', 'name', 96, 0).then((result) => setTagOptions(result.items)).catch((reason: Error) => setNotice(reason.message))
+    bridge.entities('tags', '', 'name', 1000, 0).then((result) => setTagOptions(result.items)).catch((reason: Error) => setNotice(reason.message))
   }
   const saveTags = () => {
     if (!movie) return
@@ -266,6 +274,9 @@ export default function MovieDetailPage() {
     const selected = new Set(selectedTags.map((item) => item.id))
     mutate(bridge.updateMovieTags(movie.id, [...selected].filter((tag) => !current.has(tag)), [...current].filter((tag) => !selected.has(tag))))
     setTagDialog(false)
+  }
+  const toggleSelectedTag = (tag: NamedItem) => {
+    setSelectedTags((value) => value.some((item) => item.id === tag.id) ? value.filter((item) => item.id !== tag.id) : [...value, tag])
   }
   const openActors = () => {
     if (!movie) return
@@ -342,6 +353,7 @@ export default function MovieDetailPage() {
     if (value === 'stills' && stills.length === 0) setNotice('暂无剧照')
     if (value === 'screenshots' && screenshots.length === 0) setNotice('暂无截图')
   }
+  const heroColumns = { xs: '1fr', lg: 'minmax(420px, 1.45fr) minmax(320px, .9fr)' }
 
   return <Box sx={{ '@keyframes detailIn': { from: { opacity: 0, transform: 'translateY(10px)' }, to: { opacity: 1, transform: 'translateY(0)' } } }}>
     {error && <Alert severity="error">{error}</Alert>}
@@ -354,13 +366,15 @@ export default function MovieDetailPage() {
         <Button variant="outlined" startIcon={<SyncRoundedIcon/>} onClick={syncMetadata}>重新同步</Button>
       </Box>
 
-      <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 1, maxWidth: 760 }}>
-        <Typography noWrap variant="h5" sx={{ fontWeight: 850 }}>{movie.title || movie.originalTitle || movie.code || `影片 ${movie.id}`}</Typography>
-      </Paper>
+      <Box sx={{ display: 'grid', gridTemplateColumns: heroColumns }}>
+        <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 1, minWidth: 0 }}>
+          <Typography noWrap variant="h5" sx={{ fontWeight: 850 }}>{movie.title || movie.originalTitle || movie.code || `影片 ${movie.id}`}</Typography>
+        </Paper>
+      </Box>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(420px, 1.45fr) minmax(320px, .9fr)' }, border: 1, borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
-        <Box sx={{ minHeight: { xs: 520, lg: 760 }, bgcolor: 'action.hover', display: 'grid', placeItems: 'center' }}>
-          {heroPosterUrl && !posterFailed ? <SmartImage src={heroPosterUrl} alt={movie.code || movie.title || ''} eager onError={() => setPosterFailed(true)}/> : <Typography color="text.disabled">{posterFailed ? '图片损坏或不可用' : '暂无海报'}</Typography>}
+      <Box sx={{ display: 'grid', gridTemplateColumns: heroColumns, border: 1, borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
+        <Box sx={{ height: 'clamp(480px, 64vh, 620px)', bgcolor: 'action.hover', display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
+          {heroImageUrl && !posterFailed ? <SmartImage src={heroImageUrl} alt={movie.code || movie.title || ''} fit="contain" eager onError={() => setPosterFailed(true)}/> : <Typography color="text.disabled">{posterFailed ? '图片损坏或不可用' : '暂无图片'}</Typography>}
         </Box>
         <Stack spacing={2} sx={{ minWidth: 0, p: { xs: 2, md: 3 }, borderLeft: { lg: 1 }, borderColor: 'divider' }}>
           <Typography variant="h5" sx={{ fontWeight: 850 }}>{movie.code || '番号未知'}</Typography>
@@ -394,7 +408,18 @@ export default function MovieDetailPage() {
           </DetailField>
           <DetailField label="系列"><InlineEntityList items={movie.series} onOpen={(item) => openFilteredWall('seriesId', 'seriesName', item)}/></DetailField>
           <DetailField label="标签"><InlineEntityList items={movie.genres} onOpen={(item) => openFilteredWall('genreId', 'genreName', item)}/></DetailField>
-          <DetailField label="我的标签"><InlineEntityList items={movie.tags} onOpen={(item) => openFilteredWall('customTagId', 'customTagName', item)}/></DetailField>
+          <DetailField label="评分">
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+              <Rating value={movie.userRatingSet ? movie.userRating : 0} precision={.5} disabled={busy} onChange={(_, value) => mutate(bridge.setUserState(movie.id, value === null ? { clearRating: true } : { rating: value }))}/>
+              <Typography variant="body2" color="text.secondary">{movie.userRatingSet ? movie.userRating.toFixed(1) : '未评分'}</Typography>
+            </Stack>
+          </DetailField>
+          <DetailField label="我的标签">
+            <Stack spacing={.75}>
+              <InlineEntityList items={movie.tags} onOpen={(item) => openFilteredWall('customTagId', 'customTagName', item)}/>
+              <Button size="small" variant="text" startIcon={<AddRoundedIcon/>} onClick={openTags} sx={{ alignSelf: 'flex-start', px: 0 }}>添加标签</Button>
+            </Stack>
+          </DetailField>
         </Stack>
       </Box>
 
@@ -478,18 +503,17 @@ export default function MovieDetailPage() {
     </Stack>}
 
     <Dialog open={tagDialog} onClose={() => setTagDialog(false)} fullWidth maxWidth="sm">
-      <DialogTitle>编辑影片标签</DialogTitle>
+      <DialogTitle>选择我的标签</DialogTitle>
       <DialogContent>
-        <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 750 }}>已选标签</Typography>
-        <Paper variant="outlined" sx={{ minHeight: 64, mt: .5, p: 1.25, borderRadius: 2 }}>
-          <Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap' }}>
-            {selectedTags.length ? selectedTags.map((tag) => <Button key={tag.id} size="small" variant="contained" onClick={() => setSelectedTags((value) => value.filter((item) => item.id !== tag.id))}>{tag.name}</Button>) : <Typography variant="body2" color="text.disabled">尚未选择标签</Typography>}
-          </Stack>
-        </Paper>
-        <TextField size="small" fullWidth value={tagSearch} onChange={(event) => setTagSearch(event.target.value)} placeholder="搜索标签" sx={{ mt: 2 }}/>
-        <Paper variant="outlined" sx={{ minHeight: 110, maxHeight: 260, overflowY: 'auto', mt: .75, p: 1.25, borderRadius: 2 }}>
-          <Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap' }}>
-            {tagOptions.filter((tag) => !selectedTags.some((selected) => selected.id === tag.id) && tag.name.toLocaleLowerCase().includes(tagSearch.trim().toLocaleLowerCase())).map((tag) => <Button key={tag.id} size="small" variant="outlined" onClick={() => setSelectedTags((value) => [...value, tag])}>{tag.name}</Button>)}
+        <TextField size="small" fullWidth value={tagSearch} onChange={(event) => setTagSearch(event.target.value)} placeholder="搜索标签" sx={{ mt: 1 }}/>
+        <Paper variant="outlined" sx={{ minHeight: 220, maxHeight: 360, overflowY: 'auto', mt: 1.25, p: 1.25, borderRadius: 2 }}>
+          <Stack spacing={.25}>
+            {tagOptions.filter((tag) => tag.name.toLocaleLowerCase().includes(tagSearch.trim().toLocaleLowerCase())).map((tag) => {
+              const checked = selectedTags.some((selected) => selected.id === tag.id)
+              return <FormControlLabel key={tag.id} control={<Checkbox checked={checked} onChange={() => toggleSelectedTag(tag)}/>} label={tag.name}/>
+            })}
+            {!tagOptions.length && <Typography variant="body2" color="text.disabled">暂无自定义标签</Typography>}
+            {tagOptions.length > 0 && !tagOptions.some((tag) => tag.name.toLocaleLowerCase().includes(tagSearch.trim().toLocaleLowerCase())) && <Typography variant="body2" color="text.disabled">没有匹配的标签</Typography>}
           </Stack>
         </Paper>
       </DialogContent>
