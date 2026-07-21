@@ -342,9 +342,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
     private static ProviderDiagnosticsService CreateDiagnostics(MetadataProviderSettingsService settings, IHttpClientFactory? factory = null)
     {
         IHttpClientFactory diagnosticsFactory = factory ?? new FakeHttpClientFactory(_ => new(HttpStatusCode.OK) { Content = new StringContent("""{"data":[]}""", Encoding.UTF8, "application/json") });
-        return new(settings, new MetaTubeProvider(diagnosticsFactory), new JavBusProvider(diagnosticsFactory),
-            new DmmProvider(diagnosticsFactory), new JavDbProvider(diagnosticsFactory),
-            new MinnanoActorProfileProvider(diagnosticsFactory), new WikipediaJpActorProfileProvider(diagnosticsFactory),
+        return new(settings, new MdcNgProvider(), new MetaTubeProvider(diagnosticsFactory), new JavBusProvider(diagnosticsFactory),
             enableNetworkFiltering: false);
     }
     private LibraryWorkflowService CreateLibraryService() => new(Database);

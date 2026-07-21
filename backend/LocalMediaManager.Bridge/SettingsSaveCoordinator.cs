@@ -29,6 +29,7 @@ public sealed record MediaStorageSettingsDto(
     bool UsingFallbackDefault = false);
 
 public sealed record UnifiedSettingsDto(
+    MdcNgSettingsDto MdcNg,
     MetaTubeSettingsDto MetaTube,
     JavBusSettingsDto JavBus,
     NfoSettingsDto Nfo,
@@ -71,6 +72,7 @@ public sealed class SettingsSaveCoordinator(
         ScanSettingsDto scan = await ReadScanAsync(token);
         SystemSettingsDto system = await ReadSystemAsync(token);
         return new(
+            await metadata.ReadMdcNgAsync(),
             await metadata.ReadMetaTubeAsync(),
             await metadata.ReadJavBusAsync(),
             await nfo.ReadSettingsAsync(token),
@@ -109,6 +111,7 @@ public sealed class SettingsSaveCoordinator(
         await StoreAsync(connection, transaction, "metadata.metatube.writeNfo", clean.MetaTube.WriteNfo, "boolean", token);
         await StoreAsync(connection, transaction, "metadata.metatube.autoExecute", clean.MetaTube.AutoExecute, "boolean", token);
         await StoreAsync(connection, transaction, "metadata.metatube.nonDestructive", true, "boolean", token);
+        await MetadataProviderSettingsService.StoreMdcNgAsync(connection, transaction, clean.MdcNg);
         await MetadataProviderSettingsService.StoreJavBusAsync(connection, transaction, clean.JavBus);
         await MetadataProviderSettingsService.StoreWebAsync(connection, transaction, "dmm", clean.Dmm!);
         await MetadataProviderSettingsService.StoreWebAsync(connection, transaction, "javdb", clean.JavDb!);
@@ -174,6 +177,7 @@ public sealed class SettingsSaveCoordinator(
         string posterSize = movieWallInput.PosterSize?.ToLowerInvariant() is "small" or "large" ? movieWallInput.PosterSize.ToLowerInvariant() : "medium";
         MediaStorageSettingsDto mediaStorage = NormalizeMediaStorage(input.MediaStorage, createMissingMediaStorageRoot);
         return new(
+            MetadataProviderSettingsService.NormalizeMdcNg(input.MdcNg ?? SettingsDefaults.MdcNg),
             input.MetaTube with
             {
                 BaseUrl = uri.ToString().Trim().TrimEnd('/') + "/",
@@ -555,6 +559,7 @@ public sealed class SettingsSaveCoordinator(
     private static IReadOnlyList<string> ChangedFields(UnifiedSettingsDto before, UnifiedSettingsDto after)
     {
         var changed = new List<string>();
+        if (before.MdcNg != after.MdcNg) changed.Add("mdcNg");
         if (before.MetaTube != after.MetaTube) changed.Add("metaTube");
         if (JavBusChanged(before.JavBus, after.JavBus)) changed.Add("javBus");
         if (WebProviderChanged(before.Dmm, after.Dmm)) changed.Add("dmm");
@@ -792,6 +797,7 @@ public sealed class SettingsSaveCoordinator(
 
 public static class SettingsDefaults
 {
+    public static MdcNgSettingsDto MdcNg => new(false, "", @"D:\Jvedio\Jvedio5.0\scrapers\mdc-ng\run-current.cmd", 120, "", true);
     public static JavBusSettingsDto JavBus => new(true, 2, JavBusProvider.DefaultBaseUrl, 30, 1, "", true, true);
     public static WebMetadataSettingsDto Dmm => new(false, 3, DmmProvider.DefaultBaseUrl, 30, 1, "", true, true);
     public static WebMetadataSettingsDto JavDb => new(false, 4, JavDbProvider.DefaultBaseUrl, 30, 1, "", true, true);
@@ -801,6 +807,7 @@ public static class SettingsDefaults
     public static UnifiedSettingsDto Unified => UnifiedForEnvironment(null, null);
 
     public static UnifiedSettingsDto UnifiedForEnvironment(string? installRoot, string? databasePath) => new(
+        MdcNg,
         new(true, "http://127.0.0.1:8080/", 30, true, true, true, true),
         JavBus,
         new("SkipExisting", "", true, true),

@@ -7,12 +7,9 @@ public sealed record ProviderDiagnosticResult(string Provider, bool Reachable, s
 
 public sealed class ProviderDiagnosticsService(
     MetadataProviderSettingsService settings,
+    MdcNgProvider mdcNg,
     MetaTubeProvider metaTube,
     JavBusProvider javBus,
-    DmmProvider dmm,
-    JavDbProvider javDb,
-    MinnanoActorProfileProvider minnano,
-    WikipediaJpActorProfileProvider wikipedia,
     bool enableNetworkFiltering = true) : BackgroundService
 {
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
@@ -52,16 +49,15 @@ public sealed class ProviderDiagnosticsService(
             configured && (!cache.TryGetValue(provider, out ProviderDiagnosticResult? result) || result.Reachable);
 
         return context with {
-            MetaTube = context.MetaTube with { Enabled = allowed("MetaTube", configured: true) },
-            JavBus = context.JavBus with { Enabled = allowed("JavBus", configured: true) },
-            Dmm = (context.Dmm ?? SettingsDefaults.Dmm) with { Enabled = allowed("DMM", (context.Dmm ?? SettingsDefaults.Dmm).Enabled) },
-            JavDb = (context.JavDb ?? SettingsDefaults.JavDb) with { Enabled = allowed("JavDB", (context.JavDb ?? SettingsDefaults.JavDb).Enabled) },
+            MdcNg = context.MdcNg with { Enabled = allowed("MDC-NG", context.MdcNg.Enabled) },
+            MetaTube = context.MetaTube with { Enabled = allowed("MetaTube", context.MetaTube.Enabled) },
+            JavBus = context.JavBus with { Enabled = allowed("JavBus", context.JavBus.Enabled) },
         };
     }
 
     private IReadOnlyList<ProviderDiagnosticResult> Snapshot()
     {
-        string[] order = ["MetaTube", "DMM", "JavDB", "JavBus", "Minnano", "Wikipedia JP"];
+        string[] order = ["MDC-NG", "MetaTube", "JavBus"];
         return order.Where(cache.ContainsKey).Select(provider => cache[provider]).ToArray();
     }
 
@@ -73,17 +69,14 @@ public sealed class ProviderDiagnosticsService(
                 return;
 
             MetadataProviderContext context = new(await settings.ReadMetaTubeAsync(), await settings.ReadJavBusAsync(), null,
-                await settings.ReadDmmAsync(), await settings.ReadJavDbAsync(), await settings.ReadNetworkAsync());
-            WebMetadataSettingsDto minnanoSettings = await settings.ReadMinnanoAsync();
-            WebMetadataSettingsDto wikipediaSettings = await settings.ReadWikipediaJpAsync();
+                await settings.ReadDmmAsync(), await settings.ReadJavDbAsync(), await settings.ReadNetworkAsync()) {
+                MdcNg = await settings.ReadMdcNgAsync(),
+            };
 
             var probes = new List<(string Scope, Func<Task<ProviderConnectionResult>> Run)> {
+                ("影片资料 / 演员 / 标签 / 封面 / 预览图", () => mdcNg.TestConnectionAsync(context, cancellationToken)),
                 ("影片搜索 / 演员 / 标签 / 图片", () => metaTube.TestConnectionAsync(context, cancellationToken)),
-                ("影片搜索 / 演员 / 标签 / 封面", () => dmm.TestConnectionAsync(context, cancellationToken)),
-                ("番号 / 演员 / 标签搜索", () => javDb.TestConnectionAsync(context, cancellationToken)),
                 ("影片标题 / 演员 / 导演 / 系列 / 标签 / 封面", () => javBus.TestConnectionAsync(context, cancellationToken)),
-                ("生日 / 身高 / 罩杯", () => minnano.TestConnectionAsync(minnanoSettings, cancellationToken)),
-                ("生日 / 出生地 / 活动时期 / 简介", () => wikipedia.TestConnectionAsync(wikipediaSettings, cancellationToken)),
             };
 
             ProviderDiagnosticResult[] results = await Task.WhenAll(probes.Select(async probe => {
@@ -105,14 +98,11 @@ public sealed class ProviderDiagnosticsService(
 
     private static ProviderDiagnosticResult ToDiagnostic(string scope, ProviderConnectionResult result) =>
         new(result.Provider, result.Success, scope,
-            result.Success ? "当前无需处理" : "当前网络不可达；自动同步会暂时跳过该来源",
+            result.Success ? "当前无需处理" : "当前不可用；正式同步会暂时跳过该来源",
             result.Message, DateTimeOffset.UtcNow.ToString("O"), result.ElapsedMilliseconds);
 
     private static string ProviderNameFromScope(string scope) =>
-        scope.Contains("出生地", StringComparison.OrdinalIgnoreCase) ? "Wikipedia JP"
-        : scope.Contains("身高", StringComparison.OrdinalIgnoreCase) ? "Minnano"
-        : scope.Contains("番号", StringComparison.OrdinalIgnoreCase) ? "JavDB"
+        scope.Contains("预览图", StringComparison.OrdinalIgnoreCase) ? "MDC-NG"
         : scope.Contains("导演", StringComparison.OrdinalIgnoreCase) ? "JavBus"
-        : scope.Contains("封面", StringComparison.OrdinalIgnoreCase) ? "DMM"
         : "MetaTube";
 }

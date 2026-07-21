@@ -1,9 +1,10 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Text.Json;
+using System.Xml.Linq;
 
 namespace LocalMediaManager.Bridge;
 
@@ -22,6 +23,122 @@ public interface IMetadataProvider
     Task<ProviderMetadata?> GetMetadataAsync(MetadataSearchResult result, MetadataProviderContext settings, CancellationToken cancellationToken);
     Task<IReadOnlyList<MetadataImage>> GetImagesAsync(ProviderMetadata metadata, CancellationToken cancellationToken);
     Task<ProviderConnectionResult> TestConnectionAsync(MetadataProviderContext settings, CancellationToken cancellationToken);
+}
+
+public sealed class MdcNgProvider : IMetadataProvider
+{
+    public string Name => "MDC-NG";
+
+    public Task<IReadOnlyList<MetadataSearchResult>> SearchAsync(string code, MetadataProviderContext settings, CancellationToken cancellationToken)
+    {
+        MdcNgSettingsDto mdc = settings.MdcNg;
+        return Task.FromResult<IReadOnlyList<MetadataSearchResult>>(
+            mdc.Enabled && !string.IsNullOrWhiteSpace(mdc.CommandPath) && File.Exists(mdc.CommandPath) && !string.IsNullOrWhiteSpace(settings.CurrentMoviePath)
+                ? [new(Name, code, NormalizeCode(code), null)]
+                : []);
+    }
+
+    public async Task<ProviderMetadata?> GetMetadataAsync(MetadataSearchResult result, MetadataProviderContext settings, CancellationToken cancellationToken)
+    {
+        MdcNgSettingsDto mdc = settings.MdcNg;
+        if (string.IsNullOrWhiteSpace(settings.CurrentMoviePath)) return null;
+        if (string.IsNullOrWhiteSpace(mdc.CommandPath) || !File.Exists(mdc.CommandPath))
+            throw new FileNotFoundException("MDC-NG 外部命令未配置。", mdc.CommandPath);
+        string root = Path.Combine(Path.GetTempPath(), "lmm-mdc-ng", Guid.NewGuid().ToString("N"));
+        string input = Path.Combine(root, "input");
+        string output = Path.Combine(root, "output");
+        string work = Path.Combine(root, "work");
+        Directory.CreateDirectory(input); Directory.CreateDirectory(output); Directory.CreateDirectory(work);
+        await File.WriteAllTextAsync(Path.Combine(input, $"{NormalizeCode(result.Code)}.strm"), settings.CurrentMoviePath, cancellationToken);
+        try {
+            ProcessStartInfo startInfo = BuildStartInfo(mdc.CommandPath, settings.CurrentMoviePath, input, output, work);
+            using var process = new Process {
+                StartInfo = startInfo,
+            };
+            process.Start();
+            Task<string> stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            Task<string> stderr = process.StandardError.ReadToEndAsync(cancellationToken);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(mdc.TimeoutSeconds));
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+            try { await process.WaitForExitAsync(linked.Token); }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested) {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                throw new TimeoutException("MDC-NG 外部命令执行超时。");
+            }
+            string outText = await stdout; string errText = await stderr;
+            if (process.ExitCode != 0)
+                throw new InvalidOperationException($"MDC-NG 外部命令失败：exit={process.ExitCode}; {TrimLog(errText)} {TrimLog(outText)}");
+            string? nfo = Directory.EnumerateFiles(output, "*.nfo", SearchOption.AllDirectories)
+                .Concat(Directory.EnumerateFiles(work, "*.nfo", SearchOption.AllDirectories))
+                .OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
+            if (nfo is null) throw new InvalidDataException("MDC-NG 未输出 NFO 文件。");
+            return ParseNfo(nfo, result.Code);
+        } finally {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    public Task<IReadOnlyList<MetadataImage>> GetImagesAsync(ProviderMetadata metadata, CancellationToken cancellationToken) =>
+        Task.FromResult(metadata.Images);
+
+    public Task<ProviderConnectionResult> TestConnectionAsync(MetadataProviderContext settings, CancellationToken cancellationToken)
+    {
+        var watch = Stopwatch.StartNew();
+        MdcNgSettingsDto mdc = settings.MdcNg;
+        if (string.IsNullOrWhiteSpace(mdc.CommandPath)) return Task.FromResult(new ProviderConnectionResult(false, Name, "未配置 MDC-NG 外部命令。", watch.ElapsedMilliseconds));
+        if (!File.Exists(mdc.CommandPath)) return Task.FromResult(new ProviderConnectionResult(false, Name, $"外部命令不存在：{mdc.CommandPath}", watch.ElapsedMilliseconds));
+        return Task.FromResult(new ProviderConnectionResult(true, Name, $"外部命令已配置：{mdc.CommandPath}", watch.ElapsedMilliseconds));
+    }
+
+    private static ProviderMetadata ParseNfo(string path, string fallbackCode)
+    {
+        XDocument doc = XDocument.Load(path);
+        XElement root = doc.Root ?? throw new InvalidDataException("NFO 根节点为空。");
+        string? release = First(root, "premiered", "releasedate", "release", "date");
+        int? runtime = int.TryParse(First(root, "runtime"), out int minutes) && minutes > 0 ? minutes * 60 : null;
+        var images = new List<MetadataImage>();
+        AddImage(images, "Poster", First(root, "poster", "thumb"));
+        AddImage(images, "Fanart", First(root, "fanart", "background"));
+        foreach (XElement thumb in root.Elements("thumb").Skip(1).Take(30)) AddImage(images, "Preview", thumb.Value);
+        string code = First(root, "id", "num", "code") ?? fallbackCode;
+        return new("MDC-NG", path, NormalizeCode(code), First(root, "title"), First(root, "plot", "outline", "desc"),
+            First(root, "director"), First(root, "studio", "maker"), First(root, "publisher", "label"),
+            First(root, "set", "series"), runtime, NormalizeDate(release), path,
+            Values(root, "genre").Concat(Values(root, "tag")).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), Values(root, "actor", "name"),
+            images.DistinctBy(image => image.Url, StringComparer.OrdinalIgnoreCase).ToArray());
+    }
+
+    private static ProcessStartInfo BuildStartInfo(string commandPath, string moviePath, string input, string output, string work)
+    {
+        string extension = Path.GetExtension(commandPath);
+        bool isCommandScript = extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase) || extension.Equals(".bat", StringComparison.OrdinalIgnoreCase);
+        return new ProcessStartInfo {
+            FileName = isCommandScript ? (Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe") : commandPath,
+            Arguments = isCommandScript
+                ? $"/d /c {Quote(commandPath)} {Quote(moviePath)} {Quote(input)} {Quote(output)} {Quote(work)}"
+                : $"{Quote(moviePath)} {Quote(input)} {Quote(output)} {Quote(work)}",
+            WorkingDirectory = Path.GetDirectoryName(commandPath) ?? Environment.CurrentDirectory,
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            CreateNoWindow = true,
+        };
+    }
+
+    private static void AddImage(List<MetadataImage> images, string type, string? url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && uri.Scheme is "http" or "https") images.Add(new(type, uri.ToString()));
+    }
+    private static string? First(XElement root, params string[] names) => names.Select(name => root.Element(name)?.Value.Trim()).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+    private static IReadOnlyList<string> Values(XElement root, string element, string? child = null) =>
+        root.Elements(element).Select(value => child is null ? value.Value : value.Element(child)?.Value).Select(value => value?.Trim()).Where(value => !string.IsNullOrWhiteSpace(value)).Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    private static string NormalizeCode(string value) => string.Join(' ', (value ?? "").Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant().Replace('_', '-');
+    private static string Quote(string value) => "\"" + value.Replace("\"", "\"\"") + "\"";
+    private static string TrimLog(string value) {
+        string text = string.Join(' ', (value ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).Trim();
+        return text.Length > 300 ? text[..300] : text;
+    }
+    private static string? NormalizeDate(string? value) => DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out DateTime date) && date.Year > 1900 ? date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : null;
 }
 
 public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProvider
@@ -168,12 +285,14 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
     }
 }
 
-public sealed class CompositeMetadataProvider(MetaTubeProvider metaTube, JavBusProvider javBus, DmmProvider dmm, JavDbProvider javDb) : IMetadataProvider
+public sealed class CompositeMetadataProvider(MdcNgProvider mdcNg, MetaTubeProvider metaTube, JavBusProvider javBus) : IMetadataProvider
 {
     public string Name => "Metadata";
 
     public async Task<IReadOnlyList<MetadataSearchResult>> SearchAsync(string code, MetadataProviderContext settings, CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(settings.PreferredSource))
+            return [new("Composite", code, code, null)];
         var providers = Ordered(settings).ToArray();
         if (providers.Length == 0)
             throw new InvalidOperationException("当前网络检测没有可用的元数据来源，本次同步已跳过不可达 Provider。");
@@ -197,13 +316,12 @@ public sealed class CompositeMetadataProvider(MetaTubeProvider metaTube, JavBusP
     public async Task<ProviderMetadata?> GetMetadataAsync(MetadataSearchResult result, MetadataProviderContext settings, CancellationToken cancellationToken)
     {
         IMetadataProvider provider = result.Provider.ToLowerInvariant() switch {
+            "mdc-ng" => mdcNg,
             "javbus" => javBus,
-            "dmm" => dmm,
-            "javdb" => javDb,
             _ => metaTube,
         };
-        if (provider == dmm || provider == javDb)
-            return await provider.GetMetadataAsync(result, settings, cancellationToken);
+        if (result.Provider.Equals("Composite", StringComparison.OrdinalIgnoreCase))
+            return await CompositeAsync(result.Code, settings, cancellationToken);
         if (provider == javBus || !settings.JavBus.Enabled || !string.IsNullOrWhiteSpace(settings.PreferredSource))
             return await provider.GetMetadataAsync(result, settings, cancellationToken);
 
@@ -229,9 +347,8 @@ public sealed class CompositeMetadataProvider(MetaTubeProvider metaTube, JavBusP
 
     public Task<IReadOnlyList<MetadataImage>> GetImagesAsync(ProviderMetadata metadata, CancellationToken cancellationToken) =>
         metadata.Provider.ToLowerInvariant() switch {
+            "mdc-ng" => mdcNg.GetImagesAsync(metadata, cancellationToken),
             "javbus" => javBus.GetImagesAsync(metadata, cancellationToken),
-            "dmm" => dmm.GetImagesAsync(metadata, cancellationToken),
-            "javdb" => javDb.GetImagesAsync(metadata, cancellationToken),
             _ => metaTube.GetImagesAsync(metadata, cancellationToken),
         };
 
@@ -244,24 +361,40 @@ public sealed class CompositeMetadataProvider(MetaTubeProvider metaTube, JavBusP
             if (settings.JavBus.Enabled) yield return javBus;
             yield break;
         }
+        if (settings.PreferredSource?.Equals("MDC-NG", StringComparison.OrdinalIgnoreCase) == true) {
+            if (settings.MdcNg.Enabled) yield return mdcNg;
+            yield break;
+        }
         if (settings.PreferredSource?.Equals("MetaTube", StringComparison.OrdinalIgnoreCase) == true) {
             if (settings.MetaTube.Enabled) yield return metaTube;
             yield break;
         }
-        if (settings.PreferredSource?.Equals("DMM", StringComparison.OrdinalIgnoreCase) == true) {
-            if ((settings.Dmm ?? SettingsDefaults.Dmm).Enabled) yield return dmm;
-            yield break;
-        }
-        if (settings.PreferredSource?.Equals("JavDB", StringComparison.OrdinalIgnoreCase) == true) {
-            if ((settings.JavDb ?? SettingsDefaults.JavDb).Enabled) yield return javDb;
-            yield break;
-        }
         var items = new List<(int Priority, IMetadataProvider Provider)>();
-        if (settings.MetaTube.Enabled) items.Add((1, metaTube));
-        if (settings.JavBus.Enabled) items.Add((settings.JavBus.Priority, javBus));
-        if ((settings.Dmm ?? SettingsDefaults.Dmm).Enabled) items.Add(((settings.Dmm ?? SettingsDefaults.Dmm).Priority, dmm));
-        if ((settings.JavDb ?? SettingsDefaults.JavDb).Enabled) items.Add(((settings.JavDb ?? SettingsDefaults.JavDb).Priority, javDb));
+        if (settings.MdcNg.Enabled) items.Add((1, mdcNg));
+        if (settings.MetaTube.Enabled) items.Add((2, metaTube));
+        if (settings.JavBus.Enabled) items.Add((3, javBus));
         foreach ((_, IMetadataProvider provider) in items.OrderBy(item => item.Priority)) yield return provider;
+    }
+
+    private async Task<ProviderMetadata?> CompositeAsync(string code, MetadataProviderContext settings, CancellationToken cancellationToken)
+    {
+        ProviderMetadata? merged = null;
+        foreach (IMetadataProvider source in Ordered(settings)) {
+            IReadOnlyList<MetadataSearchResult> results;
+            try { results = await source.SearchAsync(code, settings, cancellationToken); }
+            catch (Exception error) when (error is not OperationCanceledException) { continue; }
+            foreach (MetadataSearchResult result in results.Take(2)) {
+                try {
+                    ProviderMetadata? candidate = await source.GetMetadataAsync(result, settings, cancellationToken);
+                    if (candidate is null) continue;
+                    if (!JavBusCode.Normalize(candidate.Code).Equals(JavBusCode.Normalize(code), StringComparison.OrdinalIgnoreCase)) continue;
+                    merged = merged is null ? candidate : Merge(merged, candidate);
+                    if (!NeedsJavBusSupplement(merged)) return merged;
+                    break;
+                } catch (Exception error) when (error is not OperationCanceledException) { }
+            }
+        }
+        return merged;
     }
 
     private async Task<ProviderMetadata?> TryJavBusAsync(string code, MetadataProviderContext settings, CancellationToken cancellationToken)

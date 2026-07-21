@@ -27,6 +27,10 @@ export interface MetaTubeSettings {
   enabled: boolean; baseUrl: string; timeoutSeconds: number; downloadImages: boolean
   writeNfo: boolean; autoExecute: boolean; nonDestructive: boolean
 }
+export interface MdcNgSettings {
+  enabled: boolean; serviceUrl: string; commandPath: string; timeoutSeconds: number
+  apiKey: string; downloadImages: boolean
+}
 export interface JavBusSettings {
   enabled: boolean; priority: number; baseUrl: string; timeoutSeconds: number; retryCount: number
   cookie: string; downloadImages: boolean; fillMissingOnly: boolean; mirrorUrls?: string[]
@@ -82,6 +86,7 @@ export interface MediaStorageSettings {
   usingFallbackDefault?: boolean
 }
 export interface UnifiedSettings {
+  mdcNg: MdcNgSettings
   metaTube: MetaTubeSettings
   javBus: JavBusSettings
   dmm: WebMetadataSettings

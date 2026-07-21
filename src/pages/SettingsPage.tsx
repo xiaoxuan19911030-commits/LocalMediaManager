@@ -23,7 +23,7 @@ import { defaultMovieWallDisplay, normalizeMovieWallDisplay } from '@/components
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
 import type { BridgeHealth, TaskItem } from '@/types/media'
-import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegToolStatus, JavBusSettings, LogCleanupPreview, LogCleanupResult, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, PlaybackSettings, ProviderDiagnosticResult, ProviderNetworkSettings, RatingRetentionSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult, WebMetadataSettings } from '@/types/settings'
+import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegToolStatus, JavBusSettings, LogCleanupPreview, LogCleanupResult, MdcNgSettings, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, PlaybackSettings, ProviderDiagnosticResult, ProviderNetworkSettings, RatingRetentionSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult, WebMetadataSettings } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 
 const categories = [
@@ -280,7 +280,7 @@ export default function SettingsPage() {
         </Paper>
         {category === 'general' && <GeneralSection snapshot={snapshot} system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
         {category === 'metadata' && <MetadataSection/>}
-        {category === 'plugins' && <PluginsSection snapshot={snapshot} metaTube={draft.metaTube} setMetaTube={(value) => updateDraft('metaTube', value)} providerNetwork={draft.providerNetwork} setProviderNetwork={(value) => updateDraft('providerNetwork', value)} javBus={draft.javBus} setJavBus={(value) => updateDraft('javBus', value)} dmm={draft.dmm} setDmm={(value) => updateDraft('dmm', value)} javDb={draft.javDb} setJavDb={(value) => updateDraft('javDb', value)} minnano={draft.minnano} setMinnano={(value) => updateDraft('minnano', value)} wikipediaJp={draft.wikipediaJp} setWikipediaJp={(value) => updateDraft('wikipediaJp', value)} setNotice={setNotice}/>}
+        {category === 'plugins' && <PluginsSection snapshot={snapshot} mdcNg={draft.mdcNg} setMdcNg={(value) => updateDraft('mdcNg', value)} metaTube={draft.metaTube} setMetaTube={(value) => updateDraft('metaTube', value)} providerNetwork={draft.providerNetwork} setProviderNetwork={(value) => updateDraft('providerNetwork', value)} javBus={draft.javBus} setJavBus={(value) => updateDraft('javBus', value)} dmm={draft.dmm} setDmm={(value) => updateDraft('dmm', value)} javDb={draft.javDb} setJavDb={(value) => updateDraft('javDb', value)} minnano={draft.minnano} setMinnano={(value) => updateDraft('minnano', value)} wikipediaJp={draft.wikipediaJp} setWikipediaJp={(value) => updateDraft('wikipediaJp', value)} setNotice={setNotice}/>}
         {category === 'mediaStorage' && <MediaStorageSection mediaStorage={draft.mediaStorage} defaults={defaults.mediaStorage} setMediaStorage={(value) => updateDraft('mediaStorage', value)} setNotice={setNotice}/>}
         {category === 'search' && <SearchSection search={draft.search} setSearch={(value) => updateDraft('search', value)}/>}
         {category === 'shortcuts' && <ShortcutSection system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
@@ -378,8 +378,10 @@ function MetadataSection() {
   </Stack>
 }
 
-function PluginsSection({ snapshot, metaTube, setMetaTube, providerNetwork, setProviderNetwork, javBus, setJavBus, dmm, setDmm, javDb, setJavDb, minnano, setMinnano, wikipediaJp, setWikipediaJp, setNotice }: {
+function PluginsSection({ snapshot, mdcNg, setMdcNg, metaTube, setMetaTube, providerNetwork, setProviderNetwork, javBus, setJavBus, dmm, setDmm, javDb, setJavDb, minnano, setMinnano, wikipediaJp, setWikipediaJp, setNotice }: {
   snapshot: SettingsSnapshot
+  mdcNg: MdcNgSettings
+  setMdcNg: (value: MdcNgSettings) => void
   metaTube: MetaTubeSettings
   setMetaTube: (value: MetaTubeSettings) => void
   providerNetwork?: ProviderNetworkSettings
@@ -416,6 +418,91 @@ function PluginsSection({ snapshot, metaTube, setMetaTube, providerNetwork, setP
   }, [setNotice])
   useEffect(() => { void refreshFfmpeg() }, [])
   useEffect(() => { refreshDiagnostics() }, [refreshDiagnostics])
+  const resultFor = (provider: string) => diagnostics.find(item => item.provider === provider)
+  const statusFor = (provider: string, configured = true) => {
+    if (!configured) return 'Not configured'
+    if (diagnosticsBusy) return 'Checking'
+    const result = resultFor(provider)
+    if (!result) return 'Not checked'
+    if (result.reachable) return 'Connected'
+    const text = result.message.toLowerCase()
+    if (text.includes('timeout')) return 'Timeout'
+    if (text.includes('auth') || text.includes('401') || text.includes('403')) return 'Auth failed'
+    if (text.includes('json') || text.includes('format')) return 'Bad response'
+    return 'Unavailable'
+  }
+  const statusTone = (status: string) => status === 'Connected' ? 'success' : status === 'Checking' ? 'info' : status === 'Not checked' || status === 'Not configured' ? 'neutral' : 'error'
+  const updateTestResult = (name: string, work: Promise<{ success: boolean; provider: string; message: string; elapsedMilliseconds: number }>) => {
+    work.then(result => {
+      setDiagnostics(current => [...current.filter(item => item.provider !== result.provider), {
+        provider: result.provider,
+        reachable: result.success,
+        scope: name === 'JavBus' ? 'title / director / series / tags / cover' : 'movie data / actors / tags / images',
+        recommendation: result.success ? 'No action needed' : 'Check config, proxy, and service status',
+        message: result.message,
+        testedAt: new Date().toISOString(),
+        elapsedMilliseconds: result.elapsedMilliseconds,
+      }])
+      setNotice(result.message)
+    }).catch((reason: Error) => setDiagnosticsError(reason.message))
+  }
+  const openMdcNgConfig = () => {
+    const path = mdcNg.commandPath.trim()
+    if (!path) { setNotice('Configure MDC-NG command path first.'); return }
+    bridge.openDirectory(path.replace(/[\\/][^\\/]*$/, '')).then(result => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))
+  }
+  return <Stack spacing={2}>
+    <SurfaceSection title="External scraper services" description="Sync calls MDC-NG, MetaTube, then JavBus. Test actions do not write movie data.">
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'repeat(3,minmax(0,1fr))' }, gap: 1.5 }}>
+        <ScraperServiceCard title="MDC-NG Scraper" description="External command and NFO adapter for movie metadata, actors, tags, covers, and previews." status={statusFor('MDC-NG', Boolean(mdcNg.commandPath.trim()))} tone={statusTone(statusFor('MDC-NG', Boolean(mdcNg.commandPath.trim())))} enabled={mdcNg.enabled} onEnabledChange={enabled => setMdcNg({ ...mdcNg, enabled })} address={mdcNg.serviceUrl || mdcNg.commandPath || 'Not configured'} version="Command / NFO" auth={mdcNg.apiKey ? 'Auth configured' : 'Auth not configured'} capabilities="title / original title / actors / tags / plot / release / cover / fanart / previews" diagnostic={resultFor('MDC-NG')} actions={<><Button variant="outlined" onClick={openMdcNgConfig}>Open config</Button><Button variant="outlined" onClick={() => mdcNg.serviceUrl ? window.open(mdcNg.serviceUrl, '_blank') : setNotice('MDC-NG service URL is not configured.')}>Open service page</Button><Button variant="outlined" startIcon={<RefreshRoundedIcon/>} disabled={diagnosticsBusy} onClick={refreshDiagnostics}>Refresh</Button><Button variant="outlined" onClick={() => updateTestResult('MDC-NG', bridge.testMdcNg(mdcNg))}>Test scrape</Button></>}>
+          <TextField size="small" label="Command path" value={mdcNg.commandPath} onChange={event => setMdcNg({ ...mdcNg, commandPath: event.target.value })} helperText="Sync passes movie path plus temporary input/output/work folders."/>
+          <TextField size="small" label="Service URL optional" value={mdcNg.serviceUrl} onChange={event => setMdcNg({ ...mdcNg, serviceUrl: event.target.value })}/>
+        </ScraperServiceCard>
+        <ScraperServiceCard title="MetaTube Scraper" description="Fallback service for movie search, actors, tags, covers, and images." status={statusFor('MetaTube', Boolean(metaTube.baseUrl.trim()))} tone={statusTone(statusFor('MetaTube', Boolean(metaTube.baseUrl.trim())))} enabled={metaTube.enabled} onEnabledChange={enabled => setMetaTube({ ...metaTube, enabled })} address={metaTube.baseUrl} version="MetaTube API" auth="No auth required" capabilities="actors / tags / release / runtime / images / plot" diagnostic={resultFor('MetaTube')} actions={<><Button variant="outlined" onClick={() => setNotice('MetaTube config is shown in this card. Save settings after editing.')}>Open config</Button><Button variant="outlined" onClick={() => window.open(metaTube.baseUrl, '_blank')}>Open service page</Button><Button variant="outlined" startIcon={<RefreshRoundedIcon/>} disabled={diagnosticsBusy} onClick={refreshDiagnostics}>Refresh</Button><Button variant="outlined" onClick={() => updateTestResult('MetaTube', bridge.testMetaTube(metaTube))}>Test scrape</Button></>}>
+          <TextField size="small" label="Service URL" value={metaTube.baseUrl} onChange={event => setMetaTube({ ...metaTube, baseUrl: event.target.value })}/>
+        </ScraperServiceCard>
+        <ScraperServiceCard title="JavBus Online Source" description="Online fallback for title, director, series, tags, and cover." status={statusFor('JavBus', Boolean((javBus.baseUrl || 'https://www.javbus.com/').trim()))} tone={statusTone(statusFor('JavBus', Boolean((javBus.baseUrl || 'https://www.javbus.com/').trim())))} enabled={javBus.enabled} onEnabledChange={enabled => setJavBus({ ...javBus, enabled })} address={javBus.baseUrl || 'https://www.javbus.com/'} version={network.proxyMode === 'Manual' ? 'Manual proxy' : network.proxyMode === 'Direct' ? 'Direct' : 'System proxy'} auth={javBus.cookie ? 'Cookie configured' : 'Cookie not configured'} capabilities="title / director / series / category / tags / cover" diagnostic={resultFor('JavBus')} actions={<><Button variant="outlined" onClick={() => setNotice('JavBus network config is shown below. Save settings after editing.')}>Network config</Button><Button variant="outlined" onClick={() => window.open(javBus.baseUrl || 'https://www.javbus.com/', '_blank')}>Open website</Button><Button variant="outlined" startIcon={<RefreshRoundedIcon/>} disabled={diagnosticsBusy} onClick={refreshDiagnostics}>Refresh</Button><Button variant="outlined" onClick={() => updateTestResult('JavBus', bridge.testJavBus(javBus))}>Test search</Button></>}>
+          <TextField size="small" label="Current domain" value={javBus.baseUrl} placeholder="https://www.javbus.com/" onChange={event => setJavBus({ ...javBus, baseUrl: event.target.value })}/>
+          <MirrorField label="Mirror domains" value={javBus.mirrorUrls} onChange={mirrorUrls => setJavBus({ ...javBus, mirrorUrls })}/>
+        </ScraperServiceCard>
+      </Box>
+    </SurfaceSection>
+    <SurfaceSection title="Provider network" description="Proxy and JavBus mirror settings are reused by scraper sync after saving.">
+      <Stack spacing={1.5}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '180px minmax(0,1fr)' }, gap: 1.5 }}>
+          <TextField select size="small" label="Proxy mode" value={network.proxyMode} onChange={event => setProviderNetwork({ ...network, proxyMode: event.target.value as ProviderNetworkSettings['proxyMode'] })}>
+            <MenuItem value="System">System proxy</MenuItem>
+            <MenuItem value="Direct">Direct</MenuItem>
+            <MenuItem value="Manual">Manual proxy</MenuItem>
+          </TextField>
+          <TextField size="small" label="Manual proxy URL" placeholder="http://127.0.0.1:7890" value={network.proxyUrl} disabled={network.proxyMode !== 'Manual'} onChange={event => setProviderNetwork({ ...network, proxyUrl: event.target.value })}/>
+        </Box>
+        <Alert severity="info">Old DMM, JavDB, Minnano, and Wikipedia JP settings are ignored safely and do not participate in movie sync.</Alert>
+      </Stack>
+    </SurfaceSection>
+    {diagnosticsError && <Alert severity="warning">{diagnosticsError}</Alert>}
+    <SurfaceSection title="FFmpeg screenshot tool" description="Used for screenshots, thumbnails, previews, GIFs, and video info reading.">
+      <Stack spacing={1.25}>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+          {ffmpeg?.found ? <VerifiedRoundedIcon color="success"/> : <CloudOffRoundedIcon color="disabled"/>}
+          <StatusBadge tone={ffmpeg?.found ? 'success' : 'warning'} label={ffmpeg?.found ? 'Detected' : 'Not detected'}/>
+          {ffmpeg?.version && <Chip size="small" label={ffmpeg?.version}/>}
+          {ffmpeg?.probeVersion && <Chip size="small" label={ffmpeg?.probeVersion}/>}
+        </Stack>
+        <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{ffmpeg?.message || ffmpegError || 'Checking FFmpeg...'}</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>Plugin directory: {ffmpeg?.pluginDirectory || 'plugins\\ffmpeg'}</Typography>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+          <Button variant="outlined" startIcon={<FolderRoundedIcon/>} onClick={() => {
+            const directory = ffmpeg?.pluginDirectory
+            if (!directory) return
+            bridge.openDirectory(directory).then(result => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))
+          }}>Open plugin folder</Button>
+          <Button variant="outlined" startIcon={<CloudDownloadRoundedIcon/>} onClick={() => window.open('https://www.gyan.dev/ffmpeg/builds/', '_blank')}>Download</Button>
+          <Button variant="outlined" startIcon={<RefreshRoundedIcon/>} onClick={refreshFfmpeg}>Refresh</Button>
+        </Stack>
+      </Stack>
+    </SurfaceSection>
+  </Stack>
   const groups = [...new Set(snapshot.servers.map(item => item.pluginId || 'legacy'))]
     .map(id => ({ id, servers: snapshot.servers.filter(item => (item.pluginId || 'legacy') === id) }))
   return <Stack spacing={2}>
@@ -470,13 +557,17 @@ function PluginsSection({ snapshot, metaTube, setMetaTube, providerNetwork, setP
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
           {ffmpeg?.found ? <VerifiedRoundedIcon color="success"/> : <CloudOffRoundedIcon color="disabled"/>}
           <StatusBadge tone={ffmpeg?.found ? 'success' : 'warning'} label={ffmpeg?.found ? '已检测到' : '未检测到'}/>
-          {ffmpeg?.version && <Chip size="small" label={ffmpeg.version}/>}
-          {ffmpeg?.probeVersion && <Chip size="small" label={ffmpeg.probeVersion}/>}
+          {ffmpeg?.version && <Chip size="small" label={ffmpeg?.version}/>}
+          {ffmpeg?.probeVersion && <Chip size="small" label={ffmpeg?.probeVersion}/>}
         </Stack>
         <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{ffmpeg?.message || ffmpegError || '正在检测 FFmpeg...'}</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>请将 ffmpeg.exe 与 ffprobe.exe 复制到：{ffmpeg?.pluginDirectory || 'plugins\\ffmpeg'}。升级软件不会删除该目录。</Typography>
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
-          <Button variant="outlined" startIcon={<FolderRoundedIcon/>} onClick={() => ffmpeg && bridge.openDirectory(ffmpeg.pluginDirectory).then(result => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))}>打开插件目录</Button>
+          <Button variant="outlined" startIcon={<FolderRoundedIcon/>} onClick={() => {
+            const directory = ffmpeg?.pluginDirectory
+            if (!directory) return
+            bridge.openDirectory(directory).then(result => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))
+          }}>打开插件目录</Button>
           <Button variant="outlined" startIcon={<CloudDownloadRoundedIcon/>} onClick={() => window.open('https://www.gyan.dev/ffmpeg/builds/', '_blank')}>下载</Button>
           <Button variant="outlined" startIcon={<RefreshRoundedIcon/>} onClick={refreshFfmpeg}>刷新检测</Button>
         </Stack>
@@ -513,6 +604,42 @@ function ProviderSwitchCard({ title, description, checked, onChange }: { title: 
       </Stack>
     </CardContent>
   </Card>
+}
+
+function ScraperServiceCard({ title, description, status, tone, enabled, onEnabledChange, address, version, auth, capabilities, diagnostic, actions, children }: {
+  title: string
+  description: string
+  status: string
+  tone: 'success' | 'info' | 'neutral' | 'error' | 'warning'
+  enabled: boolean
+  onEnabledChange: (enabled: boolean) => void
+  address: string
+  version: string
+  auth: string
+  capabilities: string
+  diagnostic?: ProviderDiagnosticResult
+  actions: ReactNode
+  children?: ReactNode
+}) {
+  return <SurfaceSection title={title} description={description}>
+    <Stack spacing={1.25}>
+      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+          {status === 'Connected' ? <VerifiedRoundedIcon color="success"/> : <CloudOffRoundedIcon color={status === 'Checking' ? 'info' : 'disabled'}/>}
+          <StatusBadge tone={tone} label={status}/>
+          <Chip size="small" label={version}/>
+          <Chip size="small" label={auth}/>
+        </Stack>
+        <FormControlLabel control={<Switch checked={enabled} onChange={event => onEnabledChange(event.target.checked)}/>} label="Use for sync" labelPlacement="start" sx={{ m: 0 }}/>
+      </Stack>
+      <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>Address: {address}</Typography>
+      <Typography variant="body2" color="text.secondary">Capabilities: {capabilities}</Typography>
+      <Typography variant="body2" color="text.secondary">Last check: {diagnostic?.testedAt ? new Date(diagnostic.testedAt).toLocaleString() : 'Not checked'}</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{diagnostic?.message || 'The app checks sources automatically. Sync uses enabled and available sources only.'}</Typography>
+      {children && <Stack spacing={1}>{children}</Stack>}
+      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>{actions}</Stack>
+    </Stack>
+  </SurfaceSection>
 }
 
 function MirrorField({ label, value, onChange }: { label: string; value?: string[]; onChange: (value: string[]) => void }) {

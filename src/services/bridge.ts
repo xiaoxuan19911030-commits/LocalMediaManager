@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { ActorDetail, ActorProfileCandidate, ActorProfilePreview, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateDeleteGroupCommand, DuplicateDeletePreview, DuplicateResults, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageCropCommand, ImageDeletePreview, ImageMutationResult, ImageTaskLaunchResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, PlatformOpenResult, RandomMovieResult, SafeDeleteLaunchResult, SafeDeletePreview, SafeDeletePreviewCommand, ScanLaunchResult, TaskCleanupResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
-import type { JavBusSettings, WebMetadataSettings } from '@/types/settings'
-import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, FfmpegToolStatus, LogCleanupPreview, LogCleanupResult, MetaTubeSettings, ProviderConnectionResult, ProviderDiagnosticResult, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings, UnifiedSettingsSaveResult, UpdateCheckResult } from '@/types/settings'
+import type { JavBusSettings } from '@/types/settings'
+import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, FfmpegToolStatus, LogCleanupPreview, LogCleanupResult, MdcNgSettings, MetaTubeSettings, ProviderConnectionResult, ProviderDiagnosticResult, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings, UnifiedSettingsSaveResult, UpdateCheckResult } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
 
@@ -80,12 +80,9 @@ export const bridge = {
   logCleanupPreview: (retentionDays: number, includeAllHistory = false) => request<LogCleanupPreview>(`/api/system/logs/cleanup-preview?${new URLSearchParams({ retentionDays: String(retentionDays), includeAllHistory: String(includeAllHistory) })}`),
   cleanupLogs: (retentionDays: number, includeAllHistory: boolean, confirmationToken: string) => request<LogCleanupResult>('/api/system/logs/cleanup', { method: 'POST', body: JSON.stringify({ retentionDays, includeAllHistory, confirmationToken }) }),
   checkUpdates: () => request<UpdateCheckResult>('/api/system/update/check', { method: 'POST' }),
+  testMdcNg: (value: MdcNgSettings) => request<ProviderConnectionResult>('/api/settings/providers/mdc-ng/test', { method: 'POST', body: JSON.stringify(value) }),
   testMetaTube: (value: MetaTubeSettings) => request<ProviderConnectionResult>('/api/settings/providers/metatube/test', { method: 'POST', body: JSON.stringify(value) }),
   testJavBus: (value: JavBusSettings) => request<ProviderConnectionResult>('/api/settings/providers/javbus/test', { method: 'POST', body: JSON.stringify(value) }),
-  testDmm: (value: WebMetadataSettings) => request<ProviderConnectionResult>('/api/settings/providers/dmm/test', { method: 'POST', body: JSON.stringify(value) }),
-  testJavDb: (value: WebMetadataSettings) => request<ProviderConnectionResult>('/api/settings/providers/javdb/test', { method: 'POST', body: JSON.stringify(value) }),
-  testMinnano: (value: WebMetadataSettings) => request<ProviderConnectionResult>('/api/settings/providers/minnano/test', { method: 'POST', body: JSON.stringify(value) }),
-  testWikipediaJp: (value: WebMetadataSettings) => request<ProviderConnectionResult>('/api/settings/providers/wikipedia-jp/test', { method: 'POST', body: JSON.stringify(value) }),
   providerDiagnostics: () => request<ProviderDiagnosticResult[]>('/api/settings/providers/diagnostics', { method: 'POST' }),
   ffmpegStatus: () => request<FfmpegToolStatus>('/api/plugins/ffmpeg/status'),
   movie: (id: number) => request<MovieDetail>(`/api/videos/${id}`),
