@@ -29,7 +29,8 @@ public sealed class MdcNgScrapeTests
             "rating": 4.8,
             "poster": "https://img.example/poster.jpg?x=1",
             "thumb": "https://img.example/thumb.jpg",
-            "fanart": "https://img.example/fanart.jpg",
+            "cover": "https://img.example/fanart.jpg",
+            "ActorPhotos": "https://img.example/actor-a.jpg,https://img.example/actor-b.jpg",
             "extra_fanart": ["https://img.example/1.jpg", "https://img.example/2.jpg"],
             "trailer": "https://video.example/trailer.mp4"
           }
@@ -57,6 +58,7 @@ public sealed class MdcNgScrapeTests
         Assert.Equal("https://img.example/thumb.jpg", metadata.Thumb);
         Assert.Equal("https://img.example/fanart.jpg", metadata.Fanart);
         Assert.Equal(2, metadata.ExtraFanart.Count);
+        Assert.Equal("https://img.example/actor-a.jpg", metadata.ActorImages[0].ImageUrl);
         Assert.Equal("https://video.example/trailer.mp4", metadata.Trailer);
     }
 

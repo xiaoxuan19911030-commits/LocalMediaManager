@@ -6,7 +6,8 @@ namespace LocalMediaManager.Bridge;
 public sealed class MetadataSyncService(
     MetadataProviderSettingsService settings,
     MdcNgProvider mdcNg,
-    MovieMetadataImporter? importer = null)
+    MovieMetadataImporter? importer = null,
+    MovieImageImporter? imageImporter = null)
 {
     public const string MdcNgProviderId = "mdc-ng";
 
@@ -43,9 +44,25 @@ public sealed class MetadataSyncService(
                     "PROVIDER_FAILED", scrape.Message);
 
             MovieMetadataImportResult? import = null;
+            MovieImageImportResult? images = null;
             if (request.MovieId.HasValue) {
                 if (importer is null) throw new InvalidOperationException("MovieMetadataImporter is not configured.");
-                import = await importer.ImportAsync(request.MovieId.Value, scrape.Metadata, request.Overwrite, cancellationToken);
+                SyncMovie movie = await importer.ReadMovieAsync(request.MovieId.Value, cancellationToken);
+                if (imageImporter is not null) {
+                    MdcNgSettingsDto imageSettings = await settings.ReadMdcNgAsync();
+                    images = await imageImporter.PrepareAsync(movie, scrape.Metadata, imageSettings.TimeoutSeconds, request.Overwrite, cancellationToken);
+                }
+                import = await importer.ImportAsync(request.MovieId.Value, scrape.Metadata, request.Overwrite, images?.PreparedFiles, cancellationToken);
+                if (imageImporter is not null) {
+                    MdcNgSettingsDto imageSettings = await settings.ReadMdcNgAsync();
+                    MovieImageImportResult actorImages = await imageImporter.ImportActorImagesAsync(scrape.Metadata, imageSettings.TimeoutSeconds, request.Overwrite, cancellationToken);
+                    images = images is null
+                        ? actorImages
+                        : images with {
+                            ActorImagesDownloaded = actorImages.ActorImagesDownloaded,
+                            Warnings = images.Warnings.Concat(actorImages.Warnings).ToArray()
+                        };
+                }
             }
             return new(
                 scrape.Success && scrape.Metadata is not null,
@@ -56,7 +73,8 @@ public sealed class MetadataSyncService(
                 null,
                 null,
                 import?.TaskId,
-                import?.AppliedJson);
+                import?.AppliedJson,
+                images is null ? null : new(images.MovieImagesDownloaded, images.ActorImagesDownloaded, images.Warnings));
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             throw;
         } catch (Exception error) when (error is HttpRequestException or TimeoutException or InvalidOperationException or JsonException) {

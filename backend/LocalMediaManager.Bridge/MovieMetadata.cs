@@ -1,5 +1,7 @@
 namespace LocalMediaManager.Bridge;
 
+public sealed record ActorImageMetadata(string Name, string ImageUrl);
+
 public sealed record MovieMetadata(
     string Provider,
     string? ExternalId,
@@ -20,7 +22,8 @@ public sealed record MovieMetadata(
     string? Thumb,
     string? Fanart,
     IReadOnlyList<string> ExtraFanart,
-    string? Trailer);
+    string? Trailer,
+    IReadOnlyList<ActorImageMetadata> ActorImages);
 
 public sealed record MdcNgScrapeCommand(
     string MoviePath,
@@ -54,4 +57,10 @@ public sealed record MetadataSyncResult(
     string? ErrorCode,
     string? ErrorMessage,
     long? ImportTaskId = null,
-    string? ImportSummary = null);
+    string? ImportSummary = null,
+    MetadataSyncImageResult? Images = null);
+
+public sealed record MetadataSyncImageResult(
+    int MovieImagesDownloaded,
+    int ActorImagesDownloaded,
+    IReadOnlyList<string> Warnings);

@@ -24,13 +24,14 @@ public sealed class MovieMetadataImporter(string databasePath, MetadataWriteServ
     }
 
     public async Task<MovieMetadataImportResult> ImportAsync(long movieId, MovieMetadata metadata, bool overwrite,
+        PreparedFiles? files,
         CancellationToken cancellationToken)
     {
         SyncMovie movie = await ReadMovieAsync(movieId, cancellationToken);
         long taskId = await CreateTaskAsync(movieId, metadata, overwrite, cancellationToken);
         try {
             ProviderMetadata providerMetadata = ToProviderMetadata(metadata);
-            string applied = await writer.ApplyAsync(taskId, movie, providerMetadata, new([], null, []), overwrite, cancellationToken);
+            string applied = await writer.ApplyAsync(taskId, movie, providerMetadata, files ?? new([], null, []), overwrite, cancellationToken);
             await CompleteTaskAsync(taskId, applied, cancellationToken);
             return new(taskId, applied);
         } catch (Exception error) when (error is not OperationCanceledException) {

@@ -9,9 +9,10 @@ public static class MdcNgAdapter
     public static MovieMetadata ToMovieMetadata(JsonElement source, string? fallbackCode = null)
     {
         string code = NormalizeCode(FirstString(source, "number", "code", "num", "id", "dvdid", "movie_id") ?? fallbackCode ?? "");
-        string? poster = FirstUrl(source, "poster", "cover", "cover_url", "big_cover_url");
+        string? poster = FirstUrl(source, "poster", "poster_url", "cover_url", "big_cover_url");
         string? thumb = FirstUrl(source, "thumb", "thumbnail", "thumb_url", "small_cover_url");
-        string? fanart = FirstUrl(source, "fanart", "backdrop", "backdrop_url", "background", "background_url");
+        string? fanart = FirstUrl(source, "fanart", "cover", "backdrop", "backdrop_url", "background", "background_url");
+        IReadOnlyList<ActorImageMetadata> actorImages = ActorImages(source);
         IReadOnlyList<string> extraFanart = Values(source, "extrafanart", "extra_fanart", "extra_fanarts", "preview_images", "sample_images", "screenshots")
             .Where(IsHttpUrl)
             .Select(StripQuery)
@@ -40,7 +41,8 @@ public static class MdcNgAdapter
             thumb,
             fanart,
             extraFanart,
-            trailer);
+            trailer,
+            actorImages);
     }
 
     private static string? FirstString(JsonElement source, params string[] names)
@@ -71,6 +73,39 @@ public static class MdcNgAdapter
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private static IReadOnlyList<ActorImageMetadata> ActorImages(JsonElement source)
+    {
+        var result = new List<ActorImageMetadata>();
+        foreach (string name in new[] { "actors", "actor", "actress", "actresses", "stars", "cast" }) {
+            if (TryFind(source, name, out JsonElement value)) CollectActorImages(value, result);
+        }
+        if (result.Count == 0) {
+            IReadOnlyList<string> names = Values(source, "actors", "actor", "actress", "actresses", "stars", "cast");
+            IReadOnlyList<string> photos = Values(source, "actor_photos", "actorphotos", "actor_images", "actorimages", "actor_avatars", "actoravatars");
+            for (int i = 0; i < Math.Min(names.Count, photos.Count); i++) {
+                if (IsHttpUrl(photos[i])) result.Add(new(names[i], StripQuery(photos[i])));
+            }
+        }
+        return result
+            .Where(value => !string.IsNullOrWhiteSpace(value.Name) && IsHttpUrl(value.ImageUrl))
+            .DistinctBy(value => NormalizeActorKey(value.Name))
+            .ToArray();
+    }
+
+    private static void CollectActorImages(JsonElement value, List<ActorImageMetadata> result)
+    {
+        switch (value.ValueKind) {
+            case JsonValueKind.Array:
+                foreach (JsonElement item in value.EnumerateArray()) CollectActorImages(item, result);
+                break;
+            case JsonValueKind.Object:
+                string? name = FirstDirectString(value, "name", "title", "value", "label");
+                string? image = FirstDirectUrl(value, "image", "image_url", "avatar", "avatar_url", "poster", "photo", "portrait", "thumb", "thumbnail", "url");
+                if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(image)) result.Add(new(name, StripQuery(image)));
+                break;
+        }
     }
 
     private static void CollectValues(JsonElement value, List<string> values)
@@ -121,6 +156,16 @@ public static class MdcNgAdapter
         return null;
     }
 
+    private static string? FirstDirectUrl(JsonElement source, params string[] names)
+    {
+        foreach (JsonProperty property in source.EnumerateObject()) {
+            if (!names.Contains(property.Name, StringComparer.OrdinalIgnoreCase)) continue;
+            string? value = property.Value.ValueKind == JsonValueKind.String ? property.Value.GetString()?.Trim() : property.Value.ToString();
+            if (IsHttpUrl(value)) return value;
+        }
+        return null;
+    }
+
     private static bool TryFind(JsonElement source, string name, out JsonElement value)
     {
         if (source.ValueKind == JsonValueKind.Object) {
@@ -153,6 +198,9 @@ public static class MdcNgAdapter
 
     private static string NormalizeCode(string value) =>
         string.Join(' ', (value ?? "").Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant().Replace('_', '-');
+
+    private static string NormalizeActorKey(string value) =>
+        string.Join(' ', (value ?? "").Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant();
 
     private static string? NormalizeDate(string? value) =>
         DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out DateTime date) && date.Year > 1900

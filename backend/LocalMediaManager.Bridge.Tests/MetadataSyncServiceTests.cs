@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using LocalMediaManager.Bridge;
 using Microsoft.Data.Sqlite;
+using SkiaSharp;
 using Xunit;
 
 namespace LocalMediaManager.Bridge.Tests;
@@ -16,11 +17,13 @@ public sealed class MetadataSyncServiceTests : IAsyncLifetime
         Directory.CreateDirectory(root);
         await using var connection = new SqliteConnection($"Data Source={Database}");
         await connection.OpenAsync();
-        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0005_MetadataSyncWorkflow.sql", "0013_DirectorMetadata.sql" }) {
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0012_MediaStorageSettings.sql", "0013_DirectorMetadata.sql" }) {
             await using var command = connection.CreateCommand();
             command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
             await command.ExecuteNonQueryAsync();
         }
+        await Execute(connection, "UPDATE AppSettings SET ValueJson=$root WHERE Key='mediaStorage.rootPath'",
+            ("$root", System.Text.Json.JsonSerializer.Serialize(Path.Combine(root, "MediaStorage"))));
     }
 
     public Task DisposeAsync()
@@ -80,13 +83,22 @@ public sealed class MetadataSyncServiceTests : IAsyncLifetime
                 return Json("""
                 {"data":[{"id":21,"manual_job_id":11,"status":1,"metadata":{
                   "Number":"SONE-104","Title":"Imported title","OriginalTitle":"Original imported title",
-                  "Outline":"Imported plot","Actors":"Actor A,Actor B","Director":"Director A",
+                  "Outline":"Imported plot","Actors":[{"name":"Actor A","image":"https://img.example/actor-a.png"},"Actor B"],"Director":"Director A",
                   "Studio":"Studio A","Series":"Series A","Tags":"Drama,HD","Release":"2024-06-10",
-                  "Runtime":"124","UserRating":"4.17"
+                  "Runtime":"124","UserRating":"4.17","Poster":"https://img.example/poster.png",
+                  "Fanart":"https://img.example/fanart.png"
                 }}]}
                 """);
+            if (request.RequestUri!.Host == "img.example") {
+                var color = request.RequestUri.AbsolutePath.Contains("fanart") ? SKColors.DarkSlateBlue
+                    : request.RequestUri.AbsolutePath.Contains("actor") ? SKColors.HotPink
+                    : SKColors.CornflowerBlue;
+                return new(HttpStatusCode.OK) {
+                    Content = new ByteArrayContent(CreatePng(80, 120, color)) { Headers = { ContentType = new("image/png") } }
+                };
+            }
             return new(HttpStatusCode.NotFound);
-        }, withImporter: true);
+        }, withImporter: true, withImages: true);
 
         MetadataSyncResult result = await service.SyncMovieAsync(1, "mdc-ng", overwrite: false, CancellationToken.None);
 
@@ -104,6 +116,9 @@ public sealed class MetadataSyncServiceTests : IAsyncLifetime
         Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM MovieDirectors WHERE MovieId=1"));
         Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM MovieStudios WHERE MovieId=1"));
         Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM MovieSeries WHERE MovieId=1"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Images WHERE MovieId=1 AND ImageType='Poster' AND ValidationStatus='Valid'"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Images WHERE MovieId=1 AND ImageType='Fanart' AND ValidationStatus='Valid'"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Images WHERE ActorId=(SELECT Id FROM Actors WHERE Name='Actor A') AND ImageType='ActorAvatar' AND ValidationStatus='Valid'"));
 
         MovieDetailDto? detail = await ProductReader.ReadMovieAsync(Database, "http://localhost", 1);
         Assert.NotNull(detail);
@@ -112,6 +127,9 @@ public sealed class MetadataSyncServiceTests : IAsyncLifetime
         Assert.Equal(4.17, detail.ProviderRating);
         Assert.Contains(detail.Actors, actor => actor.Name == "Actor A");
         Assert.Contains(detail.Genres, genre => genre.Name == "Drama");
+        var assets = new ImageAssetService(Database, Path.Combine(root, "MediaStorage"));
+        Assert.NotNull(await assets.ResolveMovieAsync(1, "original", "poster"));
+        Assert.NotNull(await assets.ResolveMovieAsync(1, "original", "fanart"));
     }
 
     [Fact]
@@ -158,13 +176,27 @@ public sealed class MetadataSyncServiceTests : IAsyncLifetime
         Assert.DoesNotContain("provider.ScrapeAsync", endpoint);
     }
 
-    private MetadataSyncService CreateService(Func<HttpRequestMessage, HttpResponseMessage> handler, bool withImporter = false)
+    private MetadataSyncService CreateService(Func<HttpRequestMessage, HttpResponseMessage> handler, bool withImporter = false, bool withImages = false)
     {
         var settings = new MetadataProviderSettingsService(Database);
         MovieMetadataImporter? importer = withImporter
             ? new MovieMetadataImporter(Database, new MetadataWriteService(Database))
             : null;
-        return new(settings, new MdcNgProvider(new FakeFactory(handler)), importer);
+        var factory = new FakeFactory(handler);
+        MovieImageImporter? images = withImages
+            ? new MovieImageImporter(Database, Path.Combine(root, "MediaStorage"), new MediaStoragePathResolver(Database, root), new ImageDownloadService(factory), factory)
+            : null;
+        return new(settings, new MdcNgProvider(factory), importer, images);
+    }
+
+    private static byte[] CreatePng(int width, int height, SKColor color)
+    {
+        using var bitmap = new SKBitmap(width, height);
+        using var canvas = new SKCanvas(bitmap);
+        canvas.Clear(color);
+        using SKImage image = SKImage.FromBitmap(bitmap);
+        using SKData data = image.Encode(SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
     }
 
     private async Task<SqliteConnection> Open()

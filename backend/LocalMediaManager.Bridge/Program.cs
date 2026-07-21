@@ -32,6 +32,12 @@ builder.Services.AddSingleton(new MediaStoragePathResolver(databasePath, install
 builder.Services.AddSingleton(new MetadataProviderSettingsService(databasePath));
 builder.Services.AddSingleton(new MetadataWriteService(databasePath));
 builder.Services.AddSingleton(sp => new MovieMetadataImporter(databasePath, sp.GetRequiredService<MetadataWriteService>()));
+builder.Services.AddSingleton(sp => new MovieImageImporter(
+    databasePath,
+    imageRoot,
+    sp.GetRequiredService<MediaStoragePathResolver>(),
+    sp.GetRequiredService<ImageDownloadService>(),
+    sp.GetRequiredService<IHttpClientFactory>()));
 builder.Services.AddSingleton(new TaskLogService(databasePath));
 builder.Services.AddSingleton(new FfmpegLocator(databasePath, AppContext.BaseDirectory));
 builder.Services.AddSingleton(new ImageAssetService(databasePath, imageRoot));
