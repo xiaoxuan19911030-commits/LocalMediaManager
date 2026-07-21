@@ -36,6 +36,7 @@ public sealed record MdcNgToolStatusDto(
 
 public sealed class MdcNgProvider(IHttpClientFactory? clients = null) : IMetadataProvider
 {
+    private const string DefaultPreviewTargetFolder = "/config/data";
     public string Name => "MDC-NG";
 
     public Task<IReadOnlyList<MetadataSearchResult>> SearchAsync(string code, MetadataProviderContext settings, CancellationToken cancellationToken)
@@ -62,32 +63,55 @@ public sealed class MdcNgProvider(IHttpClientFactory? clients = null) : IMetadat
         int timeoutSeconds = Math.Clamp(command.TimeoutSeconds ?? normalized.TimeoutSeconds, 10, 600);
         using HttpClient client = clients?.CreateClient("MDC-NG") ?? new HttpClient();
         client.Timeout = TimeSpan.FromSeconds(Math.Min(timeoutSeconds, 60));
-        Uri apiRoot = new(normalized.ApiUrl);
+        Uri apiRoot = await ResolveApiRootAsync(client, normalized, cancellationToken);
 
-        using JsonDocument createDocument = await PostJsonAsync(client, new Uri(apiRoot, "api/manual-jobs"), new {
-            pathes = new[] { command.MoviePath },
-            target_folder = string.IsNullOrWhiteSpace(command.TargetFolder) ? "/tmp/lmm-mdc-ng" : command.TargetFolder,
-            link_mode = 3,
-            delete_empty_parent_after_move = false,
-        }, cancellationToken);
-        JsonElement createRoot = createDocument.RootElement.Clone();
-        string? jobId = FirstScalar(createRoot, "job_id", "jobId", "id");
-        string? taskId = FirstScalar(createRoot, "task_id", "taskId", "task");
+        JsonElement beforeJobs = await ReadJsonElementAsync(client, new Uri(apiRoot, "api/manual-jobs?page=1&page_size=20"), cancellationToken);
+        long beforeMaxJobId = MaxId(beforeJobs);
+        Dictionary<string, object> payload = new() {
+            ["pathes"] = new[] { command.MoviePath },
+            ["target_folder"] = string.IsNullOrWhiteSpace(command.TargetFolder) ? DefaultPreviewTargetFolder : command.TargetFolder,
+            ["link_mode"] = 3,
+            ["delete_empty_parent_after_move"] = false,
+        };
+        await PostManualJobAsync(client, new Uri(apiRoot, "api/manual-jobs"), payload, cancellationToken);
 
         DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(timeoutSeconds);
-        JsonElement latest = createRoot;
-        string status = FirstScalar(latest, "status", "state") ?? "created";
+        JsonElement latest = beforeJobs;
+        string? jobId = null;
+        string? taskId = null;
+        string status = "created";
         while (DateTimeOffset.UtcNow < deadline) {
-            using JsonDocument taskDocument = await ReadTaskAsync(client, apiRoot, taskId, jobId, cancellationToken);
-            latest = taskDocument.RootElement.Clone();
-            taskId ??= FirstScalar(latest, "task_id", "taskId", "id");
-            status = FirstScalar(latest, "status", "state") ?? status;
-            if (IsSuccessStatus(latest, status)) {
-                MovieMetadata metadata = MdcNgAdapter.ToMovieMetadata(latest, command.Code);
-                return new(Name, true, status, jobId, taskId, metadata, latest.GetRawText(), "MDC-NG scrape task finished.");
+            JsonElement jobs = await ReadJsonElementAsync(client, new Uri(apiRoot, "api/manual-jobs?page=1&page_size=20"), cancellationToken);
+            JsonElement? job = FindManualJob(jobs, command.MoviePath, beforeMaxJobId);
+            if (job is not null) {
+                latest = job.Value;
+                jobId ??= FirstScalar(latest, "id", "job_id", "jobId");
+                status = FirstScalar(latest, "status", "state") ?? status;
             }
-            if (IsFailureStatus(latest, status))
-                return new(Name, false, status, jobId, taskId, null, latest.GetRawText(), "MDC-NG scrape task failed.");
+
+            JsonElement tasks = await ReadJsonElementAsync(client, new Uri(apiRoot, "api/tasks_full?page=1&page_size=20"), cancellationToken);
+            JsonElement? task = FindTask(tasks, command.MoviePath, command.Code, jobId);
+            bool latestIsTask = task is not null;
+            if (task is not null) {
+                latest = task.Value;
+                taskId ??= FirstScalar(latest, "id", "task_id", "taskId");
+                jobId ??= FirstScalar(latest, "manual_job_id", "manualJobId", "job_id", "jobId");
+            }
+
+            status = FirstScalar(latest, "status", "state") ?? status;
+            if (TryFindProperty(latest, "metadata", out JsonElement metadataValue) && metadataValue.ValueKind == JsonValueKind.Object) {
+                MovieMetadata metadata = MdcNgAdapter.ToMovieMetadata(latest, command.Code);
+                return new(Name, true, status, jobId, taskId, metadata, latest.GetRawText(), "MDC-NG scrape task returned metadata.");
+            }
+            if (!latestIsTask && IsSuccessStatus(latest, status) && FirstScalar(latest, "total_count", "totalCount") is not "0") {
+                await Task.Delay(250, cancellationToken);
+                continue;
+            }
+            if (IsSuccessStatus(latest, status))
+                return new(Name, false, status, jobId, taskId, null, latest.GetRawText(), "MDC-NG scrape task finished without metadata.");
+            if (IsFailureStatus(latest, status)) {
+                return new(Name, false, status, jobId, taskId, null, latest.GetRawText(), "MDC-NG scrape task failed before returning metadata.");
+            }
             await Task.Delay(250, cancellationToken);
         }
         return new(Name, false, status, jobId, taskId, null, latest.GetRawText(), "MDC-NG scrape task timed out before returning metadata.");
@@ -106,13 +130,18 @@ public sealed class MdcNgProvider(IHttpClientFactory? clients = null) : IMetadat
         using HttpClient client = clients?.CreateClient("MDC-NG") ?? new HttpClient();
         client.Timeout = TimeSpan.FromSeconds(Math.Clamp(settings.TimeoutSeconds, 10, 600));
         bool serviceReachable = await IsReachableAsync(client, new Uri(new Uri(settings.ServiceUrl), "settings/common"), cancellationToken);
-        (bool apiReachable, string? version) = await ReadVersionAsync(client, new Uri(new Uri(settings.ApiUrl), "api/version"), cancellationToken);
+        string apiUrl = settings.ApiUrl;
+        (bool apiReachable, string? version) = await ReadVersionAsync(client, new Uri(new Uri(apiUrl), "api/version"), cancellationToken);
+        if (!apiReachable && !settings.ApiUrl.Equals(settings.ServiceUrl, StringComparison.OrdinalIgnoreCase)) {
+            (apiReachable, version) = await ReadVersionAsync(client, new Uri(new Uri(settings.ServiceUrl), "api/version"), cancellationToken);
+            if (apiReachable) apiUrl = settings.ServiceUrl;
+        }
         string message = apiReachable
-            ? $"MDC-NG API connected: {settings.ApiUrl}"
+            ? $"MDC-NG API connected: {apiUrl}"
             : serviceReachable
                 ? $"MDC-NG web is reachable, but API is not reachable. Map 9207:9207 and confirm API URL {settings.ApiUrl}."
                 : $"MDC-NG is not reachable. Check service URL {settings.ServiceUrl} and API URL {settings.ApiUrl}.";
-        return new(settings.ServiceUrl, settings.ApiUrl, serviceReachable, apiReachable, version, DateTimeOffset.Now.ToString("O"), message);
+        return new(settings.ServiceUrl, apiUrl, serviceReachable, apiReachable, version, DateTimeOffset.Now.ToString("O"), message);
     }
 
     private static async Task<bool> IsReachableAsync(HttpClient client, Uri uri, CancellationToken cancellationToken)
@@ -125,6 +154,17 @@ public sealed class MdcNgProvider(IHttpClientFactory? clients = null) : IMetadat
         }
     }
 
+    private static async Task<Uri> ResolveApiRootAsync(HttpClient client, MdcNgSettingsDto settings, CancellationToken cancellationToken)
+    {
+        Uri configured = new(settings.ApiUrl);
+        (bool reachable, _) = await ReadVersionAsync(client, new Uri(configured, "api/version"), cancellationToken);
+        if (reachable) return configured;
+        Uri service = new(settings.ServiceUrl);
+        if (service.Equals(configured)) return configured;
+        (bool serviceApiReachable, _) = await ReadVersionAsync(client, new Uri(service, "api/version"), cancellationToken);
+        return serviceApiReachable ? service : configured;
+    }
+
     private static async Task<(bool Reachable, string? Version)> ReadVersionAsync(HttpClient client, Uri uri, CancellationToken cancellationToken)
     {
         try {
@@ -135,48 +175,74 @@ public sealed class MdcNgProvider(IHttpClientFactory? clients = null) : IMetadat
         }
     }
 
-    private static async Task<JsonDocument> PostJsonAsync(HttpClient client, Uri uri, object payload, CancellationToken cancellationToken)
+    private static async Task PostManualJobAsync(HttpClient client, Uri uri, object payload, CancellationToken cancellationToken)
     {
         using HttpResponseMessage response = await client.PostAsJsonAsync(uri, payload, cancellationToken);
         if (!response.IsSuccessStatusCode)
             throw new HttpRequestException($"MDC-NG request failed: HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
-        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
     }
 
-    private static async Task<JsonDocument> ReadTaskAsync(HttpClient client, Uri apiRoot, string? taskId, string? jobId, CancellationToken cancellationToken)
+    private static async Task<JsonElement> ReadJsonElementAsync(HttpClient client, Uri uri, CancellationToken cancellationToken)
     {
-        Uri uri = !string.IsNullOrWhiteSpace(taskId)
-            ? new Uri(apiRoot, $"api/tasks/{Uri.EscapeDataString(taskId)}")
-            : new Uri(apiRoot, "api/tasks_full?page=1&page_size=20");
         using HttpResponseMessage response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         if (!response.IsSuccessStatusCode)
-            throw new HttpRequestException($"MDC-NG task poll failed: HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
+            throw new HttpRequestException($"MDC-NG poll failed: HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
         await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        if (!string.IsNullOrWhiteSpace(taskId) || string.IsNullOrWhiteSpace(jobId)) return document;
-        JsonElement match = FindTaskByJobId(document.RootElement, jobId) ?? document.RootElement;
-        string raw = match.GetRawText();
-        document.Dispose();
-        return JsonDocument.Parse(raw);
+        using JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        return document.RootElement.Clone();
     }
 
-    private static JsonElement? FindTaskByJobId(JsonElement source, string jobId)
+    private static long MaxId(JsonElement source)
     {
-        if (source.ValueKind == JsonValueKind.Object) {
-            string? current = FirstScalar(source, "job_id", "jobId", "manual_job_id", "manualJobId");
-            if (current == jobId) return source.Clone();
-            foreach (JsonProperty property in source.EnumerateObject()) {
-                JsonElement? match = FindTaskByJobId(property.Value, jobId);
-                if (match is not null) return match;
-            }
-        } else if (source.ValueKind == JsonValueKind.Array) {
-            foreach (JsonElement item in source.EnumerateArray()) {
-                JsonElement? match = FindTaskByJobId(item, jobId);
-                if (match is not null) return match;
-            }
+        return EnumerateDataItems(source)
+            .Select(item => long.TryParse(FirstScalar(item, "id"), NumberStyles.Integer, CultureInfo.InvariantCulture, out long id) ? id : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+    }
+
+    private static JsonElement? FindManualJob(JsonElement source, string moviePath, long afterId)
+    {
+        return EnumerateDataItems(source)
+            .Where(item => long.TryParse(FirstScalar(item, "id"), NumberStyles.Integer, CultureInfo.InvariantCulture, out long id) && id > afterId)
+            .Where(item => ContainsText(item, moviePath))
+            .OrderByDescending(item => long.Parse(FirstScalar(item, "id")!, CultureInfo.InvariantCulture))
+            .Select(item => (JsonElement?)item.Clone())
+            .FirstOrDefault();
+    }
+
+    private static JsonElement? FindTask(JsonElement source, string moviePath, string? code, string? jobId)
+    {
+        IEnumerable<JsonElement> items = EnumerateDataItems(source);
+        if (!string.IsNullOrWhiteSpace(jobId)) {
+            return items
+                .Where(item => FirstScalar(item, "manual_job_id", "manualJobId", "job_id", "jobId") == jobId)
+                .Select(item => (JsonElement?)item.Clone())
+                .FirstOrDefault();
         }
-        return null;
+        return EnumerateDataItems(source)
+            .Where(item => ContainsText(item, moviePath) || (!string.IsNullOrWhiteSpace(code) && ContainsText(item, code)))
+            .Select(item => (JsonElement?)item.Clone())
+            .FirstOrDefault();
+    }
+
+    private static IEnumerable<JsonElement> EnumerateDataItems(JsonElement source)
+    {
+        if (source.ValueKind == JsonValueKind.Object && source.TryGetProperty("data", out JsonElement data) && data.ValueKind == JsonValueKind.Array)
+            return data.EnumerateArray();
+        if (source.ValueKind == JsonValueKind.Array) return source.EnumerateArray();
+        return [];
+    }
+
+    private static bool ContainsText(JsonElement source, string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        if (source.ValueKind == JsonValueKind.String)
+            return source.GetString()?.Contains(text, StringComparison.OrdinalIgnoreCase) == true;
+        if (source.ValueKind == JsonValueKind.Object)
+            return source.EnumerateObject().Any(property => ContainsText(property.Value, text));
+        if (source.ValueKind == JsonValueKind.Array)
+            return source.EnumerateArray().Any(item => ContainsText(item, text));
+        return false;
     }
 
     private static string? FirstScalar(JsonElement source, params string[] names)

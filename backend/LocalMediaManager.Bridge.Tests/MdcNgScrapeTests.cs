@@ -64,20 +64,33 @@ public sealed class MdcNgScrapeTests
     public async Task ProviderCreatesMdcJobPollsTaskAndReturnsUnifiedMetadataWithoutWriting()
     {
         var requests = new List<HttpRequestMessage>();
-        int pollCount = 0;
+        int manualJobPolls = 0;
+        int taskPolls = 0;
         var provider = new MdcNgProvider(new FakeFactory(request => {
             requests.Add(CloneRequest(request));
+            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/api/manual-jobs") {
+                manualJobPolls++;
+                return Json(manualJobPolls == 1
+                    ? """{"data":[],"num_pages":0,"total_count":0}"""
+                    : """{"data":[{"id":7,"source_pathes":"[\"Z:\\Movies\\ABP-001.mp4\"]","status":1}],"num_pages":1,"total_count":1}""");
+            }
             if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/api/manual-jobs")
-                return Json("""{"job_id":"job-1","task_id":"task-1","status":0}""");
-            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/api/tasks/task-1") {
-                pollCount++;
-                return pollCount == 1
-                    ? Json("""{"task_id":"task-1","status":1}""")
+                return new(HttpStatusCode.OK) { Content = new StringContent("") };
+            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/api/tasks_full") {
+                taskPolls++;
+                return taskPolls == 1
+                    ? Json("""{"data":[],"num_pages":0,"total_count":0}""")
                     : Json("""
                       {
-                        "task_id":"task-1",
-                        "status":2,
-                        "result":{"number":"abp_001","title":"Remote title","actors":["Actor A"],"runtime":90,"poster":"https://img.example/p.jpg"}
+                        "data":[{
+                          "id":9,
+                          "manual_job_id":7,
+                          "status":-1,
+                          "stage":400,
+                          "metadata":{"Number":"abp_001","Title":"Remote title","Actors":"Actor A","Runtime":"90","Poster":"https://img.example/p.jpg","UserRating":"4.7"}
+                        }],
+                        "num_pages":1,
+                        "total_count":1
                       }
                       """);
             }
@@ -90,18 +103,20 @@ public sealed class MdcNgScrapeTests
             CancellationToken.None);
 
         Assert.True(result.Success);
-        Assert.Equal("job-1", result.JobId);
-        Assert.Equal("task-1", result.TaskId);
+        Assert.Equal("7", result.JobId);
+        Assert.Equal("9", result.TaskId);
         Assert.NotNull(result.Metadata);
         Assert.Equal("ABP-001", result.Metadata.Code);
         Assert.Equal("Remote title", result.Metadata.Title);
         Assert.Equal(5400, result.Metadata.DurationSeconds);
+        Assert.Equal(4.7m, result.Metadata.Rating);
         HttpRequestMessage post = Assert.Single(requests, request => request.Method == HttpMethod.Post);
         string body = await post.Content!.ReadAsStringAsync();
         Assert.Contains("\"pathes\"", body);
         Assert.Contains("ABP-001.mp4", body);
         Assert.Contains("\"link_mode\":3", body);
-        Assert.True(pollCount >= 2);
+        Assert.True(manualJobPolls >= 2);
+        Assert.True(taskPolls >= 2);
     }
 
     private static HttpResponseMessage Json(string body) =>

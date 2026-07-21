@@ -37,3 +37,17 @@ public sealed record MdcNgScrapeResult(
     MovieMetadata? Metadata,
     string RawJson,
     string Message);
+
+public sealed record MetadataSyncRequest(
+    string Code,
+    string? MediaPath = null,
+    string? ProviderId = null);
+
+public sealed record MetadataSyncResult(
+    bool Success,
+    MovieMetadata? Metadata,
+    string ProviderId,
+    long ElapsedMilliseconds,
+    IReadOnlyList<string> Warnings,
+    string? ErrorCode,
+    string? ErrorMessage);

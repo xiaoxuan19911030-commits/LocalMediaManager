@@ -56,6 +56,7 @@ builder.Services.AddSingleton(serviceProvider => new SettingsSaveCoordinator(
     serviceProvider.GetRequiredService<RatingHistoryService>()));
 builder.Services.AddSingleton<MetaTubeProvider>();
 builder.Services.AddSingleton<MdcNgProvider>();
+builder.Services.AddSingleton<MetadataSyncService>();
 builder.Services.AddSingleton<JavBusProvider>();
 builder.Services.AddSingleton<DmmProvider>();
 builder.Services.AddSingleton<JavDbProvider>();
@@ -178,8 +179,8 @@ app.MapPut("/api/settings/providers/metatube", async (MetaTubeSettingsDto input,
     Results.Ok(await settings.SaveMetaTubeAsync(input)));
 app.MapPost("/api/settings/providers/mdc-ng/test", async (MdcNgSettingsDto input, MdcNgProvider provider, MetadataProviderSettingsService settingsService) =>
     Results.Ok(await provider.TestConnectionAsync(new(await settingsService.ReadMetaTubeAsync(), await settingsService.ReadJavBusAsync(), Network: await settingsService.ReadNetworkAsync()) { MdcNg = MetadataProviderSettingsService.NormalizeMdcNg(input) }, CancellationToken.None)));
-app.MapPost("/api/settings/providers/mdc-ng/scrape-preview", async (MdcNgScrapeCommand input, MdcNgProvider provider, MetadataProviderSettingsService settingsService, CancellationToken token) =>
-    Results.Ok(await provider.ScrapeAsync(input, await settingsService.ReadMdcNgAsync(), token)));
+app.MapPost("/api/settings/providers/mdc-ng/scrape-preview", async (MdcNgScrapeCommand input, MetadataSyncService sync, CancellationToken token) =>
+    Results.Ok(await sync.SyncAsync(new(input.Code ?? "", input.MoviePath, MetadataSyncService.MdcNgProviderId), token)));
 app.MapPost("/api/settings/providers/metatube/test", async (MetaTubeSettingsDto input, MetaTubeProvider provider, MetadataProviderSettingsService settingsService) =>
     Results.Ok(await provider.TestConnectionAsync(new(input with { BaseUrl = input.BaseUrl.Trim().TrimEnd('/') + "/" }, await settingsService.ReadJavBusAsync(), Network: await settingsService.ReadNetworkAsync()) { MdcNg = await settingsService.ReadMdcNgAsync() }, CancellationToken.None)));
 app.MapPost("/api/settings/providers/javbus/test", async (JavBusSettingsDto input, JavBusProvider provider, MetadataProviderSettingsService settingsService) =>

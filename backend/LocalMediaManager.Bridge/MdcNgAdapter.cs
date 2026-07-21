@@ -35,7 +35,7 @@ public static class MdcNgAdapter
             FirstString(source, "country", "countries"),
             NormalizeDate(FirstString(source, "release_date", "releasedate", "release", "date", "premiered")),
             NormalizeDuration(FirstString(source, "duration", "runtime", "length")),
-            NormalizeRating(FirstString(source, "rating", "score")),
+            NormalizeRating(FirstString(source, "rating", "score", "user_rating", "UserRating")),
             poster,
             thumb,
             fanart,
@@ -78,7 +78,11 @@ public static class MdcNgAdapter
         switch (value.ValueKind) {
             case JsonValueKind.String:
                 string? text = value.GetString();
-                if (IsHttpUrl(text)) values.Add(text!);
+                if (!string.IsNullOrWhiteSpace(text) && text.IndexOf(',') >= 0) {
+                    foreach (string part in text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                        values.Add(part);
+                }
+                else if (IsHttpUrl(text)) values.Add(text!);
                 else AddSplitValues(text, values);
                 break;
             case JsonValueKind.Number:
