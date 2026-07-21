@@ -178,6 +178,8 @@ app.MapPut("/api/settings/providers/metatube", async (MetaTubeSettingsDto input,
     Results.Ok(await settings.SaveMetaTubeAsync(input)));
 app.MapPost("/api/settings/providers/mdc-ng/test", async (MdcNgSettingsDto input, MdcNgProvider provider, MetadataProviderSettingsService settingsService) =>
     Results.Ok(await provider.TestConnectionAsync(new(await settingsService.ReadMetaTubeAsync(), await settingsService.ReadJavBusAsync(), Network: await settingsService.ReadNetworkAsync()) { MdcNg = MetadataProviderSettingsService.NormalizeMdcNg(input) }, CancellationToken.None)));
+app.MapPost("/api/settings/providers/mdc-ng/scrape-preview", async (MdcNgScrapeCommand input, MdcNgProvider provider, MetadataProviderSettingsService settingsService, CancellationToken token) =>
+    Results.Ok(await provider.ScrapeAsync(input, await settingsService.ReadMdcNgAsync(), token)));
 app.MapPost("/api/settings/providers/metatube/test", async (MetaTubeSettingsDto input, MetaTubeProvider provider, MetadataProviderSettingsService settingsService) =>
     Results.Ok(await provider.TestConnectionAsync(new(input with { BaseUrl = input.BaseUrl.Trim().TrimEnd('/') + "/" }, await settingsService.ReadJavBusAsync(), Network: await settingsService.ReadNetworkAsync()) { MdcNg = await settingsService.ReadMdcNgAsync() }, CancellationToken.None)));
 app.MapPost("/api/settings/providers/javbus/test", async (JavBusSettingsDto input, JavBusProvider provider, MetadataProviderSettingsService settingsService) =>
@@ -197,6 +199,8 @@ app.MapPost("/api/actors/{actorId:long}/profile-apply", async (long actorId, Act
     Results.Ok(await service.ApplyAsync(actorId, candidate, token)));
 app.MapGet("/api/plugins/ffmpeg/status", (FfmpegLocator ffmpeg) =>
     Results.Ok(ffmpeg.Status()));
+app.MapGet("/api/plugins/mdc-ng/status", async (MdcNgProvider provider, MetadataProviderSettingsService settings, CancellationToken token) =>
+    Results.Ok(await provider.StatusAsync(await settings.ReadMdcNgAsync(), token)));
 app.MapGet("/api/settings/data-safety/overview", async (DataSafetyService safety) =>
     Results.Ok(await safety.OverviewAsync()));
 app.MapPost("/api/settings/data-safety/backup", async (BackupCreateCommand command, DataSafetyService safety, CancellationToken token) =>

@@ -23,7 +23,7 @@ import { defaultMovieWallDisplay, normalizeMovieWallDisplay } from '@/components
 import { bridge } from '@/services/bridge'
 import { useColorMode } from '@/themes/ThemeContext'
 import type { BridgeHealth, TaskItem } from '@/types/media'
-import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegToolStatus, JavBusSettings, LogCleanupPreview, LogCleanupResult, MdcNgSettings, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, PlaybackSettings, ProviderDiagnosticResult, ProviderNetworkSettings, RatingRetentionSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult, WebMetadataSettings } from '@/types/settings'
+import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegToolStatus, JavBusSettings, LogCleanupPreview, LogCleanupResult, MdcNgSettings, MdcNgToolStatus, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, PlaybackSettings, ProviderDiagnosticResult, ProviderNetworkSettings, RatingRetentionSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult, WebMetadataSettings } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 
 const categories = [
@@ -400,11 +400,14 @@ function PluginsSection({ snapshot, mdcNg, setMdcNg, metaTube, setMetaTube, prov
 }) {
   const [ffmpeg, setFfmpeg] = useState<FfmpegToolStatus>()
   const [ffmpegError, setFfmpegError] = useState('')
+  const [mdcNgStatus, setMdcNgStatus] = useState<MdcNgToolStatus>()
+  const [mdcNgError, setMdcNgError] = useState('')
   const [diagnostics, setDiagnostics] = useState<ProviderDiagnosticResult[]>([])
   const [diagnosticsBusy, setDiagnosticsBusy] = useState(false)
   const [diagnosticsError, setDiagnosticsError] = useState('')
   const network = providerNetwork ?? { proxyMode: 'System', proxyUrl: '', username: '', password: '' }
   const refreshFfmpeg = () => bridge.ffmpegStatus().then(setFfmpeg).catch((reason: Error) => setFfmpegError(reason.message))
+  const refreshMdcNg = () => bridge.mdcNgStatus().then(status => { setMdcNgStatus(status); setMdcNgError('') }).catch((reason: Error) => setMdcNgError(reason.message))
   const refreshDiagnostics = useCallback(() => {
     setDiagnosticsBusy(true)
     setDiagnosticsError('')
@@ -416,29 +419,29 @@ function PluginsSection({ snapshot, mdcNg, setMdcNg, metaTube, setMetaTube, prov
       .catch((reason: Error) => setDiagnosticsError(reason.message))
       .finally(() => setDiagnosticsBusy(false))
   }, [setNotice])
-  useEffect(() => { void refreshFfmpeg() }, [])
+  useEffect(() => { void refreshFfmpeg(); void refreshMdcNg() }, [])
   useEffect(() => { refreshDiagnostics() }, [refreshDiagnostics])
   const resultFor = (provider: string) => diagnostics.find(item => item.provider === provider)
   const statusFor = (provider: string, configured = true) => {
-    if (!configured) return 'Not configured'
-    if (diagnosticsBusy) return 'Checking'
+    if (!configured) return '未配置'
+    if (diagnosticsBusy) return '检测中'
     const result = resultFor(provider)
-    if (!result) return 'Not checked'
-    if (result.reachable) return 'Connected'
+    if (!result) return '未检测'
+    if (result.reachable) return '已连接'
     const text = result.message.toLowerCase()
-    if (text.includes('timeout')) return 'Timeout'
-    if (text.includes('auth') || text.includes('401') || text.includes('403')) return 'Auth failed'
-    if (text.includes('json') || text.includes('format')) return 'Bad response'
-    return 'Unavailable'
+    if (text.includes('timeout')) return '连接超时'
+    if (text.includes('auth') || text.includes('401') || text.includes('403')) return '认证失败'
+    if (text.includes('json') || text.includes('format')) return '返回异常'
+    return '不可用'
   }
-  const statusTone = (status: string) => status === 'Connected' ? 'success' : status === 'Checking' ? 'info' : status === 'Not checked' || status === 'Not configured' ? 'neutral' : 'error'
+  const statusTone = (status: string) => status === '已连接' ? 'success' : status === '检测中' ? 'info' : status === '未检测' || status === '未配置' ? 'neutral' : 'error'
   const updateTestResult = (name: string, work: Promise<{ success: boolean; provider: string; message: string; elapsedMilliseconds: number }>) => {
     work.then(result => {
       setDiagnostics(current => [...current.filter(item => item.provider !== result.provider), {
         provider: result.provider,
         reachable: result.success,
         scope: name === 'JavBus' ? 'title / director / series / tags / cover' : 'movie data / actors / tags / images',
-        recommendation: result.success ? 'No action needed' : 'Check config, proxy, and service status',
+        recommendation: result.success ? '当前无需处理' : '请检查配置、代理和服务状态',
         message: result.message,
         testedAt: new Date().toISOString(),
         elapsedMilliseconds: result.elapsedMilliseconds,
@@ -446,59 +449,79 @@ function PluginsSection({ snapshot, mdcNg, setMdcNg, metaTube, setMetaTube, prov
       setNotice(result.message)
     }).catch((reason: Error) => setDiagnosticsError(reason.message))
   }
-  const openMdcNgConfig = () => {
-    const path = mdcNg.commandPath.trim()
-    if (!path) { setNotice('Configure MDC-NG command path first.'); return }
-    bridge.openDirectory(path.replace(/[\\/][^\\/]*$/, '')).then(result => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))
-  }
+  const mdcServiceUrl = mdcNg.serviceUrl || mdcNgStatus?.serviceUrl || 'http://127.0.0.1:5800/'
+  const mdcStatusLabel = mdcNgStatus
+    ? mdcNgStatus.serviceReachable ? '已连接' : '未连接'
+    : mdcNgError ? '未连接' : '检测中'
+  const mdcStatusTone: 'success' | 'info' | 'neutral' | 'error' | 'warning' = mdcStatusLabel === '已连接' ? 'success' : mdcStatusLabel === '检测中' ? 'info' : 'error'
   return <Stack spacing={2}>
-    <SurfaceSection title="External scraper services" description="Sync calls MDC-NG, MetaTube, then JavBus. Test actions do not write movie data.">
+    <SurfaceSection title="外部刮削服务" description="同步时按 MDC-NG、MetaTube、JavBus 顺序调用；测试操作不会写入影片数据库。">
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'repeat(3,minmax(0,1fr))' }, gap: 1.5 }}>
-        <ScraperServiceCard title="MDC-NG Scraper" description="External command and NFO adapter for movie metadata, actors, tags, covers, and previews." status={statusFor('MDC-NG', Boolean(mdcNg.commandPath.trim()))} tone={statusTone(statusFor('MDC-NG', Boolean(mdcNg.commandPath.trim())))} enabled={mdcNg.enabled} onEnabledChange={enabled => setMdcNg({ ...mdcNg, enabled })} address={mdcNg.serviceUrl || mdcNg.commandPath || 'Not configured'} version="Command / NFO" auth={mdcNg.apiKey ? 'Auth configured' : 'Auth not configured'} capabilities="title / original title / actors / tags / plot / release / cover / fanart / previews" diagnostic={resultFor('MDC-NG')} actions={<><Button variant="outlined" onClick={openMdcNgConfig}>Open config</Button><Button variant="outlined" onClick={() => mdcNg.serviceUrl ? window.open(mdcNg.serviceUrl, '_blank') : setNotice('MDC-NG service URL is not configured.')}>Open service page</Button><Button variant="outlined" startIcon={<RefreshRoundedIcon/>} disabled={diagnosticsBusy} onClick={refreshDiagnostics}>Refresh</Button><Button variant="outlined" onClick={() => updateTestResult('MDC-NG', bridge.testMdcNg(mdcNg))}>Test scrape</Button></>}>
-          <TextField size="small" label="Command path" value={mdcNg.commandPath} onChange={event => setMdcNg({ ...mdcNg, commandPath: event.target.value })} helperText="Sync passes movie path plus temporary input/output/work folders."/>
-          <TextField size="small" label="Service URL optional" value={mdcNg.serviceUrl} onChange={event => setMdcNg({ ...mdcNg, serviceUrl: event.target.value })}/>
+        <Card variant="outlined" sx={{ borderRadius: 2 }}>
+          <CardContent>
+            <Stack spacing={1.25}>
+              <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+                  {mdcStatusLabel === '已连接' ? <VerifiedRoundedIcon color="success"/> : <CloudOffRoundedIcon color={mdcStatusLabel === '检测中' ? 'info' : 'disabled'}/>}
+                  <StatusBadge tone={mdcStatusTone} label={mdcStatusLabel}/>
+                  <Chip size="small" label={mdcNgStatus?.version || '版本未知'}/>
+                </Stack>
+                <FormControlLabel control={<Switch checked={mdcNg.enabled} onChange={event => setMdcNg({ ...mdcNg, enabled: event.target.checked })}/>} label="用于同步" labelPlacement="start" sx={{ m: 0 }}/>
+              </Stack>
+              <Box>
+                <Typography variant="subtitle2">MDC-NG 外部刮削服务</Typography>
+                <Typography variant="body2" color="text.secondary">Docker Web 服务，用于影片元数据刮削。</Typography>
+              </Box>
+              <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>服务地址：{mdcServiceUrl}</Typography>
+              <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+                <Button variant="outlined" onClick={() => window.open('http://127.0.0.1:5800/settings/common', '_blank')}>设置</Button>
+                <Button variant="outlined" startIcon={<RefreshRoundedIcon/>} disabled={diagnosticsBusy} onClick={() => { void refreshMdcNg(); refreshDiagnostics() }}>刷新检测</Button>
+                <Button variant="outlined" onClick={() => updateTestResult('MDC-NG', bridge.testMdcNg(mdcNg))}>测试刮削</Button>
+              </Stack>
+            </Stack>
+          </CardContent>
+        </Card>
+        <ScraperServiceCard title="MetaTube 刮削服务" description="作为备用刮削服务，用于影片搜索、演员、标签、封面及图片同步。" status={statusFor('MetaTube', Boolean(metaTube.baseUrl.trim()))} tone={statusTone(statusFor('MetaTube', Boolean(metaTube.baseUrl.trim())))} enabled={metaTube.enabled} onEnabledChange={enabled => setMetaTube({ ...metaTube, enabled })} address={metaTube.baseUrl} version="MetaTube API" auth="无需认证" capabilities="演员 / 标签 / 发行日期 / 时长 / 图片 / 简介" diagnostic={resultFor('MetaTube')} actions={<><Button variant="outlined" onClick={() => setNotice('MetaTube 配置就在当前卡片中，修改后请保存设置。')}>打开配置</Button><Button variant="outlined" onClick={() => window.open(metaTube.baseUrl, '_blank')}>打开服务页面</Button><Button variant="outlined" startIcon={<RefreshRoundedIcon/>} disabled={diagnosticsBusy} onClick={refreshDiagnostics}>刷新检测</Button><Button variant="outlined" onClick={() => updateTestResult('MetaTube', bridge.testMetaTube(metaTube))}>测试刮削</Button></>}>
+          <TextField size="small" label="服务地址" value={metaTube.baseUrl} onChange={event => setMetaTube({ ...metaTube, baseUrl: event.target.value })}/>
         </ScraperServiceCard>
-        <ScraperServiceCard title="MetaTube Scraper" description="Fallback service for movie search, actors, tags, covers, and images." status={statusFor('MetaTube', Boolean(metaTube.baseUrl.trim()))} tone={statusTone(statusFor('MetaTube', Boolean(metaTube.baseUrl.trim())))} enabled={metaTube.enabled} onEnabledChange={enabled => setMetaTube({ ...metaTube, enabled })} address={metaTube.baseUrl} version="MetaTube API" auth="No auth required" capabilities="actors / tags / release / runtime / images / plot" diagnostic={resultFor('MetaTube')} actions={<><Button variant="outlined" onClick={() => setNotice('MetaTube config is shown in this card. Save settings after editing.')}>Open config</Button><Button variant="outlined" onClick={() => window.open(metaTube.baseUrl, '_blank')}>Open service page</Button><Button variant="outlined" startIcon={<RefreshRoundedIcon/>} disabled={diagnosticsBusy} onClick={refreshDiagnostics}>Refresh</Button><Button variant="outlined" onClick={() => updateTestResult('MetaTube', bridge.testMetaTube(metaTube))}>Test scrape</Button></>}>
-          <TextField size="small" label="Service URL" value={metaTube.baseUrl} onChange={event => setMetaTube({ ...metaTube, baseUrl: event.target.value })}/>
-        </ScraperServiceCard>
-        <ScraperServiceCard title="JavBus Online Source" description="Online fallback for title, director, series, tags, and cover." status={statusFor('JavBus', Boolean((javBus.baseUrl || 'https://www.javbus.com/').trim()))} tone={statusTone(statusFor('JavBus', Boolean((javBus.baseUrl || 'https://www.javbus.com/').trim())))} enabled={javBus.enabled} onEnabledChange={enabled => setJavBus({ ...javBus, enabled })} address={javBus.baseUrl || 'https://www.javbus.com/'} version={network.proxyMode === 'Manual' ? 'Manual proxy' : network.proxyMode === 'Direct' ? 'Direct' : 'System proxy'} auth={javBus.cookie ? 'Cookie configured' : 'Cookie not configured'} capabilities="title / director / series / category / tags / cover" diagnostic={resultFor('JavBus')} actions={<><Button variant="outlined" onClick={() => setNotice('JavBus network config is shown below. Save settings after editing.')}>Network config</Button><Button variant="outlined" onClick={() => window.open(javBus.baseUrl || 'https://www.javbus.com/', '_blank')}>Open website</Button><Button variant="outlined" startIcon={<RefreshRoundedIcon/>} disabled={diagnosticsBusy} onClick={refreshDiagnostics}>Refresh</Button><Button variant="outlined" onClick={() => updateTestResult('JavBus', bridge.testJavBus(javBus))}>Test search</Button></>}>
-          <TextField size="small" label="Current domain" value={javBus.baseUrl} placeholder="https://www.javbus.com/" onChange={event => setJavBus({ ...javBus, baseUrl: event.target.value })}/>
-          <MirrorField label="Mirror domains" value={javBus.mirrorUrls} onChange={mirrorUrls => setJavBus({ ...javBus, mirrorUrls })}/>
+        <ScraperServiceCard title="JavBus 在线数据源" description="用于影片标题、导演、系列、标签及封面补充。" status={statusFor('JavBus', Boolean((javBus.baseUrl || 'https://www.javbus.com/').trim()))} tone={statusTone(statusFor('JavBus', Boolean((javBus.baseUrl || 'https://www.javbus.com/').trim())))} enabled={javBus.enabled} onEnabledChange={enabled => setJavBus({ ...javBus, enabled })} address={javBus.baseUrl || 'https://www.javbus.com/'} version={network.proxyMode === 'Manual' ? '手动代理' : network.proxyMode === 'Direct' ? '直连' : '系统代理'} auth={javBus.cookie ? '已配置 Cookie' : '未配置 Cookie'} capabilities="标题 / 导演 / 系列 / 类别 / 标签 / 封面" diagnostic={resultFor('JavBus')} actions={<><Button variant="outlined" onClick={() => setNotice('JavBus 网络配置在下方，修改后请保存设置。')}>网络配置</Button><Button variant="outlined" onClick={() => window.open(javBus.baseUrl || 'https://www.javbus.com/', '_blank')}>打开网站</Button><Button variant="outlined" startIcon={<RefreshRoundedIcon/>} disabled={diagnosticsBusy} onClick={refreshDiagnostics}>刷新检测</Button><Button variant="outlined" onClick={() => updateTestResult('JavBus', bridge.testJavBus(javBus))}>测试搜索</Button></>}>
+          <TextField size="small" label="当前域名" value={javBus.baseUrl} placeholder="https://www.javbus.com/" onChange={event => setJavBus({ ...javBus, baseUrl: event.target.value })}/>
+          <MirrorField label="镜像域名" value={javBus.mirrorUrls} onChange={mirrorUrls => setJavBus({ ...javBus, mirrorUrls })}/>
         </ScraperServiceCard>
       </Box>
     </SurfaceSection>
-    <SurfaceSection title="Provider network" description="Proxy and JavBus mirror settings are reused by scraper sync after saving.">
+    <SurfaceSection title="来源网络" description="代理和 JavBus 镜像设置会在保存后用于刮削同步。">
       <Stack spacing={1.5}>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '180px minmax(0,1fr)' }, gap: 1.5 }}>
-          <TextField select size="small" label="Proxy mode" value={network.proxyMode} onChange={event => setProviderNetwork({ ...network, proxyMode: event.target.value as ProviderNetworkSettings['proxyMode'] })}>
-            <MenuItem value="System">System proxy</MenuItem>
-            <MenuItem value="Direct">Direct</MenuItem>
-            <MenuItem value="Manual">Manual proxy</MenuItem>
+          <TextField select size="small" label="代理模式" value={network.proxyMode} onChange={event => setProviderNetwork({ ...network, proxyMode: event.target.value as ProviderNetworkSettings['proxyMode'] })}>
+            <MenuItem value="System">系统代理</MenuItem>
+            <MenuItem value="Direct">直连</MenuItem>
+            <MenuItem value="Manual">手动代理</MenuItem>
           </TextField>
-          <TextField size="small" label="Manual proxy URL" placeholder="http://127.0.0.1:7890" value={network.proxyUrl} disabled={network.proxyMode !== 'Manual'} onChange={event => setProviderNetwork({ ...network, proxyUrl: event.target.value })}/>
+          <TextField size="small" label="手动代理地址" placeholder="http://127.0.0.1:7890" value={network.proxyUrl} disabled={network.proxyMode !== 'Manual'} onChange={event => setProviderNetwork({ ...network, proxyUrl: event.target.value })}/>
         </Box>
-        <Alert severity="info">Old DMM, JavDB, Minnano, and Wikipedia JP settings are ignored safely and do not participate in movie sync.</Alert>
+        <Alert severity="info">旧的 DMM、JavDB、Minnano、Wikipedia JP 配置会被安全忽略，不参与影片同步。</Alert>
       </Stack>
     </SurfaceSection>
     {diagnosticsError && <Alert severity="warning">{diagnosticsError}</Alert>}
-    <SurfaceSection title="FFmpeg screenshot tool" description="Used for screenshots, thumbnails, previews, GIFs, and video info reading.">
+    <SurfaceSection title="FFmpeg 截图工具" description="用于截图、缩略图、预览图、GIF 和视频信息读取。">
       <Stack spacing={1.25}>
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
           {ffmpeg?.found ? <VerifiedRoundedIcon color="success"/> : <CloudOffRoundedIcon color="disabled"/>}
-          <StatusBadge tone={ffmpeg?.found ? 'success' : 'warning'} label={ffmpeg?.found ? 'Detected' : 'Not detected'}/>
+          <StatusBadge tone={ffmpeg?.found ? 'success' : 'warning'} label={ffmpeg?.found ? '已检测到' : '未检测到'}/>
           {ffmpeg?.version && <Chip size="small" label={ffmpeg?.version}/>}
           {ffmpeg?.probeVersion && <Chip size="small" label={ffmpeg?.probeVersion}/>}
         </Stack>
-        <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{ffmpeg?.message || ffmpegError || 'Checking FFmpeg...'}</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>Plugin directory: {ffmpeg?.pluginDirectory || 'plugins\\ffmpeg'}</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{ffmpeg?.message || ffmpegError || '正在检测 FFmpeg...'}</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>插件目录：{ffmpeg?.pluginDirectory || 'plugins\\ffmpeg'}</Typography>
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
           <Button variant="outlined" startIcon={<FolderRoundedIcon/>} onClick={() => {
             const directory = ffmpeg?.pluginDirectory
             if (!directory) return
             bridge.openDirectory(directory).then(result => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))
-          }}>Open plugin folder</Button>
-          <Button variant="outlined" startIcon={<CloudDownloadRoundedIcon/>} onClick={() => window.open('https://www.gyan.dev/ffmpeg/builds/', '_blank')}>Download</Button>
-          <Button variant="outlined" startIcon={<RefreshRoundedIcon/>} onClick={refreshFfmpeg}>Refresh</Button>
+          }}>打开插件目录</Button>
+          <Button variant="outlined" startIcon={<CloudDownloadRoundedIcon/>} onClick={() => window.open('https://www.gyan.dev/ffmpeg/builds/', '_blank')}>下载</Button>
+          <Button variant="outlined" startIcon={<RefreshRoundedIcon/>} onClick={refreshFfmpeg}>刷新检测</Button>
         </Stack>
       </Stack>
     </SurfaceSection>
@@ -625,17 +648,17 @@ function ScraperServiceCard({ title, description, status, tone, enabled, onEnabl
     <Stack spacing={1.25}>
       <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
-          {status === 'Connected' ? <VerifiedRoundedIcon color="success"/> : <CloudOffRoundedIcon color={status === 'Checking' ? 'info' : 'disabled'}/>}
+          {status === '已连接' || status === 'API 已连接' ? <VerifiedRoundedIcon color="success"/> : <CloudOffRoundedIcon color={status === '检测中' ? 'info' : 'disabled'}/>}
           <StatusBadge tone={tone} label={status}/>
           <Chip size="small" label={version}/>
           <Chip size="small" label={auth}/>
         </Stack>
-        <FormControlLabel control={<Switch checked={enabled} onChange={event => onEnabledChange(event.target.checked)}/>} label="Use for sync" labelPlacement="start" sx={{ m: 0 }}/>
+        <FormControlLabel control={<Switch checked={enabled} onChange={event => onEnabledChange(event.target.checked)}/>} label="用于同步" labelPlacement="start" sx={{ m: 0 }}/>
       </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>Address: {address}</Typography>
-      <Typography variant="body2" color="text.secondary">Capabilities: {capabilities}</Typography>
-      <Typography variant="body2" color="text.secondary">Last check: {diagnostic?.testedAt ? new Date(diagnostic.testedAt).toLocaleString() : 'Not checked'}</Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{diagnostic?.message || 'The app checks sources automatically. Sync uses enabled and available sources only.'}</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>地址：{address}</Typography>
+      <Typography variant="body2" color="text.secondary">可用能力：{capabilities}</Typography>
+      <Typography variant="body2" color="text.secondary">最近检测：{diagnostic?.testedAt ? new Date(diagnostic.testedAt).toLocaleString() : '未检测'}</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{diagnostic?.message || '软件会自动检测来源；同步时只调用已启用且可用的来源。'}</Typography>
       {children && <Stack spacing={1}>{children}</Stack>}
       <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>{actions}</Stack>
     </Stack>

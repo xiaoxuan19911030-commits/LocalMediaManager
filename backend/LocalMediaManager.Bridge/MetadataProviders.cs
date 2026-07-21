@@ -1,10 +1,10 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Text.Json;
-using System.Xml.Linq;
 
 namespace LocalMediaManager.Bridge;
 
@@ -25,122 +25,214 @@ public interface IMetadataProvider
     Task<ProviderConnectionResult> TestConnectionAsync(MetadataProviderContext settings, CancellationToken cancellationToken);
 }
 
-public sealed class MdcNgProvider : IMetadataProvider
+public sealed record MdcNgToolStatusDto(
+    string ServiceUrl,
+    string ApiUrl,
+    bool ServiceReachable,
+    bool ApiReachable,
+    string? Version,
+    string LastCheckedAt,
+    string Message);
+
+public sealed class MdcNgProvider(IHttpClientFactory? clients = null) : IMetadataProvider
 {
     public string Name => "MDC-NG";
 
     public Task<IReadOnlyList<MetadataSearchResult>> SearchAsync(string code, MetadataProviderContext settings, CancellationToken cancellationToken)
     {
-        MdcNgSettingsDto mdc = settings.MdcNg;
-        return Task.FromResult<IReadOnlyList<MetadataSearchResult>>(
-            mdc.Enabled && !string.IsNullOrWhiteSpace(mdc.CommandPath) && File.Exists(mdc.CommandPath) && !string.IsNullOrWhiteSpace(settings.CurrentMoviePath)
-                ? [new(Name, code, NormalizeCode(code), null)]
-                : []);
+        return Task.FromResult<IReadOnlyList<MetadataSearchResult>>([]);
     }
 
     public async Task<ProviderMetadata?> GetMetadataAsync(MetadataSearchResult result, MetadataProviderContext settings, CancellationToken cancellationToken)
     {
-        MdcNgSettingsDto mdc = settings.MdcNg;
         if (string.IsNullOrWhiteSpace(settings.CurrentMoviePath)) return null;
-        if (string.IsNullOrWhiteSpace(mdc.CommandPath) || !File.Exists(mdc.CommandPath))
-            throw new FileNotFoundException("MDC-NG 外部命令未配置。", mdc.CommandPath);
-        string root = Path.Combine(Path.GetTempPath(), "lmm-mdc-ng", Guid.NewGuid().ToString("N"));
-        string input = Path.Combine(root, "input");
-        string output = Path.Combine(root, "output");
-        string work = Path.Combine(root, "work");
-        Directory.CreateDirectory(input); Directory.CreateDirectory(output); Directory.CreateDirectory(work);
-        await File.WriteAllTextAsync(Path.Combine(input, $"{NormalizeCode(result.Code)}.strm"), settings.CurrentMoviePath, cancellationToken);
-        try {
-            ProcessStartInfo startInfo = BuildStartInfo(mdc.CommandPath, settings.CurrentMoviePath, input, output, work);
-            using var process = new Process {
-                StartInfo = startInfo,
-            };
-            process.Start();
-            Task<string> stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            Task<string> stderr = process.StandardError.ReadToEndAsync(cancellationToken);
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(mdc.TimeoutSeconds));
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
-            try { await process.WaitForExitAsync(linked.Token); }
-            catch (OperationCanceledException) when (timeout.IsCancellationRequested) {
-                try { process.Kill(entireProcessTree: true); } catch { }
-                throw new TimeoutException("MDC-NG 外部命令执行超时。");
-            }
-            string outText = await stdout; string errText = await stderr;
-            if (process.ExitCode != 0)
-                throw new InvalidOperationException($"MDC-NG 外部命令失败：exit={process.ExitCode}; {TrimLog(errText)} {TrimLog(outText)}");
-            string? nfo = Directory.EnumerateFiles(output, "*.nfo", SearchOption.AllDirectories)
-                .Concat(Directory.EnumerateFiles(work, "*.nfo", SearchOption.AllDirectories))
-                .OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
-            if (nfo is null) throw new InvalidDataException("MDC-NG 未输出 NFO 文件。");
-            return ParseNfo(nfo, result.Code);
-        } finally {
-            try { Directory.Delete(root, true); } catch { }
-        }
+        ProviderConnectionResult test = await TestConnectionAsync(settings, cancellationToken);
+        if (!test.Success) throw new InvalidOperationException(test.Message);
+        throw new NotSupportedException("MDC-NG scrape preview is available, but it is not connected to the database write workflow yet.");
     }
 
     public Task<IReadOnlyList<MetadataImage>> GetImagesAsync(ProviderMetadata metadata, CancellationToken cancellationToken) =>
         Task.FromResult(metadata.Images);
 
-    public Task<ProviderConnectionResult> TestConnectionAsync(MetadataProviderContext settings, CancellationToken cancellationToken)
+    public async Task<MdcNgScrapeResult> ScrapeAsync(MdcNgScrapeCommand command, MdcNgSettingsDto settings, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(command.MoviePath))
+            throw new ArgumentException("MoviePath is required.", nameof(command));
+        MdcNgSettingsDto normalized = MetadataProviderSettingsService.NormalizeMdcNg(settings);
+        int timeoutSeconds = Math.Clamp(command.TimeoutSeconds ?? normalized.TimeoutSeconds, 10, 600);
+        using HttpClient client = clients?.CreateClient("MDC-NG") ?? new HttpClient();
+        client.Timeout = TimeSpan.FromSeconds(Math.Min(timeoutSeconds, 60));
+        Uri apiRoot = new(normalized.ApiUrl);
+
+        using JsonDocument createDocument = await PostJsonAsync(client, new Uri(apiRoot, "api/manual-jobs"), new {
+            pathes = new[] { command.MoviePath },
+            target_folder = string.IsNullOrWhiteSpace(command.TargetFolder) ? "/tmp/lmm-mdc-ng" : command.TargetFolder,
+            link_mode = 3,
+            delete_empty_parent_after_move = false,
+        }, cancellationToken);
+        JsonElement createRoot = createDocument.RootElement.Clone();
+        string? jobId = FirstScalar(createRoot, "job_id", "jobId", "id");
+        string? taskId = FirstScalar(createRoot, "task_id", "taskId", "task");
+
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(timeoutSeconds);
+        JsonElement latest = createRoot;
+        string status = FirstScalar(latest, "status", "state") ?? "created";
+        while (DateTimeOffset.UtcNow < deadline) {
+            using JsonDocument taskDocument = await ReadTaskAsync(client, apiRoot, taskId, jobId, cancellationToken);
+            latest = taskDocument.RootElement.Clone();
+            taskId ??= FirstScalar(latest, "task_id", "taskId", "id");
+            status = FirstScalar(latest, "status", "state") ?? status;
+            if (IsSuccessStatus(latest, status)) {
+                MovieMetadata metadata = MdcNgAdapter.ToMovieMetadata(latest, command.Code);
+                return new(Name, true, status, jobId, taskId, metadata, latest.GetRawText(), "MDC-NG scrape task finished.");
+            }
+            if (IsFailureStatus(latest, status))
+                return new(Name, false, status, jobId, taskId, null, latest.GetRawText(), "MDC-NG scrape task failed.");
+            await Task.Delay(250, cancellationToken);
+        }
+        return new(Name, false, status, jobId, taskId, null, latest.GetRawText(), "MDC-NG scrape task timed out before returning metadata.");
+    }
+
+    public async Task<ProviderConnectionResult> TestConnectionAsync(MetadataProviderContext settings, CancellationToken cancellationToken)
     {
         var watch = Stopwatch.StartNew();
-        MdcNgSettingsDto mdc = settings.MdcNg;
-        if (string.IsNullOrWhiteSpace(mdc.CommandPath)) return Task.FromResult(new ProviderConnectionResult(false, Name, "未配置 MDC-NG 外部命令。", watch.ElapsedMilliseconds));
-        if (!File.Exists(mdc.CommandPath)) return Task.FromResult(new ProviderConnectionResult(false, Name, $"外部命令不存在：{mdc.CommandPath}", watch.ElapsedMilliseconds));
-        return Task.FromResult(new ProviderConnectionResult(true, Name, $"外部命令已配置：{mdc.CommandPath}", watch.ElapsedMilliseconds));
+        MdcNgToolStatusDto status = await StatusAsync(settings.MdcNg, cancellationToken);
+        watch.Stop();
+        return new(status.ApiReachable, Name, status.Message, watch.ElapsedMilliseconds);
     }
 
-    private static ProviderMetadata ParseNfo(string path, string fallbackCode)
+    public async Task<MdcNgToolStatusDto> StatusAsync(MdcNgSettingsDto settings, CancellationToken cancellationToken)
     {
-        XDocument doc = XDocument.Load(path);
-        XElement root = doc.Root ?? throw new InvalidDataException("NFO 根节点为空。");
-        string? release = First(root, "premiered", "releasedate", "release", "date");
-        int? runtime = int.TryParse(First(root, "runtime"), out int minutes) && minutes > 0 ? minutes * 60 : null;
-        var images = new List<MetadataImage>();
-        AddImage(images, "Poster", First(root, "poster", "thumb"));
-        AddImage(images, "Fanart", First(root, "fanart", "background"));
-        foreach (XElement thumb in root.Elements("thumb").Skip(1).Take(30)) AddImage(images, "Preview", thumb.Value);
-        string code = First(root, "id", "num", "code") ?? fallbackCode;
-        return new("MDC-NG", path, NormalizeCode(code), First(root, "title"), First(root, "plot", "outline", "desc"),
-            First(root, "director"), First(root, "studio", "maker"), First(root, "publisher", "label"),
-            First(root, "set", "series"), runtime, NormalizeDate(release), path,
-            Values(root, "genre").Concat(Values(root, "tag")).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), Values(root, "actor", "name"),
-            images.DistinctBy(image => image.Url, StringComparer.OrdinalIgnoreCase).ToArray());
+        using HttpClient client = clients?.CreateClient("MDC-NG") ?? new HttpClient();
+        client.Timeout = TimeSpan.FromSeconds(Math.Clamp(settings.TimeoutSeconds, 10, 600));
+        bool serviceReachable = await IsReachableAsync(client, new Uri(new Uri(settings.ServiceUrl), "settings/common"), cancellationToken);
+        (bool apiReachable, string? version) = await ReadVersionAsync(client, new Uri(new Uri(settings.ApiUrl), "api/version"), cancellationToken);
+        string message = apiReachable
+            ? $"MDC-NG API connected: {settings.ApiUrl}"
+            : serviceReachable
+                ? $"MDC-NG web is reachable, but API is not reachable. Map 9207:9207 and confirm API URL {settings.ApiUrl}."
+                : $"MDC-NG is not reachable. Check service URL {settings.ServiceUrl} and API URL {settings.ApiUrl}.";
+        return new(settings.ServiceUrl, settings.ApiUrl, serviceReachable, apiReachable, version, DateTimeOffset.Now.ToString("O"), message);
     }
 
-    private static ProcessStartInfo BuildStartInfo(string commandPath, string moviePath, string input, string output, string work)
+    private static async Task<bool> IsReachableAsync(HttpClient client, Uri uri, CancellationToken cancellationToken)
     {
-        string extension = Path.GetExtension(commandPath);
-        bool isCommandScript = extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase) || extension.Equals(".bat", StringComparison.OrdinalIgnoreCase);
-        return new ProcessStartInfo {
-            FileName = isCommandScript ? (Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe") : commandPath,
-            Arguments = isCommandScript
-                ? $"/d /c {Quote(commandPath)} {Quote(moviePath)} {Quote(input)} {Quote(output)} {Quote(work)}"
-                : $"{Quote(moviePath)} {Quote(input)} {Quote(output)} {Quote(work)}",
-            WorkingDirectory = Path.GetDirectoryName(commandPath) ?? Environment.CurrentDirectory,
-            UseShellExecute = false,
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-            CreateNoWindow = true,
-        };
+        try {
+            using HttpResponseMessage response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            return response.IsSuccessStatusCode;
+        } catch (Exception error) when (error is HttpRequestException or TaskCanceledException or InvalidOperationException) {
+            return false;
+        }
     }
 
-    private static void AddImage(List<MetadataImage> images, string type, string? url)
+    private static async Task<(bool Reachable, string? Version)> ReadVersionAsync(HttpClient client, Uri uri, CancellationToken cancellationToken)
     {
-        if (Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && uri.Scheme is "http" or "https") images.Add(new(type, uri.ToString()));
+        try {
+            string version = (await client.GetStringAsync(uri, cancellationToken)).Trim();
+            return (true, string.IsNullOrWhiteSpace(version) ? null : version);
+        } catch (Exception error) when (error is HttpRequestException or TaskCanceledException or InvalidOperationException) {
+            return (false, null);
+        }
     }
-    private static string? First(XElement root, params string[] names) => names.Select(name => root.Element(name)?.Value.Trim()).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
-    private static IReadOnlyList<string> Values(XElement root, string element, string? child = null) =>
-        root.Elements(element).Select(value => child is null ? value.Value : value.Element(child)?.Value).Select(value => value?.Trim()).Where(value => !string.IsNullOrWhiteSpace(value)).Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-    private static string NormalizeCode(string value) => string.Join(' ', (value ?? "").Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant().Replace('_', '-');
-    private static string Quote(string value) => "\"" + value.Replace("\"", "\"\"") + "\"";
-    private static string TrimLog(string value) {
-        string text = string.Join(' ', (value ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).Trim();
-        return text.Length > 300 ? text[..300] : text;
+
+    private static async Task<JsonDocument> PostJsonAsync(HttpClient client, Uri uri, object payload, CancellationToken cancellationToken)
+    {
+        using HttpResponseMessage response = await client.PostAsJsonAsync(uri, payload, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException($"MDC-NG request failed: HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
+        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
     }
-    private static string? NormalizeDate(string? value) => DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out DateTime date) && date.Year > 1900 ? date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : null;
+
+    private static async Task<JsonDocument> ReadTaskAsync(HttpClient client, Uri apiRoot, string? taskId, string? jobId, CancellationToken cancellationToken)
+    {
+        Uri uri = !string.IsNullOrWhiteSpace(taskId)
+            ? new Uri(apiRoot, $"api/tasks/{Uri.EscapeDataString(taskId)}")
+            : new Uri(apiRoot, "api/tasks_full?page=1&page_size=20");
+        using HttpResponseMessage response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException($"MDC-NG task poll failed: HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
+        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (!string.IsNullOrWhiteSpace(taskId) || string.IsNullOrWhiteSpace(jobId)) return document;
+        JsonElement match = FindTaskByJobId(document.RootElement, jobId) ?? document.RootElement;
+        string raw = match.GetRawText();
+        document.Dispose();
+        return JsonDocument.Parse(raw);
+    }
+
+    private static JsonElement? FindTaskByJobId(JsonElement source, string jobId)
+    {
+        if (source.ValueKind == JsonValueKind.Object) {
+            string? current = FirstScalar(source, "job_id", "jobId", "manual_job_id", "manualJobId");
+            if (current == jobId) return source.Clone();
+            foreach (JsonProperty property in source.EnumerateObject()) {
+                JsonElement? match = FindTaskByJobId(property.Value, jobId);
+                if (match is not null) return match;
+            }
+        } else if (source.ValueKind == JsonValueKind.Array) {
+            foreach (JsonElement item in source.EnumerateArray()) {
+                JsonElement? match = FindTaskByJobId(item, jobId);
+                if (match is not null) return match;
+            }
+        }
+        return null;
+    }
+
+    private static string? FirstScalar(JsonElement source, params string[] names)
+    {
+        foreach (string name in names) {
+            if (TryFindProperty(source, name, out JsonElement value)) {
+                string? text = value.ValueKind switch {
+                    JsonValueKind.String => value.GetString(),
+                    JsonValueKind.Number => value.ToString(),
+                    JsonValueKind.True => "true",
+                    JsonValueKind.False => "false",
+                    _ => null,
+                };
+                if (!string.IsNullOrWhiteSpace(text)) return text.Trim();
+            }
+        }
+        return null;
+    }
+
+    private static bool TryFindProperty(JsonElement source, string name, out JsonElement value)
+    {
+        if (source.ValueKind == JsonValueKind.Object) {
+            foreach (JsonProperty property in source.EnumerateObject()) {
+                if (property.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) {
+                    value = property.Value;
+                    return true;
+                }
+            }
+            foreach (JsonProperty property in source.EnumerateObject()) {
+                if (TryFindProperty(property.Value, name, out value)) return true;
+            }
+        } else if (source.ValueKind == JsonValueKind.Array) {
+            foreach (JsonElement item in source.EnumerateArray()) {
+                if (TryFindProperty(item, name, out value)) return true;
+            }
+        }
+        value = default;
+        return false;
+    }
+
+    private static bool IsSuccessStatus(JsonElement source, string status)
+    {
+        if (int.TryParse(status, CultureInfo.InvariantCulture, out int number) && number is 2 or 1000) return true;
+        string normalized = status.Trim().ToLowerInvariant();
+        return normalized is "finished" or "complete" or "completed" or "success" or "succeeded" or "done"
+            || FirstScalar(source, "finished_at", "finishedAt", "completed_at", "completedAt") is not null;
+    }
+
+    private static bool IsFailureStatus(JsonElement source, string status)
+    {
+        if (int.TryParse(status, CultureInfo.InvariantCulture, out int number) && number < 0) return true;
+        string normalized = status.Trim().ToLowerInvariant();
+        return normalized is "failed" or "failure" or "error" or "abort" or "aborted" or "cancelled" or "canceled"
+            || FirstScalar(source, "error", "exception") is not null;
+    }
 }
-
 public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProvider
 {
     private static readonly string[] ProviderPreference = ["FANZA", "MGS", "JavBus", "JAV321", "AVBASE"];

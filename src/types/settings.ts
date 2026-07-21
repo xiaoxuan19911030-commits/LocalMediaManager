@@ -28,7 +28,7 @@ export interface MetaTubeSettings {
   writeNfo: boolean; autoExecute: boolean; nonDestructive: boolean
 }
 export interface MdcNgSettings {
-  enabled: boolean; serviceUrl: string; commandPath: string; timeoutSeconds: number
+  enabled: boolean; serviceUrl: string; apiUrl: string; timeoutSeconds: number
   apiKey: string; downloadImages: boolean
 }
 export interface JavBusSettings {
@@ -142,5 +142,15 @@ export interface FfmpegToolStatus {
   version?: string
   probeVersion?: string
   pluginDirectory: string
+  message: string
+}
+
+export interface MdcNgToolStatus {
+  serviceUrl: string
+  apiUrl: string
+  serviceReachable: boolean
+  apiReachable: boolean
+  version?: string
+  lastCheckedAt: string
   message: string
 }

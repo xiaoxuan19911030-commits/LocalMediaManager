@@ -797,7 +797,7 @@ public sealed class SettingsSaveCoordinator(
 
 public static class SettingsDefaults
 {
-    public static MdcNgSettingsDto MdcNg => new(false, "", @"D:\Jvedio\Jvedio5.0\scrapers\mdc-ng\run-current.cmd", 120, "", true);
+    public static MdcNgSettingsDto MdcNg => new(false, "http://127.0.0.1:5800/", "http://127.0.0.1:9207/", 120, "", true);
     public static JavBusSettingsDto JavBus => new(true, 2, JavBusProvider.DefaultBaseUrl, 30, 1, "", true, true);
     public static WebMetadataSettingsDto Dmm => new(false, 3, DmmProvider.DefaultBaseUrl, 30, 1, "", true, true);
     public static WebMetadataSettingsDto JavDb => new(false, 4, JavDbProvider.DefaultBaseUrl, 30, 1, "", true, true);

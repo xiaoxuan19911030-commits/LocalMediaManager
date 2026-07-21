@@ -15,7 +15,7 @@ public sealed record MetaTubeSettingsDto(
 public sealed record MdcNgSettingsDto(
     bool Enabled,
     string ServiceUrl,
-    string CommandPath,
+    string ApiUrl,
     int TimeoutSeconds,
     string ApiKey = "",
     bool DownloadImages = true);
@@ -118,7 +118,7 @@ public sealed class MetadataProviderSettingsService(string databasePath)
         return NormalizeMdcNg(new(
             Bool(values, "metadata.mdcNg.enabled", defaults.Enabled),
             Text(values, "metadata.mdcNg.serviceUrl", defaults.ServiceUrl),
-            Text(values, "metadata.mdcNg.commandPath", defaults.CommandPath),
+            Text(values, "metadata.mdcNg.apiUrl", defaults.ApiUrl),
             Int(values, "metadata.mdcNg.timeoutSeconds", defaults.TimeoutSeconds),
             Text(values, "metadata.mdcNg.apiKey", defaults.ApiKey),
             Bool(values, "metadata.mdcNg.downloadImages", defaults.DownloadImages)));
@@ -194,26 +194,36 @@ public sealed class MetadataProviderSettingsService(string databasePath)
 
     public static MdcNgSettingsDto NormalizeMdcNg(MdcNgSettingsDto input)
     {
-        string serviceUrl = (input.ServiceUrl ?? "").Trim();
-        if (!string.IsNullOrWhiteSpace(serviceUrl)) {
-            if (!Uri.TryCreate(serviceUrl, UriKind.Absolute, out Uri? uri) || uri.Scheme is not ("http" or "https"))
-                throw new ArgumentException("MDC-NG 服务地址必须是有效的 HTTP 或 HTTPS URL。");
-            serviceUrl = NormalizeBaseUrl(uri.ToString());
-        }
+        string serviceUrl = NormalizeMdcNgServiceUrl(input.ServiceUrl);
+        string apiUrl = NormalizeOptionalHttpUrl(input.ApiUrl, SettingsDefaults.MdcNg.ApiUrl, "MDC-NG API 地址");
         return input with {
             ServiceUrl = serviceUrl,
-            CommandPath = (input.CommandPath ?? "").Trim(),
+            ApiUrl = apiUrl,
             TimeoutSeconds = Math.Clamp(input.TimeoutSeconds, 10, 600),
             ApiKey = input.ApiKey?.Trim() ?? "",
             DownloadImages = input.DownloadImages,
         };
     }
 
+    private static string NormalizeOptionalHttpUrl(string? value, string fallback, string label)
+    {
+        string text = (value ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(text)) text = fallback;
+        if (!Uri.TryCreate(text, UriKind.Absolute, out Uri? uri) || uri.Scheme is not ("http" or "https"))
+            throw new ArgumentException($"{label}必须是有效的 HTTP 或 HTTPS URL。");
+        return NormalizeBaseUrl(uri.ToString());
+    }
+
+    private static string NormalizeMdcNgServiceUrl(string? value)
+    {
+        return NormalizeOptionalHttpUrl(value, SettingsDefaults.MdcNg.ServiceUrl, "MDC-NG 服务地址");
+    }
+
     public static async Task StoreMdcNgAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction, MdcNgSettingsDto clean)
     {
         await StoreAsync(connection, transaction, "metadata.mdcNg.enabled", clean.Enabled, "boolean");
         await StoreAsync(connection, transaction, "metadata.mdcNg.serviceUrl", clean.ServiceUrl, "string");
-        await StoreAsync(connection, transaction, "metadata.mdcNg.commandPath", clean.CommandPath, "string");
+        await StoreAsync(connection, transaction, "metadata.mdcNg.apiUrl", clean.ApiUrl, "string");
         await StoreAsync(connection, transaction, "metadata.mdcNg.timeoutSeconds", clean.TimeoutSeconds, "integer");
         await StoreAsync(connection, transaction, "metadata.mdcNg.apiKey", clean.ApiKey, "secret");
         await StoreAsync(connection, transaction, "metadata.mdcNg.downloadImages", clean.DownloadImages, "boolean");
