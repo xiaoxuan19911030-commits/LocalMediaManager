@@ -41,7 +41,9 @@ public sealed record MdcNgScrapeResult(
 public sealed record MetadataSyncRequest(
     string Code,
     string? MediaPath = null,
-    string? ProviderId = null);
+    string? ProviderId = null,
+    long? MovieId = null,
+    bool Overwrite = false);
 
 public sealed record MetadataSyncResult(
     bool Success,
@@ -50,4 +52,6 @@ public sealed record MetadataSyncResult(
     long ElapsedMilliseconds,
     IReadOnlyList<string> Warnings,
     string? ErrorCode,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    long? ImportTaskId = null,
+    string? ImportSummary = null);

@@ -14,7 +14,8 @@ public sealed record ProviderMetadata(
     string Provider, string ExternalId, string Code, string? Title, string? Description,
     string? Director, string? Studio, string? Publisher, string? Series, int? DurationSeconds,
     string? ReleaseDate, string? WebUrl, IReadOnlyList<string> Genres, IReadOnlyList<string> Actors,
-    IReadOnlyList<MetadataImage> Images);
+    IReadOnlyList<MetadataImage> Images, decimal? Rating = null, string? OriginalTitle = null,
+    string? Country = null);
 
 public interface IMetadataProvider
 {

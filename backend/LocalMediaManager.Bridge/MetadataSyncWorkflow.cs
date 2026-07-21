@@ -154,15 +154,18 @@ public sealed class MetadataWriteService(string databasePath)
             UPDATE Movies SET
               Code=CASE WHEN $overwrite=1 THEN COALESCE($code,Code) WHEN trim(ifnull(Code,''))='' THEN $code ELSE Code END,
               Title=CASE WHEN $overwrite=1 THEN COALESCE($title,Title) WHEN trim(ifnull(Title,''))='' OR Title=Code THEN COALESCE($title,Title) ELSE Title END,
+              OriginalTitle=CASE WHEN $overwrite=1 THEN COALESCE($original,OriginalTitle) WHEN trim(ifnull(OriginalTitle,''))='' THEN $original ELSE OriginalTitle END,
               SortTitle=CASE WHEN $overwrite=1 THEN COALESCE($title,SortTitle) WHEN trim(ifnull(SortTitle,''))='' OR SortTitle=Code THEN COALESCE($title,SortTitle) ELSE SortTitle END,
               Description=CASE WHEN $overwrite=1 THEN COALESCE($description,Description) WHEN trim(ifnull(Description,''))='' THEN $description ELSE Description END,
               ReleaseDate=CASE WHEN $overwrite=1 THEN COALESCE($release,ReleaseDate) WHEN trim(ifnull(ReleaseDate,''))='' THEN $release ELSE ReleaseDate END,
               DurationSeconds=CASE WHEN $overwrite=1 THEN COALESCE($duration,DurationSeconds) WHEN DurationSeconds=0 THEN COALESCE($duration,0) ELSE DurationSeconds END,
+              ProviderRating=CASE WHEN $overwrite=1 THEN COALESCE($rating,ProviderRating) WHEN ProviderRating IS NULL OR ProviderRating=0 THEN $rating ELSE ProviderRating END,
               NfoPath=CASE WHEN $overwrite=1 THEN COALESCE($nfo,NfoPath) WHEN trim(ifnull(NfoPath,''))='' THEN $nfo ELSE NfoPath END,
               IsScraped=1,ScrapeStatus='complete',UpdatedAt=$at
             WHERE Id=$movie
             """, ("$code", metadata.Code), ("$title", metadata.Title), ("$description", metadata.Description),
-            ("$release", metadata.ReleaseDate), ("$duration", metadata.DurationSeconds), ("$nfo", files.NfoPath), ("$overwrite", overwrite ? 1 : 0),
+            ("$original", metadata.OriginalTitle), ("$release", metadata.ReleaseDate), ("$duration", metadata.DurationSeconds),
+            ("$rating", metadata.Rating), ("$nfo", files.NfoPath), ("$overwrite", overwrite ? 1 : 0),
             ("$at", Now()), ("$movie", movie.Id));
         await ExecuteAsync(connection, transaction,
             "INSERT OR IGNORE INTO ExternalIds(EntityType,EntityId,Provider,ExternalId) VALUES('Movie',$movie,$provider,$external)",
@@ -210,7 +213,7 @@ public sealed class MetadataWriteService(string databasePath)
                 ("$primary", image.Type == "Poster" ? 1 : 0), ("$provider", metadata.Provider),
                 ("$ownership", image.Ownership), ("$derived", image.IsDerived ? 1 : 0),
                 ("$content", image.ContentType), ("$at", Now()));
-        string applied = JsonSerializer.Serialize(new { metadata.Provider, metadata.ExternalId, metadata.Code, metadata.Title,
+        string applied = JsonSerializer.Serialize(new { metadata.Provider, metadata.ExternalId, metadata.Code, metadata.Title, metadata.OriginalTitle, metadata.Rating,
             ImagesDownloaded = files.Images.Count(value => value.Created), ImagesPreserved = files.Images.Count(value => !value.Created),
             Genres = metadata.Genres.Count, Actors = metadata.Actors.Count, Director = string.IsNullOrWhiteSpace(metadata.Director) ? 0 : 1, NonDestructive = !overwrite });
         await ExecuteAsync(connection, transaction, "UPDATE MetadataSyncSnapshots SET AppliedJson=$applied,AppliedAt=$at WHERE Id=$id",

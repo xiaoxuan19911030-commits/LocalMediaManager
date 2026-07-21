@@ -5,9 +5,19 @@ namespace LocalMediaManager.Bridge;
 
 public sealed class MetadataSyncService(
     MetadataProviderSettingsService settings,
-    MdcNgProvider mdcNg)
+    MdcNgProvider mdcNg,
+    MovieMetadataImporter? importer = null)
 {
     public const string MdcNgProviderId = "mdc-ng";
+
+    public async Task<MetadataSyncResult> SyncMovieAsync(long movieId, string? providerId, bool overwrite,
+        CancellationToken cancellationToken)
+    {
+        if (importer is null) throw new InvalidOperationException("MovieMetadataImporter is not configured.");
+        SyncMovie movie = await importer.ReadMovieAsync(movieId, cancellationToken);
+        MetadataSyncResult result = await SyncAsync(new(movie.Code, movie.PrimaryFile, providerId, movieId, overwrite), cancellationToken);
+        return result;
+    }
 
     public async Task<MetadataSyncResult> SyncAsync(MetadataSyncRequest request, CancellationToken cancellationToken)
     {
@@ -28,14 +38,25 @@ public sealed class MetadataSyncService(
                 mdcSettings,
                 cancellationToken);
             watch.Stop();
+            if (!scrape.Success || scrape.Metadata is null)
+                return new(false, scrape.Metadata, providerId, watch.ElapsedMilliseconds, [scrape.Message],
+                    "PROVIDER_FAILED", scrape.Message);
+
+            MovieMetadataImportResult? import = null;
+            if (request.MovieId.HasValue) {
+                if (importer is null) throw new InvalidOperationException("MovieMetadataImporter is not configured.");
+                import = await importer.ImportAsync(request.MovieId.Value, scrape.Metadata, request.Overwrite, cancellationToken);
+            }
             return new(
                 scrape.Success && scrape.Metadata is not null,
                 scrape.Metadata,
                 providerId,
                 watch.ElapsedMilliseconds,
-                scrape.Success ? [] : [scrape.Message],
-                scrape.Success ? null : "PROVIDER_FAILED",
-                scrape.Success ? null : scrape.Message);
+                [],
+                null,
+                null,
+                import?.TaskId,
+                import?.AppliedJson);
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             throw;
         } catch (Exception error) when (error is HttpRequestException or TimeoutException or InvalidOperationException or JsonException) {

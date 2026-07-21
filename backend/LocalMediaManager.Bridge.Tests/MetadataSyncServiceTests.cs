@@ -16,7 +16,7 @@ public sealed class MetadataSyncServiceTests : IAsyncLifetime
         Directory.CreateDirectory(root);
         await using var connection = new SqliteConnection($"Data Source={Database}");
         await connection.OpenAsync();
-        foreach (string file in new[] { "0001_InitialSchema.sql", "0005_MetadataSyncWorkflow.sql" }) {
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0005_MetadataSyncWorkflow.sql", "0013_DirectorMetadata.sql" }) {
             await using var command = connection.CreateCommand();
             command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
             await command.ExecuteNonQueryAsync();
@@ -56,6 +56,62 @@ public sealed class MetadataSyncServiceTests : IAsyncLifetime
         Assert.Equal("Studio A", result.Metadata.Studio);
         Assert.Equal(7440, result.Metadata.DurationSeconds);
         Assert.Equal(4.17m, result.Metadata.Rating);
+    }
+
+    [Fact]
+    public async Task SyncMovieImportsMovieMetadataIntoSqliteAndDetailReadsFromDatabase()
+    {
+        await using (SqliteConnection connection = await Open()) {
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, """
+                INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt)
+                VALUES(1,'SONE-104','SONE-104',0,0,'pending','Test',$at,$at)
+                """, ("$at", at));
+            await Execute(connection, """
+                INSERT INTO MediaFiles(MovieId,FilePath,NormalizedPath,FileName,MediaType,SourceType,IsPrimary,ExistsState,CreatedAt,UpdatedAt)
+                VALUES(1,'/media/SONE-104.mp4','/media/SONE-104.mp4','SONE-104.mp4','Video','Test',1,'Present',$at,$at)
+                """, ("$at", at));
+        }
+        var service = CreateService(request => {
+            if (request.Method == HttpMethod.Post) return new(HttpStatusCode.OK) { Content = new StringContent("") };
+            if (request.RequestUri!.AbsolutePath == "/api/manual-jobs")
+                return Json("""{"data":[{"id":11,"source_pathes":"[\"/media/SONE-104.mp4\"]","status":1,"total_count":1}]}""");
+            if (request.RequestUri!.AbsolutePath == "/api/tasks_full")
+                return Json("""
+                {"data":[{"id":21,"manual_job_id":11,"status":1,"metadata":{
+                  "Number":"SONE-104","Title":"Imported title","OriginalTitle":"Original imported title",
+                  "Outline":"Imported plot","Actors":"Actor A,Actor B","Director":"Director A",
+                  "Studio":"Studio A","Series":"Series A","Tags":"Drama,HD","Release":"2024-06-10",
+                  "Runtime":"124","UserRating":"4.17"
+                }}]}
+                """);
+            return new(HttpStatusCode.NotFound);
+        }, withImporter: true);
+
+        MetadataSyncResult result = await service.SyncMovieAsync(1, "mdc-ng", overwrite: false, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.NotNull(result.ImportTaskId);
+        await using SqliteConnection verify = await Open();
+        Assert.Equal("Imported title", await Text(verify, "SELECT Title FROM Movies WHERE Id=1"));
+        Assert.Equal("Original imported title", await Text(verify, "SELECT OriginalTitle FROM Movies WHERE Id=1"));
+        Assert.Equal("Imported plot", await Text(verify, "SELECT Description FROM Movies WHERE Id=1"));
+        Assert.Equal("2024-06-10", await Text(verify, "SELECT ReleaseDate FROM Movies WHERE Id=1"));
+        Assert.Equal(7440, await Scalar(verify, "SELECT DurationSeconds FROM Movies WHERE Id=1"));
+        Assert.Equal("4.17", await Text(verify, "SELECT ProviderRating FROM Movies WHERE Id=1"));
+        Assert.Equal(2, await Scalar(verify, "SELECT COUNT(*) FROM MovieActors WHERE MovieId=1"));
+        Assert.Equal(2, await Scalar(verify, "SELECT COUNT(*) FROM MovieGenres WHERE MovieId=1"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM MovieDirectors WHERE MovieId=1"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM MovieStudios WHERE MovieId=1"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM MovieSeries WHERE MovieId=1"));
+
+        MovieDetailDto? detail = await ProductReader.ReadMovieAsync(Database, "http://localhost", 1);
+        Assert.NotNull(detail);
+        Assert.Equal("Imported title", detail.Title);
+        Assert.Equal("Imported plot", detail.Description);
+        Assert.Equal(4.17, detail.ProviderRating);
+        Assert.Contains(detail.Actors, actor => actor.Name == "Actor A");
+        Assert.Contains(detail.Genres, genre => genre.Name == "Drama");
     }
 
     [Fact]
@@ -102,10 +158,42 @@ public sealed class MetadataSyncServiceTests : IAsyncLifetime
         Assert.DoesNotContain("provider.ScrapeAsync", endpoint);
     }
 
-    private MetadataSyncService CreateService(Func<HttpRequestMessage, HttpResponseMessage> handler)
+    private MetadataSyncService CreateService(Func<HttpRequestMessage, HttpResponseMessage> handler, bool withImporter = false)
     {
         var settings = new MetadataProviderSettingsService(Database);
-        return new(settings, new MdcNgProvider(new FakeFactory(handler)));
+        MovieMetadataImporter? importer = withImporter
+            ? new MovieMetadataImporter(Database, new MetadataWriteService(Database))
+            : null;
+        return new(settings, new MdcNgProvider(new FakeFactory(handler)), importer);
+    }
+
+    private async Task<SqliteConnection> Open()
+    {
+        var connection = new SqliteConnection($"Data Source={Database}");
+        await connection.OpenAsync();
+        return connection;
+    }
+
+    private static async Task Execute(SqliteConnection connection, string sql, params (string, object?)[] values)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        foreach (var (name, value) in values) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<long> Scalar(SqliteConnection connection, string sql)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        return Convert.ToInt64(await command.ExecuteScalarAsync() ?? 0L);
+    }
+
+    private static async Task<string?> Text(SqliteConnection connection, string sql)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        return (await command.ExecuteScalarAsync())?.ToString();
     }
 
     private static HttpResponseMessage Json(string body) =>

@@ -31,6 +31,7 @@ builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequired
 builder.Services.AddSingleton(new MediaStoragePathResolver(databasePath, installRoot));
 builder.Services.AddSingleton(new MetadataProviderSettingsService(databasePath));
 builder.Services.AddSingleton(new MetadataWriteService(databasePath));
+builder.Services.AddSingleton(sp => new MovieMetadataImporter(databasePath, sp.GetRequiredService<MetadataWriteService>()));
 builder.Services.AddSingleton(new TaskLogService(databasePath));
 builder.Services.AddSingleton(new FfmpegLocator(databasePath, AppContext.BaseDirectory));
 builder.Services.AddSingleton(new ImageAssetService(databasePath, imageRoot));
@@ -260,7 +261,11 @@ app.MapDelete("/api/tasks/{taskId:long}", async (long taskId, TaskCommandService
 app.MapPost("/api/tasks/cleanup", async (TaskCleanupCommand command, TaskCommandService service) => Results.Ok(await service.CleanupAsync(command.Status)));
 app.MapPost("/api/tasks/batch/cancel", async (IReadOnlyList<long> taskIds, TaskCommandService service) => Results.Ok(await service.CancelBatchAsync(taskIds)));
 app.MapPost("/api/tasks/batch/cancel-sync", async (IReadOnlyList<long> taskIds, TaskCommandService service) => Results.Ok(await service.CancelSyncBatchAsync(taskIds)));
-app.MapPost("/api/videos/{movieId:long}/sync", async (long movieId, string? source, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Manual", source: source)));
+app.MapPost("/api/videos/{movieId:long}/sync", async (long movieId, string? source, MetadataSyncService service, CancellationToken token) => {
+    MetadataSyncResult result = await service.SyncMovieAsync(movieId, source, overwrite: false, token);
+    return Results.Ok(new MetadataSyncLaunchResult(result.ImportTaskId ?? 0, result.Success ? "Completed" : "Failed",
+        result.Success ? "元数据同步完成。" : result.ErrorMessage ?? "元数据同步失败。"));
+});
 app.MapPost("/api/videos/{movieId:long}/rescrape", async (long movieId, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Rescrape", overwrite: true)));
 app.MapPost("/api/videos/batch/sync", async (IReadOnlyList<long> movieIds, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueBatchAsync(movieIds)));
 app.MapPost("/api/videos/library/sync", async (SyncLibraryCommand command, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueLibraryAsync(command.LibraryId)));
