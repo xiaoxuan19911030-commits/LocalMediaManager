@@ -16,7 +16,7 @@ public sealed class ProviderNetworkException(string provider, Uri uri, string me
 
 public static class ProviderNetworkDiagnostics
 {
-    private static readonly Regex Cloudflare = new("cf-chl|cloudflare|checking your browser|turnstile", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex CloudflareChallenge = new("cf-chl|driver-verify|checking your browser|turnstile", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex Blocked = new("captcha|age.?check|sign.?in|login|not-available-in-your-region|region", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public static async Task<string> ProbeAsync(string provider, Uri uri, int timeoutSeconds, Action<HttpRequestMessage>? configure = null,
@@ -26,10 +26,13 @@ public static class ProviderNetworkDiagnostics
         var watch = Stopwatch.StartNew();
         ProviderNetworkSettingsDto cleanNetwork = MetadataProviderSettingsService.NormalizeNetwork(network ?? ProviderNetworkSettingsDto.Default);
         lines.Add($"Proxy Mode: {cleanNetwork.ProxyMode}");
-        bool manualProxy = cleanNetwork.ProxyMode.Equals("Manual", StringComparison.OrdinalIgnoreCase);
+        Uri? proxyUri = EffectiveProxyUri(uri, cleanNetwork);
+        bool skipDirectTcp = cleanNetwork.ProxyMode.Equals("Manual", StringComparison.OrdinalIgnoreCase) || proxyUri is not null;
 
-        if (manualProxy) {
-            lines.Add("Direct TCP skipped because manual proxy is configured");
+        if (skipDirectTcp) {
+            lines.Add(proxyUri is null
+                ? "Direct TCP skipped because manual proxy is configured"
+                : $"Direct TCP skipped because system proxy is configured ({proxyUri})");
         } else {
             IPAddress[] addresses;
             try {
@@ -79,11 +82,12 @@ public static class ProviderNetworkDiagnostics
             if (!string.IsNullOrWhiteSpace(server)) lines.Add($"Server: {server}");
 
             string sample = await ReadSampleAsync(response, token);
-            if (Cloudflare.IsMatch(sample) || response.Headers.Any(header => header.Key.StartsWith("CF-", StringComparison.OrdinalIgnoreCase)))
+            bool cloudflareChallenge = CloudflareChallenge.IsMatch(sample);
+            if (cloudflareChallenge)
                 lines.Add("Cloudflare: detected");
             if (Blocked.IsMatch(sample))
                 lines.Add("Blocked Page: login/age/region/captcha signal detected");
-            if (response.IsSuccessStatusCode && !Cloudflare.IsMatch(sample) && !Blocked.IsMatch(sample))
+            if (response.IsSuccessStatusCode && !cloudflareChallenge && !Blocked.IsMatch(sample))
                 lines.Add("Parse Input: reachable HTML/API response");
         } catch (Exception error) when (error is HttpRequestException or TaskCanceledException or IOException) {
             lines.Add(error is TaskCanceledException ? "HTTP Timeout" : $"HTTP Failed: {error.Message}");
@@ -102,8 +106,24 @@ public static class ProviderNetworkDiagnostics
 
     public static void JsonHeaders(HttpRequestMessage request)
     {
-        request.Headers.UserAgent.ParseAdd("LocalMediaManager/0.6.3");
+        request.Headers.UserAgent.ParseAdd("LocalMediaManager/0.7.0");
         request.Headers.Accept.ParseAdd("application/json,*/*;q=0.8");
+    }
+
+    private static Uri? EffectiveProxyUri(Uri uri, ProviderNetworkSettingsDto network)
+    {
+        if (!network.ProxyMode.Equals("System", StringComparison.OrdinalIgnoreCase)) return null;
+        try {
+            IWebProxy proxy = WebRequest.GetSystemWebProxy();
+            if (proxy.IsBypassed(uri)) return null;
+            Uri? candidate = proxy.GetProxy(uri);
+            if (candidate is null) return null;
+            return Uri.Compare(candidate, uri, UriComponents.AbsoluteUri, UriFormat.SafeUnescaped, StringComparison.OrdinalIgnoreCase) == 0
+                ? null
+                : candidate;
+        } catch {
+            return null;
+        }
     }
 
     private static async Task<string> ReadSampleAsync(HttpResponseMessage response, CancellationToken token)

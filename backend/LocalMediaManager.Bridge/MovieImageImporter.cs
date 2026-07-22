@@ -19,14 +19,15 @@ public sealed class MovieImageImporter(
         var savedImages = new List<SavedImage>();
         var createdPaths = new List<string>();
         var warnings = new List<string>();
-        foreach (MetadataImage image in MovieImages(metadata)) {
+        IReadOnlyList<MetadataImage> images = MovieImages(metadata);
+        if (images.Count > 0) {
             try {
                 IReadOnlyList<SavedImage> saved = await downloader.DownloadAsync(pathResolver,
-                    new(movie.Id, movie.Code, movie.Title), [image], timeoutSeconds, overwrite, cancellationToken);
+                    new(movie.Id, movie.Code, movie.Title), images, timeoutSeconds, overwrite, cancellationToken);
                 savedImages.AddRange(saved);
                 createdPaths.AddRange(saved.Where(value => value.Created).Select(value => value.Path));
             } catch (Exception error) when (error is not OperationCanceledException) {
-                warnings.Add($"{image.Type}: {error.Message}");
+                warnings.Add($"MovieImages: {error.Message}");
             }
         }
 
@@ -36,11 +37,17 @@ public sealed class MovieImageImporter(
     public async Task<MovieImageImportResult> ImportActorImagesAsync(MovieMetadata metadata,
         int timeoutSeconds, bool overwrite, CancellationToken cancellationToken)
     {
+        return await ImportActorImagesAsync(metadata.ActorImages, metadata.Provider, timeoutSeconds, overwrite, cancellationToken);
+    }
+
+    public async Task<MovieImageImportResult> ImportActorImagesAsync(IReadOnlyList<ActorImageMetadata>? actors, string provider,
+        int timeoutSeconds, bool overwrite, CancellationToken cancellationToken)
+    {
         int actorImages = 0;
         var warnings = new List<string>();
-        foreach (ActorImageMetadata actor in metadata.ActorImages) {
+        foreach (ActorImageMetadata actor in actors ?? []) {
             try {
-                if (await ImportActorImageAsync(actor, metadata.Provider, timeoutSeconds, overwrite, cancellationToken))
+                if (await ImportActorImageAsync(actor, provider, timeoutSeconds, overwrite, cancellationToken))
                     actorImages++;
             } catch (Exception error) when (error is not OperationCanceledException) {
                 warnings.Add($"ActorAvatar {actor.Name}: {error.Message}");
@@ -55,6 +62,9 @@ public sealed class MovieImageImporter(
         string? poster = First(metadata.Poster, metadata.Thumb);
         if (!string.IsNullOrWhiteSpace(poster)) result.Add(new("Poster", poster));
         if (!string.IsNullOrWhiteSpace(metadata.Fanart)) result.Add(new("Fanart", metadata.Fanart));
+        foreach (string image in metadata.ExtraFanart)
+            if (!string.IsNullOrWhiteSpace(image))
+                result.Add(new("Preview", image));
         return result;
     }
 
@@ -68,7 +78,7 @@ public sealed class MovieImageImporter(
         using HttpClient client = clients.CreateClient("MetadataImages");
         client.Timeout = TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 10, 180));
         client.DefaultRequestHeaders.UserAgent.Clear();
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.6.3"));
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.7.0"));
         if (Uri.TryCreate(actor.ImageUrl, UriKind.Absolute, out Uri? actorUri))
             client.DefaultRequestHeaders.Referrer = new Uri(actorUri.GetLeftPart(UriPartial.Authority) + "/");
         using HttpResponseMessage response = await client.GetAsync(actor.ImageUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);

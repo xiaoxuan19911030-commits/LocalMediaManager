@@ -86,11 +86,13 @@ public sealed class MetadataSyncServiceTests : IAsyncLifetime
                   "Outline":"Imported plot","Actors":[{"name":"Actor A","image":"https://img.example/actor-a.png"},"Actor B"],"Director":"Director A",
                   "Studio":"Studio A","Series":"Series A","Tags":"Drama,HD","Release":"2024-06-10",
                   "Runtime":"124","UserRating":"4.17","Poster":"https://img.example/poster.png",
-                  "Fanart":"https://img.example/fanart.png"
+                  "Fanart":"https://img.example/fanart.png",
+                  "ExtraFanart":["https://img.example/preview-1.png","https://img.example/preview-2.png"]
                 }}]}
                 """);
             if (request.RequestUri!.Host == "img.example") {
                 var color = request.RequestUri.AbsolutePath.Contains("fanart") ? SKColors.DarkSlateBlue
+                    : request.RequestUri.AbsolutePath.Contains("preview") ? SKColors.SeaGreen
                     : request.RequestUri.AbsolutePath.Contains("actor") ? SKColors.HotPink
                     : SKColors.CornflowerBlue;
                 return new(HttpStatusCode.OK) {
@@ -118,6 +120,7 @@ public sealed class MetadataSyncServiceTests : IAsyncLifetime
         Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM MovieSeries WHERE MovieId=1"));
         Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Images WHERE MovieId=1 AND ImageType='Poster' AND ValidationStatus='Valid'"));
         Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Images WHERE MovieId=1 AND ImageType='Fanart' AND ValidationStatus='Valid'"));
+        Assert.Equal(2, await Scalar(verify, "SELECT COUNT(*) FROM Images WHERE MovieId=1 AND ImageType='Preview' AND ValidationStatus='Valid'"));
         Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Images WHERE ActorId=(SELECT Id FROM Actors WHERE Name='Actor A') AND ImageType='ActorAvatar' AND ValidationStatus='Valid'"));
 
         MovieDetailDto? detail = await ProductReader.ReadMovieAsync(Database, "http://localhost", 1);
@@ -130,6 +133,7 @@ public sealed class MetadataSyncServiceTests : IAsyncLifetime
         var assets = new ImageAssetService(Database, Path.Combine(root, "MediaStorage"));
         Assert.NotNull(await assets.ResolveMovieAsync(1, "original", "poster"));
         Assert.NotNull(await assets.ResolveMovieAsync(1, "original", "fanart"));
+        Assert.Equal(2, (await assets.ReadMovieAssetsAsync(1, "http://localhost")).Count(asset => asset.Type == "Preview" && asset.Url is not null));
     }
 
     [Fact]
@@ -174,6 +178,35 @@ public sealed class MetadataSyncServiceTests : IAsyncLifetime
         Assert.Contains("MetadataSyncService", endpoint);
         Assert.DoesNotContain("MdcNgProvider provider", endpoint);
         Assert.DoesNotContain("provider.ScrapeAsync", endpoint);
+    }
+
+    [Fact]
+    public void SyncEndpointUsesMetadataSyncTaskQueue()
+    {
+        string program = File.ReadAllText(FindRepoFile("backend/LocalMediaManager.Bridge/Program.cs"));
+        int routeStart = program.IndexOf("app.MapPost(\"/api/videos/{movieId:long}/sync\"", StringComparison.Ordinal);
+        int routeEnd = program.IndexOf("app.MapPost(\"/api/videos/{movieId:long}/rescrape\"", routeStart, StringComparison.Ordinal);
+
+        Assert.True(routeStart >= 0, "The video sync endpoint should exist.");
+        Assert.True(routeEnd > routeStart, "The rescrape endpoint should follow the sync endpoint.");
+
+        string endpoint = program[routeStart..routeEnd];
+        Assert.Contains("MetadataSyncExecutor service", endpoint, StringComparison.Ordinal);
+        Assert.Contains("service.EnqueueAsync(movieId, \"Manual\", overwrite: false, source)", endpoint, StringComparison.Ordinal);
+        Assert.DoesNotContain("MetadataSyncService service", endpoint, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NfoExportEndpointsUseMovieNfoExporter()
+    {
+        string program = File.ReadAllText(FindRepoFile("backend/LocalMediaManager.Bridge/Program.cs"));
+        int route = program.IndexOf("/api/videos/{movieId:long}/nfo/export-preview", StringComparison.Ordinal);
+        Assert.True(route >= 0);
+        int importRoute = program.IndexOf("/api/videos/{movieId:long}/nfo/import-preview", route, StringComparison.Ordinal);
+        string endpoints = program[route..(importRoute > route ? importRoute : program.Length)];
+
+        Assert.Contains("MovieNfoExporter exporter", endpoints);
+        Assert.DoesNotContain("NfoService nfo", endpoints);
     }
 
     private MetadataSyncService CreateService(Func<HttpRequestMessage, HttpResponseMessage> handler, bool withImporter = false, bool withImages = false)

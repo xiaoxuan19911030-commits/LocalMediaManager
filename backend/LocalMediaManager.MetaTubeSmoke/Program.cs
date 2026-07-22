@@ -8,7 +8,7 @@ using SkiaSharp;
 
 string repo = Path.GetFullPath(args.ElementAtOrDefault(0) ?? Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 string sourceDatabase = Path.GetFullPath(args.ElementAtOrDefault(1) ?? @"D:\Local Media Manager Next Data\data\LocalMediaManager.db");
-string runRoot = Path.GetFullPath(args.ElementAtOrDefault(2) ?? Path.Combine(@"D:\Local Media Manager Next Smoke", "0.6.3-sync-" + DateTime.Now.ToString("yyyyMMdd-HHmmss")));
+string runRoot = Path.GetFullPath(args.ElementAtOrDefault(2) ?? Path.Combine(@"D:\Local Media Manager Next Smoke", "0.7.0-sync-" + DateTime.Now.ToString("yyyyMMdd-HHmmss")));
 int sampleCount = Math.Clamp(int.TryParse(args.ElementAtOrDefault(3), out int requested) ? requested : 20, 20, 50);
 string database = Path.Combine(runRoot, "data", "LocalMediaManager.db");
 string mediaRoot = Path.Combine(runRoot, "media");
@@ -79,7 +79,7 @@ try {
     int nfosAdded = after.Count(value => value.NfoExists) - before.Count(value => value.NfoExists);
     string report = RenderReport(runRoot, sourceDatabase, samples, tasks, providerStats, completed, failed, cancelled, noResult, providerMismatch, networkFailures, imagesAdded, nfosAdded,
         protectedUsers, protectedImages, protectedNfos, temporaryFiles, integrity, foreignKeys);
-    await File.WriteAllTextAsync(Path.Combine(runRoot, "0.6.3-SYNC-PROVIDER-SMOKE.md"), report, new UTF8Encoding(false));
+    await File.WriteAllTextAsync(Path.Combine(runRoot, "0.7.0-SYNC-PROVIDER-SMOKE.md"), report, new UTF8Encoding(false));
     Console.WriteLine(report);
     return integrity == "ok" && foreignKeys == 0 && temporaryFiles == 0 && protectedUsers == samples.Count ? 0 : 3;
 }
@@ -213,7 +213,7 @@ static async Task<List<TaskEvidence>> ReadTasksAsync(string database,IReadOnlyLi
 static async Task<List<object>> ReadTaskLogsAsync(string database,IReadOnlyList<long> ids){var list=new List<object>();await using var c=await OpenAsync(database,true);await using var x=c.CreateCommand();x.CommandText=$"SELECT TaskId,Level,Message,CreatedAt FROM TaskLogs WHERE TaskId IN ({string.Join(',',ids)}) ORDER BY Id";await using var r=await x.ExecuteReaderAsync();while(await r.ReadAsync())list.Add(new{taskId=r.GetInt64(0),level=r.GetString(1),message=r.GetString(2),createdAt=r.GetString(3)});return list;}
 static async Task<ProviderStats[]> ReadProviderStatsAsync(string database,IReadOnlyList<long> ids){var list=new List<ProviderStats>();await using var c=await OpenAsync(database,true);await using var x=c.CreateCommand();x.CommandText=$"SELECT COALESCE(Provider,'Unknown'),Status,COALESCE(ResultJson,'') FROM Tasks WHERE Id IN ({string.Join(',',ids)}) ORDER BY Id";await using var r=await x.ExecuteReaderAsync();while(await r.ReadAsync()){string json=r.GetString(2);list.Add(new(r.GetString(0),r.GetString(1),json.Contains("\"Title\":",StringComparison.OrdinalIgnoreCase),json.Contains("\"Actors\":",StringComparison.OrdinalIgnoreCase),json.Contains("\"Genres\":",StringComparison.OrdinalIgnoreCase),json.Contains("\"ImagesDownloaded\":",StringComparison.OrdinalIgnoreCase)));}return list.ToArray();}
 static string RenderReport(string root,string source,IReadOnlyList<Sample> samples,IReadOnlyList<TaskEvidence> tasks,IReadOnlyList<ProviderStats> providerStats,int completed,int failed,int cancelled,int noResult,int providerMismatch,int networkFailures,int images,int nfos,int users,int protectedImages,int protectedNfos,long temporary,string integrity,long foreignKeys)=>$"""
-    # Local Media Manager 0.6.3 real sync provider smoke
+    # Local Media Manager 0.7.0 real sync provider smoke
 
     - Executed: {DateTimeOffset.Now:O}
     - Source database: `{source}` (opened read-only and copied with SQLite backup API)

@@ -88,7 +88,8 @@ builder.Services.AddSingleton(serviceProvider => new MetadataSyncExecutor(
     serviceProvider.GetRequiredService<MetadataWriteService>(),
     serviceProvider.GetRequiredService<ImageDownloadService>(),
     serviceProvider.GetRequiredService<NfoService>(),
-    serviceProvider.GetRequiredService<TaskLogService>()));
+    serviceProvider.GetRequiredService<TaskLogService>(),
+    serviceProvider.GetRequiredService<MovieImageImporter>()));
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<MetadataSyncExecutor>());
 builder.Services.AddSingleton(serviceProvider => new ImageCacheTaskService(
     databasePath,
@@ -161,7 +162,7 @@ app.Use(async (context, next) => {
 app.MapGet("/health", () => Results.Ok(new {
     product = "Local Media Manager",
     abbreviation = "LMM",
-    version = "0.6.3",
+    version = "0.7.0",
     status = "ok",
     databaseAvailable = File.Exists(databasePath),
     databasePath,

@@ -8,13 +8,20 @@ namespace LocalMediaManager.Bridge;
 public sealed record MetadataSyncLaunchResult(long TaskId, string Status, string Message);
 public sealed record BatchTaskMutationResult(int Count, string Message);
 public sealed record SyncLibraryCommand(long? LibraryId = null);
+public sealed record FilteredMovieSyncCommand(
+    string Query = "", long? ActorId = null, long? TagId = null, long? DirectorId = null, long? MovieTagId = null,
+    long? CustomTagId = null, long? GenreId = null, long? SeriesId = null, long? StudioId = null, bool? Favorite = null,
+    bool? Watched = null, double? RatingMin = null, string? RatingFilter = null, string? Metadata = null,
+    string? FileStatus = null, string? MetadataStatus = null, long? LibraryId = null, string? Sort = null);
+public sealed record FilteredMovieSyncPreview(long Count);
+public sealed record FilteredMovieSyncResult(long Count, string Message);
 public sealed record SyncMovie(long Id, string Code, string? Title, string? Description, string? ReleaseDate,
     int DurationSeconds, string? PrimaryFile, string? NfoPath);
 public sealed record SavedImage(string Type, string Path, string SourceUrl, long Size, bool Created,
     int Width = 0, int Height = 0, string? ContentType = null, string? FileHash = null,
     string Ownership = "Provider", bool IsDerived = false);
 public sealed record PreparedFiles(IReadOnlyList<SavedImage> Images, string? NfoPath, IReadOnlyList<string> CreatedPaths);
-public sealed record ImageDownloadOptions(string? Cookie = null, string? Referer = null);
+public sealed record ImageDownloadOptions(string? Cookie = null, string? Referer = null, string? RestrictedHost = null);
 
 public sealed class TaskLogService(string databasePath)
 {
@@ -48,12 +55,8 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
         using HttpClient client = clients.CreateClient("MetadataImages");
         client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.Clear();
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.6.3"));
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.7.0"));
         client.DefaultRequestHeaders.Accept.ParseAdd("image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
-        if (!string.IsNullOrWhiteSpace(options?.Cookie))
-            client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", options.Cookie);
-        if (!string.IsNullOrWhiteSpace(options?.Referer))
-            client.DefaultRequestHeaders.Referrer = new Uri(options.Referer);
         int previewIndex = 0;
         string temporaryRoot = await pathResolver.TemporaryRootAsync(cancellationToken);
         try {
@@ -77,7 +80,9 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
                 }
 
                 string temporary = Path.Combine(temporaryRoot, Guid.NewGuid().ToString("N") + ".part");
-                using HttpResponseMessage response = await client.GetAsync(image.Url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                using var request = new HttpRequestMessage(HttpMethod.Get, image.Url);
+                ApplyOptions(request, options);
+                using HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                 response.EnsureSuccessStatusCode();
                 string? declaredType = response.Content.Headers.ContentType?.MediaType;
                 if (response.Content.Headers.ContentLength is > MaximumDownloadBytes)
@@ -115,6 +120,20 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
         return saved;
     }
 
+    private static void ApplyOptions(HttpRequestMessage request, ImageDownloadOptions? options) {
+        if (options is null || !AppliesTo(request.RequestUri, options.RestrictedHost)) return;
+        if (!string.IsNullOrWhiteSpace(options.Cookie)) request.Headers.TryAddWithoutValidation("Cookie", options.Cookie);
+        if (!string.IsNullOrWhiteSpace(options.Referer) && Uri.TryCreate(options.Referer, UriKind.Absolute, out Uri? referer)) request.Headers.Referrer = referer;
+    }
+    private static bool AppliesTo(Uri? uri, string? restrictedHost) {
+        if (string.IsNullOrWhiteSpace(restrictedHost)) return true;
+        if (uri is null) return false;
+        string host = restrictedHost.Trim().TrimEnd('.');
+        string baseHost = host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? host[4..] : host;
+        return uri.Host.Equals(host, StringComparison.OrdinalIgnoreCase)
+            || uri.Host.Equals(baseHost, StringComparison.OrdinalIgnoreCase)
+            || uri.Host.EndsWith('.' + baseHost, StringComparison.OrdinalIgnoreCase);
+    }
     private static string? FindExisting(string directory, string baseName) {
         foreach (string extension in new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif" }) {
             string candidate = Path.Combine(directory, baseName + extension);
@@ -144,6 +163,7 @@ public sealed class MetadataWriteService(string databasePath)
     {
         await using var connection = await OpenAsync();
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        IReadOnlyList<string> addedFields = await DetermineAddedFieldsAsync(connection, transaction, movie, metadata, files, overwrite);
         string before = JsonSerializer.Serialize(new { movie.Title, movie.Description, movie.ReleaseDate, movie.DurationSeconds, movie.NfoPath });
         long snapshotId = await InsertIdAsync(connection, transaction, """
             INSERT INTO MetadataSyncSnapshots(TaskId,MovieId,Provider,BeforeJson,CreatedAt)
@@ -215,12 +235,51 @@ public sealed class MetadataWriteService(string databasePath)
                 ("$content", image.ContentType), ("$at", Now()));
         string applied = JsonSerializer.Serialize(new { metadata.Provider, metadata.ExternalId, metadata.Code, metadata.Title, metadata.OriginalTitle, metadata.Rating,
             ImagesDownloaded = files.Images.Count(value => value.Created), ImagesPreserved = files.Images.Count(value => !value.Created),
-            Genres = metadata.Genres.Count, Actors = metadata.Actors.Count, Director = string.IsNullOrWhiteSpace(metadata.Director) ? 0 : 1, NonDestructive = !overwrite });
+            Genres = metadata.Genres.Count, Actors = metadata.Actors.Count, Director = string.IsNullOrWhiteSpace(metadata.Director) ? 0 : 1,
+            AddedFields = addedFields, NonDestructive = !overwrite });
         await ExecuteAsync(connection, transaction, "UPDATE MetadataSyncSnapshots SET AppliedJson=$applied,AppliedAt=$at WHERE Id=$id",
             ("$applied", applied), ("$at", Now()), ("$id", snapshotId));
         await transaction.CommitAsync(cancellationToken);
         return applied;
     }
+
+    private static async Task<IReadOnlyList<string>> DetermineAddedFieldsAsync(SqliteConnection connection,
+        System.Data.Common.DbTransaction transaction, SyncMovie movie, ProviderMetadata metadata, PreparedFiles files, bool overwrite)
+    {
+        var fields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (overwrite || string.IsNullOrWhiteSpace(movie.Title) || movie.Title == movie.Code) AddIf(fields, "标题", metadata.Title);
+        if (overwrite || string.IsNullOrWhiteSpace(movie.Description)) AddIf(fields, "简介", metadata.Description);
+        if (overwrite || string.IsNullOrWhiteSpace(movie.ReleaseDate)) AddIf(fields, "日期", metadata.ReleaseDate);
+        if ((overwrite || movie.DurationSeconds <= 0) && metadata.DurationSeconds is > 0) fields.Add("时长");
+        string? original = await ScalarTextAsync(connection, transaction, "SELECT OriginalTitle FROM Movies WHERE Id=$id", ("$id", movie.Id));
+        if (overwrite || string.IsNullOrWhiteSpace(original)) AddIf(fields, "原始标题", metadata.OriginalTitle);
+        long hasRating = await ScalarLongAsync(connection, transaction, "SELECT COUNT(*) FROM Movies WHERE Id=$id AND ProviderRating IS NOT NULL AND ProviderRating<>0", ("$id", movie.Id));
+        if ((overwrite || hasRating == 0) && metadata.Rating is > 0) fields.Add("评分");
+        if (await HasNewRelationAsync(connection, transaction, movie.Id, "Directors", "MovieDirectors", "DirectorId", Values(metadata.Director))) fields.Add("导演");
+        if (await HasNewRelationAsync(connection, transaction, movie.Id, "Studios", "MovieStudios", "StudioId", Values(metadata.Studio, metadata.Publisher))) fields.Add("厂商");
+        if (await HasNewRelationAsync(connection, transaction, movie.Id, "Series", "MovieSeries", "SeriesId", Values(metadata.Series))) fields.Add("系列");
+        if (await HasNewRelationAsync(connection, transaction, movie.Id, "Genres", "MovieGenres", "GenreId", metadata.Genres)) fields.Add("标签");
+        if (await HasNewRelationAsync(connection, transaction, movie.Id, "Actors", "MovieActors", "ActorId", metadata.Actors)) fields.Add("演员");
+        foreach (SavedImage image in files.Images.Where(value => value.Created)) fields.Add(image.Type);
+        if (!string.IsNullOrWhiteSpace(files.NfoPath) && files.CreatedPaths.Contains(files.NfoPath, StringComparer.OrdinalIgnoreCase)) fields.Add("NFO");
+        return fields.Order(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static async Task<bool> HasNewRelationAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
+        long movieId, string entityTable, string relationTable, string relationKey, IReadOnlyList<string> values)
+    {
+        if (!await TableExistsAsync(connection, transaction, entityTable) || !await TableExistsAsync(connection, transaction, relationTable)) return false;
+        foreach (string value in values.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase)) {
+            long exists = await ScalarLongAsync(connection, transaction,
+                $"SELECT COUNT(*) FROM {relationTable} r JOIN {entityTable} e ON e.Id=r.{relationKey} WHERE r.MovieId=$movie AND e.NormalizedName=$name",
+                ("$movie", movieId), ("$name", Normalize(value)));
+            if (exists == 0) return true;
+        }
+        return false;
+    }
+
+    private static IReadOnlyList<string> Values(params string?[] values) => values.Where(value => !string.IsNullOrWhiteSpace(value)).Cast<string>().ToArray();
+    private static void AddIf(HashSet<string> fields, string name, string? value) { if (!string.IsNullOrWhiteSpace(value)) fields.Add(name); }
 
     private static async Task<long> EnsureNamedAsync(SqliteConnection c, System.Data.Common.DbTransaction tx, string table, string value) {
         string name = value.Trim(); string normalized = Normalize(name);
@@ -247,6 +306,7 @@ public sealed class MetadataWriteService(string databasePath)
     private static async Task ExecuteAsync(SqliteConnection c, System.Data.Common.DbTransaction tx, string sql, params (string,object?)[] p) { await using var x=c.CreateCommand(); x.Transaction=(SqliteTransaction)tx; x.CommandText=sql; foreach(var (n,v) in p)x.Parameters.AddWithValue(n,v??DBNull.Value); await x.ExecuteNonQueryAsync(); }
     private static async Task<long> InsertIdAsync(SqliteConnection c, System.Data.Common.DbTransaction tx, string sql, params (string,object?)[] p) { await using var x=c.CreateCommand(); x.Transaction=(SqliteTransaction)tx; x.CommandText=sql; foreach(var (n,v) in p)x.Parameters.AddWithValue(n,v??DBNull.Value); return Convert.ToInt64(await x.ExecuteScalarAsync()); }
     private static async Task<long> ScalarLongAsync(SqliteConnection c, System.Data.Common.DbTransaction tx, string sql, params (string,object?)[] p) { await using var x=c.CreateCommand(); x.Transaction=(SqliteTransaction)tx; x.CommandText=sql; foreach(var (n,v) in p)x.Parameters.AddWithValue(n,v??DBNull.Value); return Convert.ToInt64(await x.ExecuteScalarAsync()??0L); }
+    private static async Task<string?> ScalarTextAsync(SqliteConnection c, System.Data.Common.DbTransaction tx, string sql, params (string,object?)[] p) { await using var x=c.CreateCommand(); x.Transaction=(SqliteTransaction)tx; x.CommandText=sql; foreach(var (n,v) in p)x.Parameters.AddWithValue(n,v??DBNull.Value); return (await x.ExecuteScalarAsync())?.ToString(); }
     private static async Task<bool> TableExistsAsync(SqliteConnection c, System.Data.Common.DbTransaction tx, string table) { await using var x=c.CreateCommand(); x.Transaction=(SqliteTransaction)tx; x.CommandText="SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$table"; x.Parameters.AddWithValue("$table", table); return Convert.ToInt64(await x.ExecuteScalarAsync()??0L)>0; }
 }
 
@@ -259,9 +319,10 @@ public sealed class MetadataSyncExecutor(
     MetadataWriteService writer,
     ImageDownloadService images,
     NfoService nfo,
-    TaskLogService logs) : BackgroundService
+    TaskLogService logs,
+    MovieImageImporter? actorImageImporter = null) : BackgroundService
 {
-    private const int MaxConcurrentSyncTasks = 3;
+    private const int MaxConcurrentSyncTasks = 6;
     private static readonly string[] ActiveStates = ["Preparing", "FetchingMetadata", "DownloadingImages", "WritingMetadata", "WritingNfo", "Running"];
     private readonly ConcurrentDictionary<long, CancellationTokenSource> cancellations = new();
 
@@ -294,7 +355,6 @@ public sealed class MetadataSyncExecutor(
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
         }
     }
-
     private async Task RunClaimedAsync(long taskId, MetadataProviderContext settings, CancellationToken stoppingToken)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
@@ -331,6 +391,8 @@ public sealed class MetadataSyncExecutor(
     public async Task<MetadataSyncLaunchResult> EnqueueAsync(long movieId, string trigger, bool overwrite = false, string? source = null) {
         await using var connection = await OpenAsync();
         if (await ScalarLongAsync(connection, "SELECT COUNT(*) FROM Movies WHERE Id=$id", ("$id", movieId)) == 0) throw new KeyNotFoundException("影片不存在。");
+        if (await ScalarLongAsync(connection, "SELECT COUNT(*) FROM MediaFiles WHERE MovieId=$id AND IsPrimary=1 AND MediaType='Video' AND COALESCE(ExistsState,'')<>'Missing'", ("$id", movieId)) == 0)
+            throw new InvalidOperationException("当前影片文件不存在，不能对 Missing 记录重新同步。请切换到文件存在的影片记录后再同步。");
         long existing = await ScalarLongAsync(connection, "SELECT COALESCE(MAX(Id),0) FROM Tasks WHERE TaskType='Sync' AND CurrentMovieId=$movie AND Status NOT IN ('Completed','Failed','Cancelled')", ("$movie", movieId));
         if (existing > 0) return new(existing, "Pending", "该影片已有同步任务。");
         long id = await InsertIdAsync(connection, """
@@ -375,17 +437,46 @@ public sealed class MetadataSyncExecutor(
         return new(ids.Count, libraryId.HasValue ? $"Created sync tasks for {ids.Count} movies in library." : $"Created sync tasks for {ids.Count} movies.");
     }
 
+    public async Task<FilteredMovieSyncPreview> PreviewFilteredAsync(FilteredMovieSyncCommand command, CancellationToken cancellationToken) {
+        IReadOnlyList<long> ids = await ReadFilteredMovieIdsAsync(command);
+        return new(ids.Count);
+    }
+
+    public async Task<FilteredMovieSyncResult> EnqueueFilteredAsync(FilteredMovieSyncCommand command, CancellationToken cancellationToken) {
+        IReadOnlyList<long> ids = await ReadFilteredMovieIdsAsync(command);
+        if (ids.Count == 0) return new(0, "当前筛选结果没有匹配影片，未创建同步任务。");
+        foreach (long id in ids) {
+            cancellationToken.ThrowIfCancellationRequested();
+            await EnqueueAsync(id, "Filtered");
+        }
+        return new(ids.Count, $"已为当前筛选结果的 {ids.Count} 部影片创建同步任务。");
+    }
+
+    private Task<IReadOnlyList<long>> ReadFilteredMovieIdsAsync(FilteredMovieSyncCommand command) =>
+        ProductReader.ReadAdvancedSearchMovieIdsAsync(databasePath, command.Query ?? "", command.ActorId, command.TagId,
+            command.DirectorId, command.MovieTagId, command.CustomTagId, command.SeriesId, command.Favorite, command.Watched,
+            Math.Clamp(command.RatingMin ?? 0, 0, 5), command.RatingFilter ?? "all", command.Metadata ?? "all",
+            command.FileStatus ?? "all", command.MetadataStatus ?? "all", command.LibraryId, command.Sort ?? "newest",
+            command.GenreId, command.StudioId);
+
     private async Task ExecuteOneAsync(long taskId, MetadataProviderContext settings, CancellationToken cancellationToken)
     {
         var createdPaths = new List<string>();
+        var partialFailures = new List<string>();
         try {
             SyncMovie movie = await ReadMovieAsync(taskId, cancellationToken);
             bool overwrite = await ReadOverwriteAsync(taskId, cancellationToken);
+            string? normalizedCode = NormalizeSyncCode(movie.Code);
+            if (string.IsNullOrWhiteSpace(normalizedCode)) throw new InvalidOperationException("影片没有可用于同步的番号。");
+            movie = movie with { Code = normalizedCode };
             await StageAsync(taskId, "Preparing", 8, $"准备影片 {movie.Code}", cancellationToken);
             await EnsureRunnableAsync(taskId, cancellationToken);
-            if (string.IsNullOrWhiteSpace(movie.Code)) throw new InvalidOperationException("影片没有可用于同步的番号。");
 
-            settings = settings with { PreferredSource = await ReadSourceAsync(taskId, cancellationToken), CurrentMoviePath = movie.PrimaryFile };
+            settings = settings with {
+                PreferredSource = await ReadSourceAsync(taskId, cancellationToken),
+                CurrentMoviePath = movie.PrimaryFile,
+                ProviderLog = (source, message, token) => logs.WriteAsync(taskId, "Info", $"[{source}] {message}", token),
+            };
             await StageAsync(taskId, "FetchingMetadata", 22, $"{settings.PreferredSource ?? "自动数据源"} 搜索：{movie.Code}", cancellationToken);
             IReadOnlyList<MetadataSearchResult> results = await provider.SearchAsync(movie.Code, settings, cancellationToken);
             await logs.WriteAsync(taskId, "Info", $"Provider Search Results: {results.Count} candidate(s).", cancellationToken);
@@ -423,26 +514,42 @@ public sealed class MetadataSyncExecutor(
             IReadOnlyList<SavedImage> savedImages = [];
             if (settings.DownloadImages(metadata.Provider)) {
                 await StageAsync(taskId, "DownloadingImages", 48, $"下载图片（{metadata.Images.Count} 项）", cancellationToken);
+                ImageDownloadOptions? imageOptions = JavBusImageOptions(settings.JavBus);
                 try {
-                    ImageDownloadOptions? imageOptions = metadata.Provider.Equals("JavBus", StringComparison.OrdinalIgnoreCase)
-                        ? new(settings.JavBus.Cookie, metadata.WebUrl ?? settings.JavBus.BaseUrl)
-                        : null;
                     savedImages = await images.DownloadAsync(pathResolver, new(movie.Id, movie.Code, movie.Title),
                         await provider.GetImagesAsync(metadata, cancellationToken), settings.TimeoutSeconds(metadata.Provider), overwrite, cancellationToken, imageOptions);
                     createdPaths.AddRange(savedImages.Where(value => value.Created).Select(value => value.Path));
-                } catch (Exception error) when (metadata.Provider.Equals("JavBus", StringComparison.OrdinalIgnoreCase) && error is not OperationCanceledException) {
-                    await logs.WriteAsync(taskId, "Warning", $"JavBus 图片下载失败，已保留元数据同步：{error.Message}", cancellationToken);
+                } catch (Exception error) when (error is not OperationCanceledException) {
+                    partialFailures.Add($"图片写入失败: {error.Message}");
+                    await logs.WriteAsync(taskId, "Warning", $"[Image Write] Failed; metadata merge will continue: {error.Message}", cancellationToken);
                 }
             }
             string? nfoPath = null;
             if (settings.MetaTube.WriteNfo) {
                 await StageAsync(taskId, "WritingNfo", 68, "生成 NFO（已有文件不会覆盖）", cancellationToken);
-                (nfoPath, bool created) = await nfo.WriteAsync(movie, metadata, cancellationToken);
-                if (created && nfoPath is not null) createdPaths.Add(nfoPath);
+                try {
+                    (nfoPath, bool created) = await nfo.WriteAsync(movie, metadata, cancellationToken);
+                    if (created && nfoPath is not null) createdPaths.Add(nfoPath);
+                    await logs.WriteAsync(taskId, "Info", $"[NFO Write] Success: {nfoPath ?? "skipped"}", cancellationToken);
+                } catch (Exception error) when (error is not OperationCanceledException) {
+                    partialFailures.Add($"NFO 写入失败: {error.Message}");
+                    await logs.WriteAsync(taskId, "Warning", $"[NFO Write] Failed; metadata merge will continue: {error.Message}", cancellationToken);
+                }
             }
             await StageAsync(taskId, "WritingMetadata", 82, overwrite ? "覆盖同步刮削元数据" : "非破坏合并元数据", cancellationToken);
             string summary = await writer.ApplyAsync(taskId, movie, metadata, new(savedImages, nfoPath, createdPaths), overwrite, cancellationToken);
-            await CompleteAsync(taskId, summary, cancellationToken);
+            await logs.WriteAsync(taskId, "Info", $"[Database Merge] {summary}", cancellationToken);
+            await logs.WriteAsync(taskId, "Info", "[Database Merge] Success", cancellationToken);
+            if (actorImageImporter is not null && settings.DownloadImages(metadata.Provider) && metadata.ActorImages?.Count > 0) {
+                await StageAsync(taskId, "DownloadingImages", 92, $"下载演员头像（{metadata.ActorImages.Count} 项）", cancellationToken);
+                MovieImageImportResult actorImages = await actorImageImporter.ImportActorImagesAsync(
+                    metadata.ActorImages, metadata.Provider, settings.TimeoutSeconds(metadata.Provider), overwrite, cancellationToken);
+                foreach (string warning in actorImages.Warnings)
+                    await logs.WriteAsync(taskId, "Warning", warning, cancellationToken);
+                if (actorImages.ActorImagesDownloaded > 0)
+                    await logs.WriteAsync(taskId, "Info", $"演员头像已下载：{actorImages.ActorImagesDownloaded} 张。", cancellationToken);
+            }
+            await CompleteAsync(taskId, summary, partialFailures, cancellationToken);
         } catch (OperationCanceledException) {
             await SafeDeleteAsync(createdPaths);
             await MarkCancelledAsync(taskId);
@@ -467,7 +574,7 @@ public sealed class MetadataSyncExecutor(
     }
     private async Task<long?> ClaimAsync(CancellationToken token) {
         await using var connection = await OpenAsync(); await using var tx=await connection.BeginTransactionAsync(token);
-        long id=await ScalarLongAsync(connection,"SELECT COALESCE(MIN(Id),0) FROM Tasks WHERE TaskType='Sync' AND Status IN ('Pending','Retrying')",tx);
+        long id=await ScalarLongAsync(connection,"SELECT COALESCE((SELECT Id FROM Tasks WHERE TaskType='Sync' AND Status IN ('Pending','Retrying') ORDER BY CASE Status WHEN 'Retrying' THEN 0 ELSE 1 END, Id LIMIT 1),0)",tx);
         if(id==0){await tx.RollbackAsync(token);return null;}
         await ExecuteAsync(connection,"UPDATE Tasks SET Status='Preparing',Stage='Preparing',Provider='MetaTube',Progress=3,StartedAt=COALESCE(StartedAt,$at),UpdatedAt=$at,CancellationRequested=0 WHERE Id=$id",tx,("$at",Now()),("$id",id));
         await tx.CommitAsync(token); return id;
@@ -475,11 +582,12 @@ public sealed class MetadataSyncExecutor(
     private async Task<SyncMovie> ReadMovieAsync(long taskId,CancellationToken token) {
         await using var c=await OpenAsync(); await using var x=c.CreateCommand(); x.CommandText="""
             SELECT m.Id,COALESCE(m.Code,''),m.Title,m.Description,m.ReleaseDate,m.DurationSeconds,m.NfoPath,
-                   (SELECT FilePath FROM MediaFiles WHERE MovieId=m.Id AND IsPrimary=1 AND MediaType='Video' ORDER BY Id LIMIT 1)
+                   (SELECT FilePath FROM MediaFiles WHERE MovieId=m.Id AND IsPrimary=1 AND MediaType='Video' AND COALESCE(ExistsState,'')<>'Missing' ORDER BY Id LIMIT 1)
             FROM Tasks t JOIN Movies m ON m.Id=COALESCE(t.CurrentMovieId,json_extract(t.PayloadJson,'$.MovieId')) WHERE t.Id=$task
             """; x.Parameters.AddWithValue("$task",taskId); await using var r=await x.ExecuteReaderAsync(token);
         if(!await r.ReadAsync(token))throw new KeyNotFoundException("同步任务关联的影片不存在。");
-        return new(r.GetInt64(0),r.GetString(1),r.IsDBNull(2)?null:r.GetString(2),r.IsDBNull(3)?null:r.GetString(3),r.IsDBNull(4)?null:r.GetString(4),r.GetInt32(5),r.IsDBNull(7)?null:r.GetString(7),r.IsDBNull(6)?null:r.GetString(6));
+        if (r.IsDBNull(7)) throw new InvalidOperationException("当前影片文件不存在，不能对 Missing 记录重新同步。请切换到文件存在的影片记录后再同步。");
+        return new(r.GetInt64(0),r.GetString(1),r.IsDBNull(2)?null:r.GetString(2),r.IsDBNull(3)?null:r.GetString(3),r.IsDBNull(4)?null:r.GetString(4),r.GetInt32(5),r.GetString(7),r.IsDBNull(6)?null:r.GetString(6));
     }
     private async Task<bool> ReadOverwriteAsync(long taskId,CancellationToken token) {
         await using var c=await OpenAsync(); string? payload=await ScalarTextAsync(c,"SELECT PayloadJson FROM Tasks WHERE Id=$id",("$id",taskId));
@@ -498,17 +606,28 @@ public sealed class MetadataSyncExecutor(
             await settingsService.ReadDmmAsync(), await settingsService.ReadJavDbAsync(), await settingsService.ReadNetworkAsync()) {
             MdcNg = await settingsService.ReadMdcNgAsync(),
         }, token);
+    private static ImageDownloadOptions? JavBusImageOptions(JavBusSettingsDto settings) {
+        if (string.IsNullOrWhiteSpace(settings.Cookie)
+            || !Uri.TryCreate(settings.BaseUrl, UriKind.Absolute, out Uri? uri)) return null;
+        return new(settings.Cookie, uri.GetLeftPart(UriPartial.Authority) + "/", uri.Host);
+    }
+    private static string? NormalizeSyncCode(string value) {
+        string? standard = MovieCodeNormalizer.Normalize(value);
+        if (!string.IsNullOrWhiteSpace(standard)) return standard;
+        string fc2 = JavBusCode.Normalize(value);
+        return fc2.StartsWith("FC2-PPV-", StringComparison.OrdinalIgnoreCase) ? fc2 : null;
+    }
     private async Task SetProviderAsync(long id,string providerName,CancellationToken token){await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Provider=$provider,UpdatedAt=$at WHERE Id=$id",("$provider",providerName),("$at",Now()),("$id",id));await logs.WriteAsync(id,"Info",$"使用数据源：{providerName}",token);}
     private static string? NormalizeSource(string? value) => value?.Trim().ToLowerInvariant() switch { "javbus" => "JavBus", "metatube" => "MetaTube", "mdc-ng" or "mdcng" => "MDC-NG", _ => null };
     private async Task StageAsync(long id,string stage,double progress,string message,CancellationToken token){await EnsureRunnableAsync(id,token);await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Status=$stage,Stage=$stage,Progress=$progress,UpdatedAt=$at WHERE Id=$id",("$stage",stage),("$progress",progress),("$at",Now()),("$id",id));await logs.WriteAsync(id,"Info",message,token);}
     private async Task EnsureRunnableAsync(long id,CancellationToken token){while(true){token.ThrowIfCancellationRequested();await using var c=await OpenAsync();string? s=await ScalarTextAsync(c,"SELECT Status FROM Tasks WHERE Id=$id",("$id",id));if(s=="Cancelled")throw new OperationCanceledException(token);if(s!="Paused")return;await Task.Delay(250,token);}}
-    private async Task CompleteAsync(long id,string summary,CancellationToken token){await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Status='Completed',Stage='Completed',Progress=100,CompletedItems=1,ResultJson=$result,ResultSummary='元数据同步完成',ErrorMessage=NULL,CompletedAt=$at,UpdatedAt=$at WHERE Id=$id",("$result",summary),("$at",Now()),("$id",id));await logs.WriteAsync(id,"Info","元数据、图片与 NFO 工作流已完成。",token);}
+    private async Task CompleteAsync(long id,string summary,IReadOnlyList<string> partialFailures,CancellationToken token){string status=partialFailures.Count==0?"Completed":"CompletedWithErrors";string resultSummary=partialFailures.Count==0?"元数据同步完成":"元数据已获取并写入数据库，但部分文件写入失败";string? error=partialFailures.Count==0?null:string.Join(" | ",partialFailures);await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Status=$status,Stage=$status,Progress=100,CompletedItems=1,ResultJson=$result,ResultSummary=$summary,ErrorMessage=$error,CompletedAt=$at,UpdatedAt=$at WHERE Id=$id",("$status",status),("$result",summary),("$summary",resultSummary),("$error",error),("$at",Now()),("$id",id));await logs.WriteAsync(id,partialFailures.Count==0?"Info":"Warning",partialFailures.Count==0?"元数据、图片与 NFO 工作流已完成。":$"[Final] CompletedWithErrors: Database Merge succeeded; {error}",token);}
     private async Task FailAsync(long id,Exception error){try{await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Status='Failed',Stage='Failed',ErrorMessage=$error,ResultSummary='同步失败，已有有效数据未被覆盖',CompletedAt=$at,UpdatedAt=$at WHERE Id=$id",("$error",error.Message),("$at",Now()),("$id",id));await logs.WriteAsync(id,"Error",error.Message);}catch(Exception e){Console.Error.WriteLine($"Could not persist sync failure {id}: {e}");}}
     private async Task MarkCancelledAsync(long id){try{await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Status='Cancelled',Stage='Cancelled',ResultSummary='用户取消',CompletedAt=$at,UpdatedAt=$at WHERE Id=$id",("$at",Now()),("$id",id));}catch(Exception e){Console.Error.WriteLine(e);}}
     private async Task UpdateTaskAsync(long id,string status,string stage,double? progress,string? error,bool cancel){await using var c=await OpenAsync();if(await ScalarLongAsync(c,"SELECT COUNT(*) FROM Tasks WHERE Id=$id AND TaskType='Sync'",("$id",id))==0)throw new KeyNotFoundException("同步任务不存在。");await ExecuteAsync(c,"UPDATE Tasks SET Status=$status,Stage=$stage,Progress=COALESCE($progress,Progress),ErrorMessage=$error,CancellationRequested=$cancel,UpdatedAt=$at WHERE Id=$id",("$status",status),("$stage",stage),("$progress",progress),("$error",error),("$cancel",cancel?1:0),("$at",Now()),("$id",id));}
     private async Task<SqliteConnection> OpenAsync(){var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=databasePath,Mode=SqliteOpenMode.ReadWrite}.ToString());await c.OpenAsync();await ExecuteAsync(c,"PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");return c;}
     private static async Task SafeDeleteAsync(IEnumerable<string> paths){foreach(string p in paths.Reverse())try{if(File.Exists(p))File.Delete(p);}catch{await Task.Yield();}}
-    private static string Comparable(string value)=>value.Replace("-","").Replace("_","").Replace(" ","").Trim();
+    private static string Comparable(string value)=>JavBusCode.Normalize(value);
     private static string Now()=>DateTimeOffset.UtcNow.ToString("O");
     private static Task ExecuteAsync(SqliteConnection c,string sql,params (string,object?)[] p)=>ExecuteAsync(c,sql,null,p);
     private static async Task ExecuteAsync(SqliteConnection c,string sql,System.Data.Common.DbTransaction? tx,params (string,object?)[] p){await using var x=c.CreateCommand();x.Transaction=(SqliteTransaction?)tx;x.CommandText=sql;foreach(var(n,v)in p)x.Parameters.AddWithValue(n,v??DBNull.Value);await x.ExecuteNonQueryAsync();}
@@ -520,15 +639,16 @@ public sealed class MetadataSyncExecutor(
 
 public sealed class TaskCommandService(string databasePath, LibraryWorkflowService libraries,
     MetadataSyncExecutor sync, ImageCacheTaskService imageCache, FileOrganizerService organizer,
-    ImageGenerationTaskService imageGeneration, SafeDeleteWorkflowService safeDelete)
+    ImageGenerationTaskService imageGeneration, SafeDeleteWorkflowService safeDelete,
+    ActorProfileCompleteTaskService actorProfileComplete)
 {
     private static readonly HashSet<string> TerminalStatuses = new(StringComparer.OrdinalIgnoreCase) { "Completed", "CompletedWithErrors", "Failed", "Cancelled" };
     private static bool IsImageGeneration(string type) => type is "Poster" or "Preview" or "Screenshot" or "GIF";
     private static bool IsDelete(string type) => type is "DeleteMetadata" or "DeleteMedia";
-    public async Task<TaskMutationResult> PauseAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.PauseAsync(id), "ImageCacheRebuild"=>await imageCache.PauseAsync(id), "Organizer"=>await organizer.PauseAsync(id), var type when IsImageGeneration(type)=>await imageGeneration.PauseAsync(id), var type when IsDelete(type)=>await safeDelete.PauseAsync(id), _=>await libraries.PauseTaskAsync(id) };
-    public async Task<TaskMutationResult> ResumeAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.ResumeAsync(id), "ImageCacheRebuild"=>await imageCache.ResumeAsync(id), "Organizer"=>await organizer.ResumeAsync(id), var type when IsImageGeneration(type)=>await imageGeneration.ResumeAsync(id), var type when IsDelete(type)=>await safeDelete.ResumeAsync(id), _=>await libraries.ResumeTaskAsync(id) };
-    public async Task<TaskMutationResult> CancelAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.CancelAsync(id), "ImageCacheRebuild"=>await imageCache.CancelAsync(id), "Organizer"=>await organizer.CancelAsync(id), var type when IsImageGeneration(type)=>await imageGeneration.CancelAsync(id), var type when IsDelete(type)=>await safeDelete.CancelAsync(id), _=>await libraries.CancelTaskAsync(id) };
-    public async Task<object> RetryAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.RetryAsync(id), "ImageCacheRebuild"=>await imageCache.RetryAsync(id), "Organizer"=>await organizer.RetryAsync(id), var type when IsImageGeneration(type)=>await imageGeneration.RetryAsync(id), var type when IsDelete(type)=>await safeDelete.RetryAsync(id), _=>await libraries.RetryTaskAsync(id) };
+    public async Task<TaskMutationResult> PauseAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.PauseAsync(id), "ImageCacheRebuild"=>await imageCache.PauseAsync(id), "Organizer"=>await organizer.PauseAsync(id), "ActorProfileComplete"=>await actorProfileComplete.PauseAsync(id), var type when IsImageGeneration(type)=>await imageGeneration.PauseAsync(id), var type when IsDelete(type)=>await safeDelete.PauseAsync(id), _=>await libraries.PauseTaskAsync(id) };
+    public async Task<TaskMutationResult> ResumeAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.ResumeAsync(id), "ImageCacheRebuild"=>await imageCache.ResumeAsync(id), "Organizer"=>await organizer.ResumeAsync(id), "ActorProfileComplete"=>await actorProfileComplete.ResumeAsync(id), var type when IsImageGeneration(type)=>await imageGeneration.ResumeAsync(id), var type when IsDelete(type)=>await safeDelete.ResumeAsync(id), _=>await libraries.ResumeTaskAsync(id) };
+    public async Task<TaskMutationResult> CancelAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.CancelAsync(id), "ImageCacheRebuild"=>await imageCache.CancelAsync(id), "Organizer"=>await organizer.CancelAsync(id), "ActorProfileComplete"=>await actorProfileComplete.CancelAsync(id), var type when IsImageGeneration(type)=>await imageGeneration.CancelAsync(id), var type when IsDelete(type)=>await safeDelete.CancelAsync(id), _=>await libraries.CancelTaskAsync(id) };
+    public async Task<object> RetryAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.RetryAsync(id), "ImageCacheRebuild"=>await imageCache.RetryAsync(id), "Organizer"=>await organizer.RetryAsync(id), "ActorProfileComplete"=>await actorProfileComplete.RetryAsync(id), var type when IsImageGeneration(type)=>await imageGeneration.RetryAsync(id), var type when IsDelete(type)=>await safeDelete.RetryAsync(id), _=>await libraries.RetryTaskAsync(id) };
     public async Task<TaskCleanupResult> DeleteAsync(long id)
     {
         TaskSnapshot task = await SnapshotAsync(id);

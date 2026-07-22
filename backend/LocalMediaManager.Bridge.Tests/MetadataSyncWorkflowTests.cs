@@ -1,7 +1,9 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using LocalMediaManager.Bridge;
 using Microsoft.Data.Sqlite;
+using SkiaSharp;
 using Xunit;
 
 namespace LocalMediaManager.Bridge.Tests;
@@ -62,6 +64,149 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task MetaTubeUsesFirstPreviewAsFanartWhenProviderOmitsBackdrop()
+    {
+        var factory = new FakeHttpClientFactory(request => {
+            string body = request.RequestUri!.AbsolutePath.Contains("search")
+                ? """{"data":[{"provider":"FANZA","id":"blk","number":"BLK-690","title":"BLK"}]}"""
+                : """{"data":{"provider":"FANZA","id":"blk","number":"BLK-690","title":"Remote title","summary":"Plot","runtime":120,"release_date":"2026-01-02","maker":"Maker","actors":["Actor A"],"genres":["Genre A"],"preview_images":["https://img.example/preview-1.jpg","https://img.example/preview-2.jpg"]}}""";
+            return new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+        });
+        var provider = new MetaTubeProvider(factory);
+        MetadataProviderContext context = Context(new(true, "http://127.0.0.1:8080/", 30, true, false, true, true));
+
+        IReadOnlyList<MetadataSearchResult> results = await provider.SearchAsync("BLK-690", context, CancellationToken.None);
+        ProviderMetadata? metadata = await provider.GetMetadataAsync(results.Single(), context, CancellationToken.None);
+
+        Assert.NotNull(metadata);
+        Assert.Contains(metadata.Images, image => image.Type == "Fanart" && image.Url == "https://img.example/preview-1.jpg");
+        Assert.Contains(metadata.Images, image => image.Type == "Preview" && image.Url == "https://img.example/preview-1.jpg");
+        Assert.Equal(2, metadata.Images.Count(image => image.Url == "https://img.example/preview-1.jpg"));
+    }
+
+    [Fact]
+    public async Task MetaTubeUsesProviderCoverUrlAsFanartWhilePrimaryImageStaysPoster()
+    {
+        var factory = new FakeHttpClientFactory(request => {
+            string body = request.RequestUri!.AbsolutePath.Contains("search")
+                ? """{"data":[{"provider":"FANZA","id":"118abf252","number":"ABF-252","title":"ABF","cover_url":"https://img.example/search-cover.jpg"}]}"""
+                : """{"data":{"provider":"FANZA","id":"118abf252","number":"ABF-252","title":"Remote title","summary":"Plot","runtime":105,"release_date":"2025-08-01","maker":"Prestige","actors":["七嶋舞"],"genres":["Genre A"],"cover_url":"https://img.example/full-jacket.jpg","preview_images":["https://img.example/preview-1.jpg"]}}""";
+            return new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+        });
+        var provider = new MetaTubeProvider(factory);
+        MetadataProviderContext context = Context(new(true, "http://127.0.0.1:8080/", 30, true, false, true, true));
+
+        IReadOnlyList<MetadataSearchResult> results = await provider.SearchAsync("ABF-252", context, CancellationToken.None);
+        ProviderMetadata? metadata = await provider.GetMetadataAsync(results.Single(), context, CancellationToken.None);
+
+        Assert.NotNull(metadata);
+        Assert.Contains(metadata.Images, image => image.Type == "Poster" && image.Url == "http://127.0.0.1:8080/v1/images/primary/FANZA/118abf252");
+        Assert.Contains(metadata.Images, image => image.Type == "Fanart" && image.Url == "https://img.example/full-jacket.jpg");
+        Assert.DoesNotContain(metadata.Images, image => image.Type == "Fanart" && image.Url == "https://img.example/preview-1.jpg");
+        Assert.Contains(metadata.Images, image => image.Type == "Preview" && image.Url == "https://img.example/preview-1.jpg");
+    }
+
+    [Fact]
+    public async Task MdcNgProviderUsesScrapeWorkflowFromTheTaskQueue()
+    {
+        int manualJobReads = 0;
+        var factory = new FakeHttpClientFactory(request => {
+            if (request.RequestUri!.AbsolutePath == "/api/version")
+                return new(HttpStatusCode.OK) { Content = new StringContent("15.9") };
+            if (request.Method == HttpMethod.Post && request.RequestUri.AbsolutePath == "/api/manual-jobs")
+                return new(HttpStatusCode.OK) { Content = new StringContent("") };
+            if (request.RequestUri.AbsolutePath == "/api/manual-jobs") {
+                manualJobReads++;
+                string body = manualJobReads == 1
+                    ? """{"data":[]}"""
+                    : """{"data":[{"id":11,"source_pathes":"[\"/media/SONE-104.mp4\"]","status":1,"total_count":1}]}""";
+                return new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+            }
+            if (request.RequestUri.AbsolutePath == "/api/tasks_full") {
+                const string body = """{"data":[{"id":21,"manual_job_id":11,"status":1,"metadata":{"Number":"SONE-104","Title":"Remote title","Series":"Series A","Actors":"Actor A","Tags":"Drama","Runtime":"124","Poster":"https://img.example/poster.jpg"}}]}""";
+                return new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+            }
+            return new(HttpStatusCode.NotFound);
+        });
+        var provider = new MdcNgProvider(factory);
+        MetadataProviderContext context = Context(preferredSource: "MDC-NG") with {
+            CurrentMoviePath = "/media/SONE-104.mp4",
+            MdcNg = new(true, "http://mdc/", "http://mdc/", 30),
+        };
+
+        IReadOnlyList<MetadataSearchResult> results = await provider.SearchAsync("sone104", context, CancellationToken.None);
+        ProviderMetadata? metadata = await provider.GetMetadataAsync(results.Single(), context, CancellationToken.None);
+
+        Assert.Single(results);
+        Assert.Equal("MDC-NG", results[0].Provider);
+        Assert.NotNull(metadata);
+        Assert.Equal("SONE-104", metadata.Code);
+        Assert.Equal("Series A", metadata.Series);
+        Assert.Equal(7440, metadata.DurationSeconds);
+        Assert.Contains(metadata.Images, image => image.Type == "Poster");
+    }
+
+    [Fact]
+    public async Task CompositeProviderSupplementsPreviewOnlyMdcNgImagesWithPosterAndFanart()
+    {
+        int manualJobReads = 0;
+        int javBusRequests = 0;
+        var providerLogs = new List<string>();
+        var mdcFactory = new FakeHttpClientFactory(request => {
+            if (request.RequestUri!.AbsolutePath == "/api/version")
+                return new(HttpStatusCode.OK) { Content = new StringContent("15.9") };
+            if (request.Method == HttpMethod.Post && request.RequestUri.AbsolutePath == "/api/manual-jobs")
+                return new(HttpStatusCode.OK) { Content = new StringContent("") };
+            if (request.RequestUri.AbsolutePath == "/api/manual-jobs") {
+                manualJobReads++;
+                string body = manualJobReads == 1 ? "{\"data\":[]}" : "{\"data\":[{\"id\":11,\"source_pathes\":\"[\\\"/media/ABW-276.mp4\\\"]\",\"status\":1,\"total_count\":1}]}";
+                return new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+            }
+            if (request.RequestUri.AbsolutePath == "/api/tasks_full")
+                return new(HttpStatusCode.OK) { Content = new StringContent("{\"data\":[{\"id\":21,\"manual_job_id\":11,\"status\":1,\"metadata\":{\"Number\":\"ABW-276\",\"Title\":\"MDC title\",\"Director\":\"Director\",\"Studio\":\"Studio\",\"Series\":\"Series\",\"Actors\":\"Actor\",\"Tags\":\"Tag\",\"Runtime\":\"120\",\"Release\":\"2024-01-01\",\"Preview_images\":[\"https://img.example/preview.jpg\"]}}]}", Encoding.UTF8, "application/json") };
+            return new(HttpStatusCode.NotFound);
+        });
+        var metaTubeFactory = new FakeHttpClientFactory(request => {
+            string body = request.RequestUri!.AbsolutePath.Contains("search")
+                ? "{\"data\":[{\"provider\":\"FANZA\",\"id\":\"abw\",\"number\":\"ABW-276\",\"title\":\"MetaTube title\"}]}"
+                : "{\"data\":{\"provider\":\"FANZA\",\"id\":\"abw\",\"number\":\"ABW-276\",\"title\":\"MetaTube title\",\"label\":\"Meta label\",\"backdrop_url\":\"https://img.example/fanart.jpg\",\"preview_images\":[\"https://img.example/meta-preview.jpg\"],\"genres\":[\"Meta genre\"],\"actors\":[\"Meta actor\"]}}";
+            return new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+        });
+        var javBusFactory = new FakeHttpClientFactory(_ => {
+            javBusRequests++;
+            return new(HttpStatusCode.OK) { Content = new StringContent(JavBusHtml().Replace("ABP-001", "ABW-276"), Encoding.UTF8, "text/html") };
+        });
+        var provider = new CompositeMetadataProvider(new MdcNgProvider(mdcFactory), new MetaTubeProvider(metaTubeFactory), new JavBusProvider(javBusFactory));
+        MetadataProviderContext context = Context(new(true, "http://metatube/", 30, true, false, true, true),
+            new(true, 3, "https://www.javbus.com/", 30, 0, "", true, true)) with {
+            CurrentMoviePath = "/media/ABW-276.mp4",
+            MdcNg = new(true, "http://mdc/", "http://mdc/", 30),
+            ProviderLog = (source, message, _) => { providerLogs.Add($"{source}:{message}"); return Task.CompletedTask; },
+        };
+
+        ProviderMetadata? metadata = await provider.GetMetadataAsync(new("Composite", "ABW-276", "ABW-276", null), context, CancellationToken.None);
+
+        Assert.NotNull(metadata);
+        Assert.Equal("MDC title", metadata.Title);
+        Assert.Contains("Tag", metadata.Genres);
+        Assert.Contains("Meta genre", metadata.Genres);
+        Assert.Contains("Drama", metadata.Genres);
+        Assert.Contains("Actor", metadata.Actors);
+        Assert.Contains("Meta actor", metadata.Actors);
+        Assert.Contains("Actor A", metadata.Actors);
+        Assert.Contains(metadata.Images, image => image.Type == "Preview" && image.Url == "https://img.example/preview.jpg");
+        Assert.Contains(metadata.Images, image => image.Type == "Preview" && image.Url == "https://img.example/meta-preview.jpg");
+        Assert.True(metadata.Images.Count(image => image.Type == "Preview") >= 2);
+        Assert.Contains(metadata.Images, image => image.Type == "Poster");
+        Assert.Contains(metadata.Images, image => image.Type == "Fanart");
+        Assert.True(javBusRequests > 0);
+        Assert.Contains(providerLogs, message => message.StartsWith("MDC-NG:开始"));
+        Assert.Contains(providerLogs, message => message.StartsWith("MetaTube:开始"));
+        Assert.Contains(providerLogs, message => message.StartsWith("JavBus:开始"));
+        Assert.Contains(providerLogs, message => message.StartsWith("Metadata Merge:最终字段"));
+    }
+
+    [Fact]
     public async Task MetadataWriteFillsEmptyFieldsAndPreservesManualData()
     {
         await using var connection = await Open();
@@ -73,12 +218,18 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         var movie = new SyncMovie(1, "ABP-001", "Manual title", null, null, 0, null, null);
         var metadata = new ProviderMetadata("FANZA", "remote-1", "ABP-001", "Remote title", "Remote plot", null,
             "Remote maker", null, "Remote series", 7200, "2026-01-02", null, ["Remote genre"], ["Remote actor"], []);
-        await new MetadataWriteService(Database).ApplyAsync(1, movie, metadata, new([], null, []), false, CancellationToken.None);
+        string applied = await new MetadataWriteService(Database).ApplyAsync(1, movie, metadata, new([], null, []), false, CancellationToken.None);
         Assert.Equal("Manual title", await Text(connection, "SELECT Title FROM Movies WHERE Id=1"));
         Assert.Equal("Remote plot", await Text(connection, "SELECT Description FROM Movies WHERE Id=1"));
         Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieTags WHERE MovieId=1"));
         Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieActors WHERE MovieId=1"));
         Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MetadataSyncSnapshots WHERE TaskId=1 AND AppliedAt IS NOT NULL"));
+        using JsonDocument appliedJson = JsonDocument.Parse(applied);
+        string[] addedFields = appliedJson.RootElement.GetProperty("AddedFields").EnumerateArray().Select(value => value.GetString()!).ToArray();
+        Assert.Contains("简介", addedFields);
+        Assert.Contains("时长", addedFields);
+        Assert.Contains("标签", addedFields);
+        Assert.Contains("演员", addedFields);
     }
 
     [Fact]
@@ -142,6 +293,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         Assert.Equal("Series A", metadata.Series);
         Assert.Equal(7200, metadata.DurationSeconds);
         Assert.Contains("Actor A", metadata.Actors);
+        Assert.Contains(metadata.ActorImages ?? [], image => image.Name == "Actor A" && image.ImageUrl == "https://www.javbus.com/pics/actress/abc_a.jpg");
         Assert.Contains("Drama", metadata.Genres);
         Assert.Contains(metadata.Images, image => image.Type == "Poster" && image.Url == "https://www.javbus.com/cover.jpg");
     }
@@ -222,6 +374,8 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         await using (var connection = await Open()) {
             await InsertMovie(connection, 1, "BATCH-001");
             await InsertMovie(connection, 2, "BATCH-002");
+            await InsertPrimaryFile(connection, 1, "BATCH-001");
+            await InsertPrimaryFile(connection, 2, "BATCH-002");
         }
         MetadataSyncExecutor executor = CreateExecutor();
 
@@ -269,7 +423,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
             string at = DateTimeOffset.UtcNow.ToString("O");
             await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Stage,Provider,Progress,TotalItems,CompletedItems,CreatedAt,UpdatedAt,CurrentMovieId) VALUES(10,'Sync','Pending','Pending','MetaTube',0,1,0,$at,$at,1),(11,'Sync','Running','FetchingMetadata','MetaTube',20,1,0,$at,$at,2),(12,'Scan','Running','Running',NULL,0,1,0,$at,$at,NULL)", ("$at", at));
         }
-        var service = new TaskCommandService(Database, null!, CreateExecutor(), null!, null!, null!, null!);
+        var service = new TaskCommandService(Database, null!, CreateExecutor(), null!, null!, null!, null!, CreateActorProfileCompleteTaskService());
 
         BatchTaskMutationResult result = await service.CancelSyncBatchAsync([10, 11, 11]);
         await Assert.ThrowsAsync<ArgumentException>(() => service.CancelSyncBatchAsync([12]));
@@ -289,7 +443,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
             string at = DateTimeOffset.UtcNow.ToString("O");
             await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Stage,Provider,Progress,TotalItems,CompletedItems,CreatedAt,UpdatedAt,CurrentMovieId) VALUES(10,'Sync','Pending','Pending','MetaTube',0,1,0,$at,$at,1),(11,'Scan','Running','Running',NULL,20,1,0,$at,$at,NULL),(12,'Screenshot','Completed','Completed','FFmpeg',100,1,1,$at,$at,1)", ("$at", at));
         }
-        var service = new TaskCommandService(Database, CreateLibraryService(), CreateExecutor(), null!, null!, CreateImageGenerationService(), null!);
+        var service = new TaskCommandService(Database, CreateLibraryService(), CreateExecutor(), null!, null!, CreateImageGenerationService(), null!, CreateActorProfileCompleteTaskService());
 
         BatchTaskMutationResult result = await service.CancelBatchAsync([10, 11, 12]);
 
@@ -304,6 +458,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
     {
         await using (var connection = await Open()) {
             await InsertMovie(connection, 1, "AUTO-001");
+            await InsertPrimaryFile(connection, 1, "AUTO-001");
         }
         MetadataProviderSettingsService settings = new(Database);
         await settings.SaveMetaTubeAsync(new(false, "http://127.0.0.1:8080/", 30, false, false, false, true));
@@ -330,6 +485,170 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         Assert.Equal("Completed", status);
     }
 
+    [Fact]
+    public async Task ManualSyncWritesProviderImagesToTheCurrentPresentMovieOnly()
+    {
+        await using (var connection = await Open()) {
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES(1,'DUP-001','Missing legacy',0,1,'migrated','Jvedio5',$at,$at),(2,'DUP-001','Present movie',0,0,'pending','LMM.Scan',$at,$at)", ("$at", at));
+            await Execute(connection, """
+                INSERT INTO MediaFiles(MovieId,FilePath,NormalizedPath,FileName,MediaType,SourceType,IsPrimary,ExistsState,CreatedAt,UpdatedAt)
+                VALUES
+                (1,'Z:\old\DUP-001.mp4','z:\old\dup-001.mp4','DUP-001.mp4','Video','Test',1,'Missing',$at,$at),
+                (2,'Z:\media\DUP-001.mp4','z:\media\dup-001.mp4','DUP-001.mp4','Video','Test',1,'Present',$at,$at)
+                """, ("$at", at));
+            await Execute(connection, "INSERT INTO Images(MovieId,ImageType,FilePath,IsPrimary,SourceProvider,Ownership,CreatedAt,UpdatedAt) VALUES(1,'Preview','Z:\\JVDIO\\ExtraPic\\DUP-001.jpg',0,'LegacyFile','Legacy',$at,$at)", ("$at", at));
+        }
+        MetadataProviderSettingsService settings = new(Database);
+        await settings.SaveMetaTubeAsync(new(false, "http://127.0.0.1:8080/", 30, true, false, false, true));
+        byte[] image = CreatePng(64, 96, SKColors.ForestGreen);
+        var factory = new FakeHttpClientFactory(request => {
+            string path = request.RequestUri!.AbsolutePath;
+            if (path.Contains("/v1/movies/search", StringComparison.OrdinalIgnoreCase))
+                return new(HttpStatusCode.OK) { Content = new StringContent("""{"data":[{"provider":"FANZA","id":"dup","number":"DUP-001","title":"Duplicate"}]}""", Encoding.UTF8, "application/json") };
+            if (path.Contains("/v1/movies/", StringComparison.OrdinalIgnoreCase))
+                return new(HttpStatusCode.OK) { Content = new StringContent("""{"data":{"provider":"FANZA","id":"dup","number":"DUP-001","title":"Provider title","summary":"Plot","runtime":60,"release_date":"2026-01-02","maker":"Maker","cover_url":"https://img.example/full-jacket.png","actors":[],"genres":[],"preview_images":["https://img.example/preview-1.png","https://img.example/preview-2.png"]}}""", Encoding.UTF8, "application/json") };
+            return new(HttpStatusCode.OK) {
+                Content = new ByteArrayContent(image) { Headers = { ContentType = new("image/png") } }
+            };
+        });
+        var resolver = new MediaStoragePathResolver(Database, root);
+        var executor = new MetadataSyncExecutor(Database, resolver, settings, CreateDiagnostics(settings, factory), new MetaTubeProvider(factory),
+            new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database, resolver), new TaskLogService(Database));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => executor.EnqueueAsync(1, "Manual"));
+        MetadataSyncLaunchResult launch = await executor.EnqueueAsync(2, "Manual");
+        await executor.StartAsync(CancellationToken.None);
+        string? status = null;
+        for (int attempt = 0; attempt < 80 && status != "Completed"; attempt++) {
+            await Task.Delay(50);
+            await using SqliteConnection check = await Open();
+            status = await Text(check, $"SELECT Status FROM Tasks WHERE Id={launch.TaskId}");
+        }
+        await executor.StopAsync(CancellationToken.None);
+
+        Assert.Equal("Completed", status);
+        await using SqliteConnection verify = await Open();
+        Assert.Equal(2, await Scalar(verify, $"SELECT CurrentMovieId FROM Tasks WHERE Id={launch.TaskId}"));
+        Assert.Equal(0, await Scalar(verify, "SELECT COUNT(*) FROM Images WHERE MovieId=1 AND SourceProvider<>'LegacyFile'"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Images WHERE MovieId=2 AND ImageType='Poster' AND SourceProvider='FANZA'"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Images WHERE MovieId=2 AND ImageType='Fanart' AND SourceProvider='FANZA'"));
+        Assert.Equal(2, await Scalar(verify, "SELECT COUNT(*) FROM Images WHERE MovieId=2 AND ImageType='Preview' AND SourceProvider='FANZA'"));
+        var assets = new ImageAssetService(Database, Path.Combine(root, "MediaStorage"));
+        Assert.Equal(2, (await assets.ReadMovieAssetsAsync(2, "http://localhost")).Count(asset => asset.Type == "Preview" && asset.Url is not null));
+    }
+
+    [Fact]
+    public async Task SyncWorkerUsesCodeExtractedFromMovieLabel()
+    {
+        await using (var connection = await Open()) {
+            await InsertMovie(connection, 1, "SSIS-906+五星+好身材大长腿+持续输出");
+            await InsertPrimaryFile(connection, 1, "SSIS-906");
+        }
+        MetadataProviderSettingsService settings = new(Database);
+        await settings.SaveMetaTubeAsync(new(false, "http://127.0.0.1:8080/", 30, false, false, false, true));
+        string? searchQuery = null;
+        var factory = new FakeHttpClientFactory(request => {
+            if (request.RequestUri!.AbsolutePath.Contains("search")) {
+                searchQuery = request.RequestUri.Query;
+                return new(HttpStatusCode.OK) { Content = new StringContent("""{"data":[{"provider":"FANZA","id":"ssis","number":"SSIS-906","title":"SSIS"}]}""", Encoding.UTF8, "application/json") };
+            }
+            return new(HttpStatusCode.OK) { Content = new StringContent("""{"data":{"provider":"FANZA","id":"ssis","number":"SSIS-906","title":"SSIS title","summary":"Plot","runtime":60,"release_date":"2026-01-02","maker":"Maker","actors":[],"genres":[],"preview_images":[]}}""", Encoding.UTF8, "application/json") };
+        });
+        var resolver = new MediaStoragePathResolver(Database, root);
+        var executor = new MetadataSyncExecutor(Database, resolver, settings, CreateDiagnostics(settings, factory), new MetaTubeProvider(factory),
+            new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database, resolver), new TaskLogService(Database));
+        MetadataSyncLaunchResult launch = await executor.EnqueueAsync(1, "Manual");
+
+        await executor.StartAsync(CancellationToken.None);
+        string? status = null;
+        for (int attempt = 0; attempt < 50 && status != "Completed"; attempt++) {
+            await Task.Delay(50);
+            await using SqliteConnection check = await Open();
+            status = await Text(check, $"SELECT Status FROM Tasks WHERE Id={launch.TaskId}");
+        }
+        await executor.StopAsync(CancellationToken.None);
+
+        Assert.Equal("Completed", status);
+        Assert.Contains("q=SSIS-906", searchQuery);
+    }
+
+    [Fact]
+    public async Task SyncWorkerTreatsFc2PpvAndFc2CodesAsTheSameMovie()
+    {
+        await using (var connection = await Open()) {
+            await InsertMovie(connection, 1, "FC2-1539556");
+            await InsertPrimaryFile(connection, 1, "FC2-1539556");
+        }
+        MetadataProviderSettingsService settings = new(Database);
+        await settings.SaveMetaTubeAsync(new(false, "http://127.0.0.1:8080/", 30, false, false, false, true));
+        var factory = new FakeHttpClientFactory(request => {
+            string body = request.RequestUri!.AbsolutePath.Contains("search")
+                ? """{"data":[{"provider":"FANZA","id":"fc2","number":"FC2-1539556","title":"FC2 title"}]}"""
+                : """{"data":{"provider":"FANZA","id":"fc2","number":"FC2-1539556","title":"FC2 title","summary":"Plot","runtime":60,"release_date":"2026-01-02","maker":"Maker","actors":[],"genres":[],"preview_images":[]}}""";
+            return new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+        });
+        var resolver = new MediaStoragePathResolver(Database, root);
+        var executor = new MetadataSyncExecutor(Database, resolver, settings, CreateDiagnostics(settings, factory), new MetaTubeProvider(factory),
+            new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database, resolver), new TaskLogService(Database));
+        MetadataSyncLaunchResult launch = await executor.EnqueueAsync(1, "Manual");
+
+        await executor.StartAsync(CancellationToken.None);
+        string? status = null;
+        for (int attempt = 0; attempt < 50 && status != "Completed"; attempt++) {
+            await Task.Delay(50);
+            await using SqliteConnection check = await Open();
+            status = await Text(check, $"SELECT Status FROM Tasks WHERE Id={launch.TaskId}");
+        }
+        await executor.StopAsync(CancellationToken.None);
+
+        Assert.Equal("Completed", status);
+    }
+
+    [Fact]
+    public async Task SyncWorkerKeepsDatabaseMergeWhenNfoOutputIsUnavailable()
+    {
+        await using (var connection = await Open()) {
+            await InsertMovie(connection, 1, "PARTIAL-001");
+            await InsertPrimaryFile(connection, 1, "PARTIAL-001");
+        }
+        string blockedRoot = Path.Combine(root, "blocked-media-storage");
+        await File.WriteAllTextAsync(blockedRoot, "not a directory");
+        await using (var connection = await Open()) {
+            await Execute(connection, "UPDATE AppSettings SET ValueJson=$root WHERE Key='mediaStorage.rootPath'",
+                ("$root", JsonSerializer.Serialize(blockedRoot)));
+        }
+        MetadataProviderSettingsService settings = new(Database);
+        await settings.SaveMetaTubeAsync(new(false, "http://127.0.0.1:8080/", 30, false, false, true, true));
+        var factory = new FakeHttpClientFactory(request => {
+            string body = request.RequestUri!.AbsolutePath.Contains("search")
+                ? """{"data":[{"provider":"FANZA","id":"partial","number":"PARTIAL-001","title":"Partial"}]}"""
+                : """{"data":{"provider":"FANZA","id":"partial","number":"PARTIAL-001","title":"Remote title","summary":"Database metadata survives","runtime":60,"release_date":"2026-01-02","maker":"Maker","actors":["Actor A"],"genres":["Genre A"],"preview_images":[]}}""";
+            return new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+        });
+        var resolver = new MediaStoragePathResolver(Database, root);
+        var executor = new MetadataSyncExecutor(Database, resolver, settings, CreateDiagnostics(settings, factory), new MetaTubeProvider(factory),
+            new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database, resolver), new TaskLogService(Database));
+        MetadataSyncLaunchResult launch = await executor.EnqueueAsync(1, "Manual");
+
+        await executor.StartAsync(CancellationToken.None);
+        string? status = null;
+        for (int attempt = 0; attempt < 80 && status is not ("Completed" or "CompletedWithErrors" or "Failed"); attempt++) {
+            await Task.Delay(50);
+            await using SqliteConnection check = await Open();
+            status = await Text(check, $"SELECT Status FROM Tasks WHERE Id={launch.TaskId}");
+        }
+        await executor.StopAsync(CancellationToken.None);
+
+        Assert.Equal("CompletedWithErrors", status);
+        await using SqliteConnection verify = await Open();
+        Assert.Equal("Database metadata survives", await Text(verify, "SELECT Description FROM Movies WHERE Id=1"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM MovieActors WHERE MovieId=1"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM MovieGenres WHERE MovieId=1"));
+        Assert.Contains("NFO 写入失败", await Text(verify, $"SELECT ErrorMessage FROM Tasks WHERE Id={launch.TaskId}"));
+        Assert.Equal(1, await Scalar(verify, $"SELECT COUNT(*) FROM TaskLogs WHERE TaskId={launch.TaskId} AND Message='[Database Merge] Success'"));
+    }
+
     public Task DisposeAsync() { try { Directory.Delete(root, true); } catch { } return Task.CompletedTask; }
     private MetadataSyncExecutor CreateExecutor()
     {
@@ -351,6 +670,13 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         var resolver = new MediaStoragePathResolver(Database, root);
         return new(Database, resolver, new ImageWorkflowService(Database, root, resolver), new TaskLogService(Database), new FfmpegLocator(Database, root));
     }
+    private ActorProfileCompleteTaskService CreateActorProfileCompleteTaskService()
+    {
+        var factory = new FakeHttpClientFactory(_ => new(HttpStatusCode.ServiceUnavailable));
+        var providerService = new ActorProfileProviderService(Database, new MetadataProviderSettingsService(Database),
+            new MinnanoActorProfileProvider(factory), new WikipediaJpActorProfileProvider(factory), new ActorProfileService(Database));
+        return new(Database, providerService, new TaskLogService(Database));
+    }
     private async Task<SqliteConnection> Open() { var c = new SqliteConnection($"Data Source={Database}"); await c.OpenAsync(); return c; }
     private static MetadataProviderContext Context(MetaTubeSettingsDto? metaTube = null, JavBusSettingsDto? javBus = null, string? preferredSource = null) =>
         new(metaTube ?? new(true, "http://127.0.0.1:8080/", 30, true, false, true, true),
@@ -367,15 +693,31 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         <p><span class="header">製作商:</span> <a>Studio A</a></p>
         <p><span class="header">發行商:</span> <a>Publisher A</a></p>
         <p><span class="header">系列:</span> <a>Series A</a></p>
-        <a href="/star/abc">Actor A</a><a href="/star/def">Actor B</a>
+        <a href="/star/abc"><img src="/pics/actress/abc_a.jpg" title="Actor A">Actor A</a><a href="/star/def">Actor B</a>
         <a href="/genre/drama">Drama</a><a href="/genre/hd">HD</a>
         <a class="sample-box" href="/sample1.jpg">sample</a>
         </body></html>
         """;
+    private static byte[] CreatePng(int width, int height, SKColor color)
+    {
+        using var bitmap = new SKBitmap(width, height);
+        using var canvas = new SKCanvas(bitmap);
+        canvas.Clear(color);
+        using SKImage image = SKImage.FromBitmap(bitmap);
+        using SKData data = image.Encode(SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
+    }
     private static Task InsertMovie(SqliteConnection c, long id, string code)
     {
         string at = DateTimeOffset.UtcNow.ToString("O");
         return Execute(c, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES($id,$code,$code,0,0,'pending','Test',$at,$at)", ("$id", id), ("$code", code), ("$at", at));
+    }
+    private static Task InsertPrimaryFile(SqliteConnection c, long movieId, string code)
+    {
+        string at = DateTimeOffset.UtcNow.ToString("O");
+        string path = $"Z:\\Videos\\{code}.mp4";
+        return Execute(c, "INSERT INTO MediaFiles(MovieId,FilePath,NormalizedPath,FileName,MediaType,SourceType,IsPrimary,ExistsState,CreatedAt,UpdatedAt) VALUES($movie,$path,$path,$name,'Video','Test',1,'Present',$at,$at)",
+            ("$movie", movieId), ("$path", path), ("$name", $"{code}.mp4"), ("$at", at));
     }
     private static async Task Execute(SqliteConnection c, string sql, params (string,object?)[] values) { await using var x=c.CreateCommand();x.CommandText=sql;foreach(var(n,v)in values)x.Parameters.AddWithValue(n,v??DBNull.Value);await x.ExecuteNonQueryAsync(); }
     private static async Task<long> Scalar(SqliteConnection c,string sql){await using var x=c.CreateCommand();x.CommandText=sql;return Convert.ToInt64(await x.ExecuteScalarAsync()??0L);}

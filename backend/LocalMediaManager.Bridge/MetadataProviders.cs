@@ -15,7 +15,7 @@ public sealed record ProviderMetadata(
     string? Director, string? Studio, string? Publisher, string? Series, int? DurationSeconds,
     string? ReleaseDate, string? WebUrl, IReadOnlyList<string> Genres, IReadOnlyList<string> Actors,
     IReadOnlyList<MetadataImage> Images, decimal? Rating = null, string? OriginalTitle = null,
-    string? Country = null);
+    string? Country = null, IReadOnlyList<ActorImageMetadata>? ActorImages = null);
 
 public interface IMetadataProvider
 {
@@ -42,19 +42,50 @@ public sealed class MdcNgProvider(IHttpClientFactory? clients = null) : IMetadat
 
     public Task<IReadOnlyList<MetadataSearchResult>> SearchAsync(string code, MetadataProviderContext settings, CancellationToken cancellationToken)
     {
-        return Task.FromResult<IReadOnlyList<MetadataSearchResult>>([]);
+        if (!settings.MdcNg.Enabled || string.IsNullOrWhiteSpace(settings.CurrentMoviePath))
+            return Task.FromResult<IReadOnlyList<MetadataSearchResult>>([]);
+
+        string normalizedCode = JavBusCode.Normalize(code);
+        return Task.FromResult<IReadOnlyList<MetadataSearchResult>>([
+            new(Name, settings.CurrentMoviePath, normalizedCode, normalizedCode)
+        ]);
     }
 
     public async Task<ProviderMetadata?> GetMetadataAsync(MetadataSearchResult result, MetadataProviderContext settings, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(settings.CurrentMoviePath)) return null;
-        ProviderConnectionResult test = await TestConnectionAsync(settings, cancellationToken);
-        if (!test.Success) throw new InvalidOperationException(test.Message);
-        throw new NotSupportedException("MDC-NG scrape preview is available, but it is not connected to the database write workflow yet.");
+        MdcNgScrapeResult scrape = await ScrapeAsync(
+            new(settings.CurrentMoviePath, result.Code, TimeoutSeconds: settings.MdcNg.TimeoutSeconds),
+            settings.MdcNg,
+            cancellationToken);
+        if (!scrape.Success || scrape.Metadata is null)
+            throw new InvalidOperationException(scrape.Message);
+
+        return ToProviderMetadata(scrape.Metadata);
     }
 
     public Task<IReadOnlyList<MetadataImage>> GetImagesAsync(ProviderMetadata metadata, CancellationToken cancellationToken) =>
         Task.FromResult(metadata.Images);
+
+    private static ProviderMetadata ToProviderMetadata(MovieMetadata metadata)
+    {
+        var images = new List<MetadataImage>();
+        AddImage(images, "Poster", metadata.Poster);
+        AddImage(images, "Thumb", metadata.Thumb);
+        AddImage(images, "Fanart", metadata.Fanart);
+        foreach (string image in metadata.ExtraFanart) AddImage(images, "Preview", image);
+        AddImage(images, "Trailer", metadata.Trailer);
+
+        return new(metadata.Provider, metadata.ExternalId ?? metadata.Code, metadata.Code, metadata.Title,
+            metadata.Description, metadata.Director, metadata.Studio, null, metadata.Series,
+            metadata.DurationSeconds > 0 ? metadata.DurationSeconds : null, metadata.ReleaseDate, null,
+            metadata.Tags, metadata.Actors, images, metadata.Rating, metadata.OriginalTitle, metadata.Country, metadata.ActorImages);
+    }
+
+    private static void AddImage(List<MetadataImage> images, string type, string? url)
+    {
+        if (!string.IsNullOrWhiteSpace(url)) images.Add(new(type, url));
+    }
 
     public async Task<MdcNgScrapeResult> ScrapeAsync(MdcNgScrapeCommand command, MdcNgSettingsDto settings, CancellationToken cancellationToken)
     {
@@ -346,17 +377,25 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
         primary ??= FirstUrl(movie, "big_cover_url", "cover_url", "big_thumb_url", "thumb_url");
         var images = new List<MetadataImage>();
         if (!string.IsNullOrWhiteSpace(primary)) images.Add(new("Poster", StripQuery(primary)));
-        string? fanart = FirstUrl(movie, "backdrop_url", "fanart_url", "background_url", "landscape_url");
+        string? fanart = FirstUrl(movie, "backdrop_url", "fanart_url", "background_url", "landscape_url")
+            ?? FirstUrl(movie, "big_cover_url", "cover_url");
         if (!string.IsNullOrWhiteSpace(fanart)) images.Add(new("Fanart", StripQuery(fanart)));
-        if (movie.TryGetProperty("preview_images", out JsonElement previews) && previews.ValueKind == JsonValueKind.Array)
-            images.AddRange(previews.EnumerateArray().Where(value => value.ValueKind == JsonValueKind.String)
-                .Select(value => value.GetString()).Where(IsHttpUrl).Select(value => new MetadataImage("Preview", StripQuery(value!))).Take(30));
+        MetadataImage[] previewImages = movie.TryGetProperty("preview_images", out JsonElement previews) && previews.ValueKind == JsonValueKind.Array
+            ? previews.EnumerateArray().Where(value => value.ValueKind == JsonValueKind.String)
+                .Select(value => value.GetString()).Where(IsHttpUrl).Select(value => new MetadataImage("Preview", StripQuery(value!))).Take(30).ToArray()
+            : [];
+        if (string.IsNullOrWhiteSpace(fanart)) {
+            string? fallbackFanart = previewImages.FirstOrDefault()?.Url ?? primary;
+            if (!string.IsNullOrWhiteSpace(fallbackFanart)) images.Add(new("Fanart", fallbackFanart));
+        }
+        images.AddRange(previewImages);
         var metadata = new ProviderMetadata(
             result.Provider, result.ExternalId, code, NullableString(movie, "title"), NullableString(movie, "summary"),
             NullableString(movie, "director"), NullableString(movie, "maker"), NullableString(movie, "label"),
             NullableString(movie, "series"), runtimeMinutes is > 0 ? runtimeMinutes * 60 : null, releaseDate,
-            NullableString(movie, "homepage") ?? detailUrl.ToString(), Strings(movie, "genres"), Strings(movie, "actors"),
-            images.DistinctBy(image => image.Url, StringComparer.OrdinalIgnoreCase).ToArray());
+            NullableString(movie, "homepage") ?? detailUrl.ToString(), Strings(movie, "genres"), ActorNames(movie),
+            images.DistinctBy(image => $"{image.Type}\u0000{image.Url}", StringComparer.OrdinalIgnoreCase).ToArray(),
+            ActorImages: ActorImages(movie));
         return HasUsefulMetadata(metadata) ? metadata : null;
     }
 
@@ -387,7 +426,7 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
             : ProviderHttpClients.Create(settings.TimeoutSeconds, network);
         client.Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.Clear();
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.6.3"));
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.7.0"));
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         return client;
     }
@@ -434,6 +473,39 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
             .Select(value => value.GetString()?.Trim()).Where(value => !string.IsNullOrWhiteSpace(value))
             .Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
+    private static IReadOnlyList<string> ActorNames(JsonElement source) {
+        if (!source.TryGetProperty("actors", out JsonElement values) || values.ValueKind != JsonValueKind.Array) return [];
+        return values.EnumerateArray().Select(value => value.ValueKind switch {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Object => FirstString(value, "name", "jp_name", "ja_name", "display_name", "title"),
+            _ => null,
+        }).Where(value => !string.IsNullOrWhiteSpace(value)).Cast<string>().Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+    private static IReadOnlyList<ActorImageMetadata> ActorImages(JsonElement source) {
+        var result = new List<ActorImageMetadata>();
+        if (source.TryGetProperty("actors", out JsonElement actors) && actors.ValueKind == JsonValueKind.Array) {
+            foreach (JsonElement actor in actors.EnumerateArray()) {
+                if (actor.ValueKind != JsonValueKind.Object) continue;
+                AddActorImage(result, actor, "name", "jp_name", "ja_name", "display_name", "title");
+            }
+        }
+        foreach (string groupName in new[] { "actor_images", "actorImages", "actor_avatars", "actorAvatars" }) {
+            if (!source.TryGetProperty(groupName, out JsonElement values) || values.ValueKind != JsonValueKind.Array) continue;
+            foreach (JsonElement item in values.EnumerateArray()) {
+                if (item.ValueKind == JsonValueKind.Object) AddActorImage(result, item, "name", "actor", "actress", "jp_name", "ja_name", "display_name", "title");
+            }
+        }
+        return result.DistinctBy(value => $"{value.Name}\u0000{value.ImageUrl}", StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+    private static void AddActorImage(List<ActorImageMetadata> result, JsonElement source, params string[] nameKeys) {
+        string? name = FirstString(source, nameKeys);
+        string? image = FirstUrl(source, "image_url", "avatar_url", "photo_url", "portrait_url", "thumbnail_url", "thumb_url", "url", "image", "avatar", "photo", "portrait", "thumbnail");
+        if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(image))
+            result.Add(new(name.Trim(), StripQuery(image)));
+    }
+    private static string? FirstString(JsonElement source, params string[] names) =>
+        names.Select(name => NullableString(source, name)).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
     private static string? FirstUrl(JsonElement source, params string[] names) => names.Select(name => NullableString(source, name)).FirstOrDefault(IsHttpUrl);
     private static bool IsHttpUrl(string? value) => Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) && uri.Scheme is "http" or "https";
     private static string StripQuery(string value) { int index = value.IndexOfAny(['?', '#']); return index >= 0 ? value[..index] : value; }
@@ -539,20 +611,45 @@ public sealed class CompositeMetadataProvider(MdcNgProvider mdcNg, MetaTubeProvi
     {
         ProviderMetadata? merged = null;
         foreach (IMetadataProvider source in Ordered(settings)) {
+            await LogAsync(settings, source.Name, "开始", cancellationToken);
             IReadOnlyList<MetadataSearchResult> results;
-            try { results = await source.SearchAsync(code, settings, cancellationToken); }
-            catch (Exception error) when (error is not OperationCanceledException) { continue; }
+            try {
+                results = await source.SearchAsync(code, settings, cancellationToken);
+                await LogAsync(settings, source.Name, $"搜索结束：候选 {results.Count} 个", cancellationToken);
+            }
+            catch (Exception error) when (error is not OperationCanceledException) {
+                await LogAsync(settings, source.Name, $"失败：{error.Message}", cancellationToken);
+                continue;
+            }
+            bool accepted = false;
             foreach (MetadataSearchResult result in results.Take(2)) {
                 try {
                     ProviderMetadata? candidate = await source.GetMetadataAsync(result, settings, cancellationToken);
-                    if (candidate is null) continue;
-                    if (!JavBusCode.Normalize(candidate.Code).Equals(JavBusCode.Normalize(code), StringComparison.OrdinalIgnoreCase)) continue;
-                    merged = merged is null ? candidate : Merge(merged, candidate);
-                    if (!NeedsJavBusSupplement(merged)) return merged;
+                    if (candidate is null) {
+                        await LogAsync(settings, source.Name, "详情为空，继续下一候选", cancellationToken);
+                        continue;
+                    }
+                    if (!JavBusCode.Normalize(candidate.Code).Equals(JavBusCode.Normalize(code), StringComparison.OrdinalIgnoreCase)) {
+                        await LogAsync(settings, source.Name, $"番号不匹配：期望 {code}，实际 {candidate.Code}", cancellationToken);
+                        continue;
+                    }
+                    string returned = Describe(candidate);
+                    ProviderMetadata next = merged is null ? candidate : Merge(merged, candidate);
+                    string added = merged is null ? Describe(candidate) : DescribeAdded(merged, next);
+                    merged = next;
+                    accepted = true;
+                    await LogAsync(settings, source.Name, $"返回：{returned}", cancellationToken);
+                    await LogAsync(settings, source.Name, $"补全：{added}", cancellationToken);
                     break;
-                } catch (Exception error) when (error is not OperationCanceledException) { }
+                }
+                catch (Exception error) when (error is not OperationCanceledException) {
+                    await LogAsync(settings, source.Name, $"详情失败：{error.Message}", cancellationToken);
+                }
             }
+            await LogAsync(settings, source.Name, accepted ? "结束：已参与合并" : "结束：无可合并结果", cancellationToken);
         }
+        if (merged is not null)
+            await LogAsync(settings, "Metadata Merge", $"最终字段：{Describe(merged)}", cancellationToken);
         return merged;
     }
 
@@ -578,10 +675,14 @@ public sealed class CompositeMetadataProvider(MdcNgProvider mdcNg, MetaTubeProvi
         || string.IsNullOrWhiteSpace(metadata.ReleaseDate)
         || metadata.Actors.Count == 0
         || metadata.Genres.Count == 0
-        || metadata.Images.Count == 0;
+        || !HasImageType(metadata.Images, "Poster")
+        || !HasImageType(metadata.Images, "Fanart")
+        || metadata.ActorImages is null
+        || metadata.ActorImages.Count == 0;
 
     private static ProviderMetadata Merge(ProviderMetadata primary, ProviderMetadata fallback) => primary with {
         Title = FirstText(primary.Title, fallback.Title),
+        OriginalTitle = FirstText(primary.OriginalTitle, fallback.OriginalTitle),
         Description = FirstText(primary.Description, fallback.Description),
         Director = FirstText(primary.Director, fallback.Director),
         Studio = FirstText(primary.Studio, fallback.Studio),
@@ -590,17 +691,95 @@ public sealed class CompositeMetadataProvider(MdcNgProvider mdcNg, MetaTubeProvi
         DurationSeconds = primary.DurationSeconds is > 0 ? primary.DurationSeconds : fallback.DurationSeconds,
         ReleaseDate = FirstText(primary.ReleaseDate, fallback.ReleaseDate),
         WebUrl = FirstText(primary.WebUrl, fallback.WebUrl),
-        Genres = Union(primary.Genres, fallback.Genres),
-        Actors = Union(primary.Actors, fallback.Actors),
-        Images = primary.Images.Count > 0 ? primary.Images : fallback.Images,
+        Country = FirstText(primary.Country, fallback.Country),
+        Rating = primary.Rating is > 0 ? primary.Rating : fallback.Rating,
+        Genres = MergeTextValues(primary.Genres, fallback.Genres),
+        Actors = MergeTextValues(primary.Actors, fallback.Actors),
+        Images = MergeImages(primary.Images, fallback.Images),
+        ActorImages = MergeActorImages(primary.ActorImages ?? [], fallback.ActorImages ?? []),
     };
+
+    private static bool HasImageType(IReadOnlyList<MetadataImage> images, string type) =>
+        images.Any(image => image.Type.Equals(type, StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(image.Url));
+
+    private static IReadOnlyList<MetadataImage> MergeImages(IReadOnlyList<MetadataImage> primary,
+        IReadOnlyList<MetadataImage> fallback)
+    {
+        var result = primary.Where(image => !string.IsNullOrWhiteSpace(image.Url)).ToList();
+        foreach (MetadataImage image in fallback.Where(image => !string.IsNullOrWhiteSpace(image.Url))) {
+            bool multiValue = image.Type.Equals("Preview", StringComparison.OrdinalIgnoreCase)
+                || image.Type.Equals("Screenshot", StringComparison.OrdinalIgnoreCase);
+            if (multiValue) {
+                if (!result.Any(current => current.Type.Equals(image.Type, StringComparison.OrdinalIgnoreCase)
+                    && current.Url.Equals(image.Url, StringComparison.OrdinalIgnoreCase))) result.Add(image);
+            }
+            else if (!HasImageType(result, image.Type)) result.Add(image);
+        }
+        return result;
+    }
+
+    private static IReadOnlyList<string> MergeTextValues(IReadOnlyList<string> primary, IReadOnlyList<string> fallback) =>
+        primary.Concat(fallback).Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+    private static IReadOnlyList<ActorImageMetadata> MergeActorImages(IReadOnlyList<ActorImageMetadata> primary,
+        IReadOnlyList<ActorImageMetadata> fallback) =>
+        primary.Concat(fallback).Where(value => !string.IsNullOrWhiteSpace(value.Name) && !string.IsNullOrWhiteSpace(value.ImageUrl))
+            .DistinctBy(value => value.Name, StringComparer.OrdinalIgnoreCase).ToArray();
 
     private static string? FirstText(string? primary, string? fallback) =>
         string.IsNullOrWhiteSpace(primary) ? fallback : primary;
 
-    private static IReadOnlyList<string> Union(IReadOnlyList<string> primary, IReadOnlyList<string> fallback) =>
-        primary.Concat(fallback).Where(value => !string.IsNullOrWhiteSpace(value))
-            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    private static Task LogAsync(MetadataProviderContext settings, string provider, string message, CancellationToken token) =>
+        settings.ProviderLog?.Invoke(provider, message, token) ?? Task.CompletedTask;
+
+    private static string Describe(ProviderMetadata value)
+    {
+        var fields = new List<string>();
+        var empty = new List<string>();
+        AddState(fields, empty, "标题", value.Title); AddState(fields, empty, "番号", value.Code);
+        AddState(fields, empty, "日期", value.ReleaseDate); AddState(fields, empty, "时长", value.DurationSeconds is > 0);
+        AddState(fields, empty, "导演", value.Director); AddState(fields, empty, "厂商", value.Studio);
+        AddState(fields, empty, "系列", value.Series); AddState(fields, empty, "标签", value.Genres.Count > 0, value.Genres.Count);
+        AddState(fields, empty, "演员", value.Actors.Count > 0, value.Actors.Count);
+        AddState(fields, empty, "Poster", HasImageType(value.Images, "Poster"));
+        AddState(fields, empty, "Fanart", HasImageType(value.Images, "Fanart"));
+        AddState(fields, empty, "Preview", HasImageType(value.Images, "Preview"), value.Images.Count(image => image.Type.Equals("Preview", StringComparison.OrdinalIgnoreCase)));
+        AddState(fields, empty, "Screenshot", HasImageType(value.Images, "Screenshot"), value.Images.Count(image => image.Type.Equals("Screenshot", StringComparison.OrdinalIgnoreCase)));
+        AddState(fields, empty, "简介", value.Description); AddState(fields, empty, "评分", value.Rating is > 0);
+        empty.Add("NFO(由同步流程生成，Provider 不直接返回)");
+        return $"有 {fields.Count} 项：{(fields.Count == 0 ? "无" : string.Join("、", fields))}；空：{string.Join("、", empty)}";
+    }
+
+    private static string DescribeAdded(ProviderMetadata before, ProviderMetadata after)
+    {
+        var fields = new List<string>();
+        Added(fields, "标题", before.Title, after.Title); Added(fields, "日期", before.ReleaseDate, after.ReleaseDate);
+        if (before.DurationSeconds is null or <= 0 && after.DurationSeconds is > 0) fields.Add("时长");
+        Added(fields, "导演", before.Director, after.Director); Added(fields, "厂商", before.Studio, after.Studio);
+        Added(fields, "发行商", before.Publisher, after.Publisher); Added(fields, "系列", before.Series, after.Series);
+        Added(fields, "简介", before.Description, after.Description); Added(fields, "原始标题", before.OriginalTitle, after.OriginalTitle);
+        Added(fields, "国家", before.Country, after.Country);
+        if (before.Rating is null or <= 0 && after.Rating is > 0) fields.Add("评分");
+        int genres = after.Genres.Count - before.Genres.Count; if (genres > 0) fields.Add($"标签(+{genres})");
+        int actors = after.Actors.Count - before.Actors.Count; if (actors > 0) fields.Add($"演员(+{actors})");
+        foreach (IGrouping<string, MetadataImage> images in after.Images.Except(before.Images).GroupBy(image => image.Type, StringComparer.OrdinalIgnoreCase))
+            fields.Add($"{images.Key}(+{images.Count()})");
+        int actorImages = (after.ActorImages?.Count ?? 0) - (before.ActorImages?.Count ?? 0);
+        if (actorImages > 0) fields.Add($"演员头像(+{actorImages})");
+        return fields.Count == 0 ? "无新增，保留现有值" : string.Join("、", fields);
+    }
+
+    private static void AddState(List<string> fields, List<string> empty, string name, string? value) =>
+        AddState(fields, empty, name, !string.IsNullOrWhiteSpace(value));
+    private static void AddState(List<string> fields, List<string> empty, string name, bool present, int count = 0) {
+        if (present) fields.Add(count > 0 ? $"{name}({count})" : name); else empty.Add(name);
+    }
+    private static void Added(List<string> fields, string name, string? before, string? after) {
+        if (string.IsNullOrWhiteSpace(before) && !string.IsNullOrWhiteSpace(after)) fields.Add(name);
+    }
+
 }
 
 public sealed class JavBusProvider(IHttpClientFactory clients) : IMetadataProvider
@@ -745,6 +924,8 @@ internal static class JavBusParser
     private static readonly Regex Sample = new(@"class\s*=\s*[""'][^""']*sample-box[^""']*[""'][\s\S]*?href\s*=\s*[""']([^""']+)[""']", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex Genre = new(@"href\s*=\s*[""'][^""']*/genre/[^""']+[""'][^>]*>(.*?)</a>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex Actor = new(@"href\s*=\s*[""'][^""']*/star/[^""']+[""'][^>]*>(.*?)</a>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex ActorLink = new(@"<a\b[^>]*href\s*=\s*[""'][^""']*/star/[^""']+[""'][^>]*>(.*?)</a>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex Image = new(@"<img\b[^>]*\bsrc\s*=\s*[""']([^""']+)[""'][^>]*>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
 
     public static ProviderMetadata Parse(string html, string webUrl, string fallbackCode)
     {
@@ -766,7 +947,8 @@ internal static class JavBusParser
             webUrl,
             Links(Genre, html),
             Links(Actor, html),
-            images);
+            images,
+            ActorImages: ActorImages(html, webUrl));
     }
 
     public static string? Code(string html) => Field(html, "識別碼", "识别码", "品番", "番号");
@@ -793,6 +975,20 @@ internal static class JavBusParser
     }
     private static IReadOnlyList<string> Links(Regex regex, string html) => regex.Matches(html).Select(match => Html(match.Groups[1].Value))
         .Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    private static IReadOnlyList<ActorImageMetadata> ActorImages(string html, string webUrl) =>
+        ActorLink.Matches(html)
+            .Select(match => {
+                string body = match.Groups[1].Value;
+                string? image = Absolute(First(Image, body), webUrl);
+                string name = Html(body);
+                return !string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(image)
+                    ? new ActorImageMetadata(name, image)
+                    : null;
+            })
+            .Where(value => value is not null)
+            .Cast<ActorImageMetadata>()
+            .DistinctBy(value => value.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     private static string? First(Regex regex, string html) => regex.Match(html) is { Success: true } match ? Html(match.Groups[1].Value) : null;
     private static string Html(string? value) => Regex.Replace(WebUtility.HtmlDecode(value ?? ""), "<.*?>", " ").Trim();
     private static string? Absolute(string? value, string baseUrl)

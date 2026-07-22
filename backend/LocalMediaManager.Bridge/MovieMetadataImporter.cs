@@ -51,7 +51,7 @@ public sealed class MovieMetadataImporter(string databasePath, MetadataWriteServ
         return new(metadata.Provider, metadata.ExternalId ?? metadata.Code, metadata.Code, metadata.Title,
             metadata.Description, metadata.Director, metadata.Studio, null, metadata.Series,
             metadata.DurationSeconds, metadata.ReleaseDate, null, metadata.Tags, metadata.Actors,
-            images, metadata.Rating, metadata.OriginalTitle, metadata.Country);
+            images, metadata.Rating, metadata.OriginalTitle, metadata.Country, metadata.ActorImages);
     }
 
     private async Task<long> CreateTaskAsync(long movieId, MovieMetadata metadata, bool overwrite,
