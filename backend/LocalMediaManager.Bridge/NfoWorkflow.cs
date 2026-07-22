@@ -11,7 +11,12 @@ namespace LocalMediaManager.Bridge;
 public sealed record NfoData(string Code, string? Title, string? OriginalTitle, string? Plot, double? Rating,
     string? ReleaseDate, int? RuntimeMinutes, string? Director, string? Studio, string? Publisher,
     string? Country, IReadOnlyList<string> Actors, IReadOnlyList<string> Tags, IReadOnlyList<string> Genres,
-    IReadOnlyList<string> Series, IReadOnlyList<string> ImageReferences, string? Source, string? SourceId);
+    IReadOnlyList<string> Series, IReadOnlyList<string> ImageReferences, string? Source, string? SourceId)
+{
+    public string? PosterPath { get; init; }
+    public string? FanartPath { get; init; }
+    public IReadOnlyDictionary<string, string> ActorImagePaths { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+}
 public sealed record NfoPreview(long MovieId, string Path, string Ownership, bool Locked, bool Exists,
     bool CanApply, string ConfirmationToken, IReadOnlyList<string> Changes, IReadOnlyList<string> Conflicts,
     IReadOnlyList<string> Warnings, NfoData Data);
@@ -62,6 +67,12 @@ public sealed class NfoService(string databasePath, MediaStoragePathResolver pat
             metadata.Images.Select(image => image.Url).Where(value => !string.IsNullOrWhiteSpace(value)).ToArray(),
             metadata.Provider, metadata.ExternalId);
         return await WriteSafeAsync(movie.Id, path, data, metadata.Provider, cancellationToken);
+    }
+
+    public async Task<(string? Path, bool Created)> WriteFromDatabaseAsync(long movieId, CancellationToken cancellationToken)
+    {
+        (NfoData data, string path) = await ReadDatabaseDataAsync(movieId, cancellationToken);
+        return await WriteSafeAsync(movieId, path, data, "LocalMediaManager", cancellationToken);
     }
 
     public async Task<NfoPreview> PreviewExportAsync(long movieId, CancellationToken cancellationToken = default)
@@ -228,7 +239,9 @@ public sealed class NfoService(string databasePath, MediaStoragePathResolver pat
             data.Tags.Order(StringComparer.OrdinalIgnoreCase).Select(value => new XElement("tag", value)),
             data.Genres.Order(StringComparer.OrdinalIgnoreCase).Select(value => new XElement("genre", value)),
             data.Series.Order(StringComparer.OrdinalIgnoreCase).Select(value => new XElement("series", value)),
-            data.Actors.Order(StringComparer.OrdinalIgnoreCase).Select(value => new XElement("actor", new XElement("name", value), new XElement("type", "Actor"))),
+            data.Actors.Order(StringComparer.OrdinalIgnoreCase).Select(value => ActorElement(value, data.ActorImagePaths)),
+            Element("thumb", data.PosterPath) is { } poster ? new XElement("thumb", new XAttribute("aspect", "poster"), poster.Value) : null,
+            data.FanartPath is { Length: > 0 } fanart ? new XElement("fanart", new XElement("thumb", fanart)) : null,
             data.ImageReferences.Count > 0 ? new XElement("fanart", data.ImageReferences.Order(StringComparer.OrdinalIgnoreCase).Select(value => new XElement("thumb", new XAttribute("preview", value), value))) : null,
             Element("source", data.Source), Element("sourceid", data.SourceId), new XElement("lmmownership", "LMM"));
         return new(new XDeclaration("1.0", "utf-8", "yes"), root);
@@ -240,7 +253,7 @@ public sealed class NfoService(string databasePath, MediaStoragePathResolver pat
         DatabaseMovie movie = await ReadMovieAsync(connection, movieId, token);
         string? primary = await ScalarTextAsync(connection, "SELECT FilePath FROM MediaFiles WHERE MovieId=$id AND IsPrimary=1 ORDER BY Id LIMIT 1", token, ("$id", movieId));
         if (string.IsNullOrWhiteSpace(primary)) throw new InvalidOperationException("影片没有主媒体文件，无法确定 NFO 输出位置。");
-        string path = (await pathResolver.ResolveForMovieAsync(new MediaStorageMovie(movieId, movie.Code ?? "", movie.Title), "NFO", ".nfo", null, null, token)).FullPath;
+        string path = Path.ChangeExtension(primary, ".nfo");
         var data = new NfoData(movie.Code ?? "", movie.Title, movie.OriginalTitle, movie.Description, movie.ProviderRating,
             movie.ReleaseDate, movie.DurationSeconds > 0 ? movie.DurationSeconds / 60 : null,
             await FirstRelationAsync(connection, movieId, "Directors", "MovieDirectors", "DirectorId", token),
@@ -249,7 +262,11 @@ public sealed class NfoService(string databasePath, MediaStoragePathResolver pat
             await RelationsAsync(connection, movieId, "Tags", "MovieTags", "TagId", token),
             await RelationsAsync(connection, movieId, "Genres", "MovieGenres", "GenreId", token),
             await RelationsAsync(connection, movieId, "Series", "MovieSeries", "SeriesId", token),
-            (await ReadSettingsAsync(token)).IncludeImages ? await ImageReferencesAsync(connection, movieId, token) : [], "LocalMediaManager", movieId.ToString(CultureInfo.InvariantCulture));
+            [], "LocalMediaManager", movieId.ToString(CultureInfo.InvariantCulture)) {
+            PosterPath = await ImagePathAsync(connection, movieId, "Poster", token),
+            FanartPath = await ImagePathAsync(connection, movieId, "Fanart", token),
+            ActorImagePaths = await ActorImagePathsAsync(connection, movieId, token),
+        };
         return (data, path);
     }
 
@@ -266,7 +283,13 @@ public sealed class NfoService(string databasePath, MediaStoragePathResolver pat
     private static async Task AddRelationAsync(SqliteConnection c,System.Data.Common.DbTransaction tx,long movieId,string table,string relation,string key,string value,CancellationToken token) { string clean=value.Trim();if(clean.Length==0)return;string normalized=Normalize(clean);long id=await ScalarLongAsync(c,tx,$"SELECT COALESCE(MAX(Id),0) FROM {table} WHERE NormalizedName=$name",token,("$name",normalized));if(id==0){(string columns,string values)=table switch{"Actors"=>("Name,NormalizedName,LegacySource,CreatedAt,UpdatedAt","$name,$normalized,'NFO',$at,$at"),"Tags"=>("Name,NormalizedName,Source,CreatedAt,UpdatedAt","$name,$normalized,'NFO',$at,$at"),_=>("Name,NormalizedName","$name,$normalized")};id=await InsertIdAsync(c,tx,$"INSERT INTO {table}({columns}) VALUES({values});SELECT last_insert_rowid();",token,("$name",clean),("$normalized",normalized),("$at",Now()));}string extra=relation switch{"MovieActors"=>",RoleName,SortOrder","MovieTags"=>",CreatedAt","MovieSeries"=>",SortOrder","MovieStudios"=>",RelationType",_=>""};string extraValues=relation switch{"MovieActors"=>",'',999","MovieTags"=>",$at","MovieSeries"=>",999","MovieStudios"=>",'Studio'",_=>""};await ExecuteAsync(c,tx,$"INSERT OR IGNORE INTO {relation}(MovieId,{key}{extra}) VALUES($movie,$id{extraValues})",("$movie",movieId),("$id",id),("$at",Now())); }
     private static async Task<IReadOnlyList<string>> RelationsAsync(SqliteConnection c,long movieId,string table,string relation,string key,CancellationToken token) { await using SqliteCommand x=c.CreateCommand();x.CommandText=$"SELECT e.Name FROM {table} e JOIN {relation} r ON r.{key}=e.Id WHERE r.MovieId=$movie ORDER BY e.Name";x.Parameters.AddWithValue("$movie",movieId);var values=new List<string>();await using SqliteDataReader r=await x.ExecuteReaderAsync(token);while(await r.ReadAsync(token))values.Add(r.GetString(0));return values; }
     private static async Task<string?> FirstRelationAsync(SqliteConnection c,long movieId,string table,string relation,string key,CancellationToken token) { try{return (await RelationsAsync(c,movieId,table,relation,key,token)).FirstOrDefault();}catch(SqliteException){return null;} }
-    private static async Task<IReadOnlyList<string>> ImageReferencesAsync(SqliteConnection c,long movieId,CancellationToken token) { await using SqliteCommand x=c.CreateCommand();x.CommandText="SELECT COALESCE(SourceUrl,FilePath) FROM Images WHERE MovieId=$movie AND COALESCE(SourceUrl,FilePath) IS NOT NULL ORDER BY IsPrimary DESC,Id";x.Parameters.AddWithValue("$movie",movieId);var values=new List<string>();await using SqliteDataReader r=await x.ExecuteReaderAsync(token);while(await r.ReadAsync(token))values.Add(r.GetString(0));return values; }
+    private static XElement ActorElement(string name, IReadOnlyDictionary<string, string> imagePaths) {
+        var actor = new XElement("actor", new XElement("name", name), new XElement("type", "Actor"));
+        if (imagePaths.TryGetValue(name, out string? path) && !string.IsNullOrWhiteSpace(path)) actor.Add(new XElement("thumb", path));
+        return actor;
+    }
+    private static async Task<string?> ImagePathAsync(SqliteConnection c,long movieId,string type,CancellationToken token) { await using SqliteCommand x=c.CreateCommand();x.CommandText="SELECT FilePath FROM Images WHERE MovieId=$movie AND ImageType=$type AND trim(ifnull(FilePath,''))<>'' ORDER BY IsPrimary DESC,Id LIMIT 1";x.Parameters.AddWithValue("$movie",movieId);x.Parameters.AddWithValue("$type",type);return(await x.ExecuteScalarAsync(token))?.ToString(); }
+    private static async Task<IReadOnlyDictionary<string,string>> ActorImagePathsAsync(SqliteConnection c,long movieId,CancellationToken token) { await using SqliteCommand x=c.CreateCommand();x.CommandText="SELECT a.Name,i.FilePath FROM MovieActors ma JOIN Actors a ON a.Id=ma.ActorId JOIN Images i ON i.ActorId=a.Id WHERE ma.MovieId=$movie AND i.ImageType='ActorAvatar' AND trim(ifnull(i.FilePath,''))<>'' ORDER BY i.IsPrimary DESC,i.Id";x.Parameters.AddWithValue("$movie",movieId);var values=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);await using SqliteDataReader r=await x.ExecuteReaderAsync(token);while(await r.ReadAsync(token))values.TryAdd(r.GetString(0),r.GetString(1));return values; }
     private static async Task<string?> SettingAsync(SqliteConnection c,string key,CancellationToken token){string? raw=await ScalarTextAsync(c,"SELECT ValueJson FROM AppSettings WHERE Key=$key",token,("$key",key));if(string.IsNullOrWhiteSpace(raw))return raw;try{return JsonSerializer.Deserialize<string>(raw)??raw;}catch(JsonException){return raw;}}
     private static async Task StoreSettingAsync(SqliteConnection c,System.Data.Common.DbTransaction tx,string key,object value,string type){await ExecuteAsync(c,tx,"INSERT INTO AppSettings(Key,ValueJson,ValueType,UpdatedAt) VALUES($key,$value,$type,$at) ON CONFLICT(Key) DO UPDATE SET ValueJson=excluded.ValueJson,ValueType=excluded.ValueType,UpdatedAt=excluded.UpdatedAt",("$key",key),("$value",JsonSerializer.Serialize(value)),("$type",type),("$at",Now()));}
     private static string TextSetting(IReadOnlyDictionary<string,string> values,string key,string fallback){if(!values.TryGetValue(key,out string? raw))return fallback;try{return JsonSerializer.Deserialize<string>(raw)??fallback;}catch(JsonException){return fallback;}}

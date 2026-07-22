@@ -26,16 +26,16 @@ public sealed class MediaStoragePathResolverTests : IAsyncLifetime
     }
 
     [Theory]
-    [InlineData("Poster", "Posters", "ABC-123.jpg")]
-    [InlineData("Thumbnail", "Thumbnails", "ABC-123.jpg")]
-    [InlineData("Fanart", "Fanart", "ABC-123.jpg")]
-    [InlineData("Preview", "Previews", "ABC-123_001.jpg")]
-    [InlineData("Screenshot", "Screenshots", "ABC-123_001.jpg")]
-    [InlineData("GIF", "GIF", "ABC-123_001.gif")]
-    [InlineData("NFO", "NFO", "ABC-123.nfo")]
-    [InlineData("GeneratedCard", "WallCrops", "ABC-123.jpg")]
-    [InlineData("CardCover", "WallCrops", "ABC-123.jpg")]
-    public async Task ResolvesMediaStoragePathForResourceType(string type, string directory, string fileName)
+    [InlineData("Poster", "Posters", "ABC-123.jpg", false)]
+    [InlineData("Thumbnail", "Thumbnails", "ABC-123.jpg", false)]
+    [InlineData("Fanart", "Fanart", "ABC-123.jpg", false)]
+    [InlineData("Preview", "Previews", "01.jpg", true)]
+    [InlineData("Screenshot", "Screenshots", "01.jpg", true)]
+    [InlineData("GIF", "GIF", "01.gif", true)]
+    [InlineData("NFO", "NFO", "ABC-123.nfo", true)]
+    [InlineData("GeneratedCard", "WallCrops", "ABC-123.jpg", false)]
+    [InlineData("CardCover", "WallCrops", "ABC-123.jpg", false)]
+    public async Task ResolvesMediaStoragePathForResourceType(string type, string directory, string fileName, bool grouped)
     {
         string extension = type.Equals("GIF", StringComparison.OrdinalIgnoreCase) ? ".gif"
             : type.Equals("NFO", StringComparison.OrdinalIgnoreCase) ? ".nfo"
@@ -44,8 +44,12 @@ public sealed class MediaStoragePathResolverTests : IAsyncLifetime
 
         MediaStorageResourcePath result = await Resolver().ResolveForMovieAsync(1, type, extension, index);
 
-        Assert.Equal(Path.Combine(MediaRoot, directory, "ABC-123", fileName), result.FullPath);
+        string expected = grouped
+            ? Path.Combine(MediaRoot, directory, "ABC-123", fileName)
+            : Path.Combine(MediaRoot, directory, fileName);
+        Assert.Equal(expected, result.FullPath);
         Assert.Equal(directory, result.Directory);
+        Assert.Equal(grouped ? "ABC-123" : "", result.MovieFolder);
     }
 
     [Fact]
@@ -59,6 +63,66 @@ public sealed class MediaStoragePathResolverTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ResolveIgnoresExistingLowerCaseDirectoryWhenWriting()
+    {
+        string actualResourceDirectory = Path.Combine(MediaRoot, "posters");
+        string actualMovieDirectory = Path.Combine(actualResourceDirectory, "abc-123");
+        Directory.CreateDirectory(actualMovieDirectory);
+
+        MediaStorageResourcePath result = await Resolver().ResolveForMovieAsync(1, "Poster", ".jpg");
+
+        Assert.Equal(Path.Combine(MediaRoot, "Posters", "ABC-123.jpg"), result.FullPath);
+        Assert.Equal("", result.MovieFolder);
+    }
+
+    [Fact]
+    public async Task ResolveIgnoresExistingLowerCaseFileWhenWriting()
+    {
+        string actualMovieDirectory = Path.Combine(MediaRoot, "posters", "abc-123");
+        Directory.CreateDirectory(actualMovieDirectory);
+        string existingPath = Path.Combine(actualMovieDirectory, "abc-123.jpg");
+        await File.WriteAllTextAsync(existingPath, "existing");
+
+        MediaStorageResourcePath result = await Resolver().ResolveForMovieAsync(1, "Poster", ".jpg");
+
+        Assert.Equal(Path.Combine(MediaRoot, "Posters", "ABC-123.jpg"), result.FullPath);
+        Assert.Equal("ABC-123.jpg", result.FileName);
+    }
+
+    [Theory]
+    [InlineData("sone-454", "SONE-454")]
+    [InlineData("SONE-454", "SONE-454")]
+    [InlineData("SonE-454", "SONE-454")]
+    [InlineData("abw-001", "ABW-001")]
+    [InlineData("ipx-123", "IPX-123")]
+    public void NormalizeMovieNumberUsesFixedUpperCasePolicy(string input, string expected)
+    {
+        Assert.Equal(MetadataNamingPolicy.UpperCaseMovieNumber, MetadataNamingPolicy.Current);
+        Assert.Equal(expected, MetadataNamingPolicy.NormalizeMovieNumber(input, 1));
+    }
+
+    [Theory]
+    [InlineData("Poster", ".jpg", null, "Posters", "SONE-454.jpg")]
+    [InlineData("Fanart", ".jpg", null, "Fanart", "SONE-454.jpg")]
+    [InlineData("GeneratedCard", ".jpg", null, "WallCrops", "SONE-454.jpg")]
+    [InlineData("NFO", ".nfo", null, "NFO", "SONE-454", "SONE-454.nfo")]
+    [InlineData("Preview", ".jpg", 1, "Previews", "SONE-454", "01.jpg")]
+    [InlineData("Screenshot", ".jpg", 2, "Screenshots", "SONE-454", "02.jpg")]
+    [InlineData("GIF", ".gif", 3, "GIF", "SONE-454", "03.gif")]
+    public async Task AllResourcePathsUseNormalizedMovieNumber(
+        string type,
+        string extension,
+        int? index,
+        string directory,
+        params string[] relativeSegments)
+    {
+        MediaStorageResourcePath result = await Resolver().ResolveForMovieAsync(
+            new MediaStorageMovie(3287, "  sone-454  ", "Example"), type, extension, index);
+
+        Assert.Equal(Path.Combine(new[] { MediaRoot, directory }.Concat(relativeSegments).ToArray()), result.FullPath);
+    }
+
+    [Fact]
     public async Task UserConfiguredRootHasHighestPriority()
     {
         string custom = Path.Combine(root, "CustomMedia");
@@ -67,7 +131,7 @@ public sealed class MediaStoragePathResolverTests : IAsyncLifetime
 
         MediaStorageResourcePath result = await Resolver().ResolveForMovieAsync(1, "Poster", ".jpg");
 
-        Assert.Equal(Path.Combine(custom, "Posters", "ABC-123", "ABC-123.jpg"), result.FullPath);
+        Assert.Equal(Path.Combine(custom, "Posters", "ABC-123.jpg"), result.FullPath);
     }
 
     [Fact]
@@ -78,7 +142,7 @@ public sealed class MediaStoragePathResolverTests : IAsyncLifetime
 
         MediaStorageResourcePath result = await Resolver().ResolveForMovieAsync(1, "Poster", ".jpg");
 
-        Assert.Equal(Path.Combine(root, "Local Media Manager Next Data", "MediaStorage", "Posters", "ABC-123", "ABC-123.jpg"), result.FullPath);
+        Assert.Equal(Path.Combine(root, "Local Media Manager Next Data", "MediaStorage", "Posters", "ABC-123.jpg"), result.FullPath);
     }
 
     [Fact]

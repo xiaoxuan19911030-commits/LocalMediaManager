@@ -31,6 +31,7 @@ builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequired
 builder.Services.AddSingleton(new MediaStoragePathResolver(databasePath, installRoot));
 builder.Services.AddSingleton(new MetadataProviderSettingsService(databasePath));
 builder.Services.AddSingleton(new MetadataWriteService(databasePath));
+builder.Services.AddSingleton(new MetadataHealthAnalysisService(databasePath));
 builder.Services.AddSingleton(sp => new MovieMetadataImporter(databasePath, sp.GetRequiredService<MetadataWriteService>()));
 builder.Services.AddSingleton(sp => new MovieImageImporter(
     databasePath,
@@ -53,6 +54,7 @@ builder.Services.AddSingleton<ImageDownloadService>();
 builder.Services.AddSingleton(serviceProvider => new NfoService(
     databasePath,
     serviceProvider.GetRequiredService<MediaStoragePathResolver>()));
+builder.Services.AddSingleton<MovieNfoExporter>();
 builder.Services.AddSingleton(serviceProvider => new SettingsSaveCoordinator(
     databasePath,
     installRoot,
@@ -75,7 +77,14 @@ builder.Services.AddSingleton(serviceProvider => new ActorProfileProviderService
     serviceProvider.GetRequiredService<MetadataProviderSettingsService>(),
     serviceProvider.GetRequiredService<MinnanoActorProfileProvider>(),
     serviceProvider.GetRequiredService<WikipediaJpActorProfileProvider>(),
-    serviceProvider.GetRequiredService<ActorProfileService>()));
+    serviceProvider.GetRequiredService<ActorProfileService>(),
+    serviceProvider.GetRequiredService<MovieImageImporter>(),
+    serviceProvider.GetRequiredService<JavBusProvider>()));
+builder.Services.AddSingleton(serviceProvider => new ActorProfileCompleteTaskService(
+    databasePath,
+    serviceProvider.GetRequiredService<ActorProfileProviderService>(),
+    serviceProvider.GetRequiredService<TaskLogService>()));
+builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<ActorProfileCompleteTaskService>());
 builder.Services.AddSingleton<ProviderDiagnosticsService>();
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<ProviderDiagnosticsService>());
 builder.Services.AddSingleton<IMetadataProvider, CompositeMetadataProvider>();
@@ -89,7 +98,8 @@ builder.Services.AddSingleton(serviceProvider => new MetadataSyncExecutor(
     serviceProvider.GetRequiredService<ImageDownloadService>(),
     serviceProvider.GetRequiredService<NfoService>(),
     serviceProvider.GetRequiredService<TaskLogService>(),
-    serviceProvider.GetRequiredService<MovieImageImporter>()));
+    serviceProvider.GetRequiredService<MovieImageImporter>(),
+    serviceProvider.GetRequiredService<MetadataHealthAnalysisService>()));
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<MetadataSyncExecutor>());
 builder.Services.AddSingleton(serviceProvider => new ImageCacheTaskService(
     databasePath,
@@ -121,7 +131,8 @@ builder.Services.AddSingleton(serviceProvider => new TaskCommandService(database
     serviceProvider.GetRequiredService<ImageCacheTaskService>(),
     serviceProvider.GetRequiredService<FileOrganizerService>(),
     serviceProvider.GetRequiredService<ImageGenerationTaskService>(),
-    serviceProvider.GetRequiredService<SafeDeleteWorkflowService>()));
+    serviceProvider.GetRequiredService<SafeDeleteWorkflowService>(),
+    serviceProvider.GetRequiredService<ActorProfileCompleteTaskService>()));
 
 var app = builder.Build();
 app.UseCors();
@@ -162,7 +173,7 @@ app.Use(async (context, next) => {
 app.MapGet("/health", () => Results.Ok(new {
     product = "Local Media Manager",
     abbreviation = "LMM",
-    version = "0.7.0",
+    version = "0.7.1",
     status = "ok",
     databaseAvailable = File.Exists(databasePath),
     databasePath,
@@ -206,6 +217,8 @@ app.MapGet("/api/actors/{actorId:long}/profile-preview", async (long actorId, st
     Results.Ok(await service.PreviewAsync(actorId, source, token)));
 app.MapPost("/api/actors/{actorId:long}/profile-apply", async (long actorId, ActorProfileCandidate candidate, ActorProfileProviderService service, CancellationToken token) =>
     Results.Ok(await service.ApplyAsync(actorId, candidate, token)));
+app.MapPost("/api/actors/profile-complete", async (ActorProfileCompleteCommand command, ActorProfileCompleteTaskService service, CancellationToken token) =>
+    Results.Ok(await service.EnqueueAsync(command, token)));
 app.MapGet("/api/plugins/ffmpeg/status", (FfmpegLocator ffmpeg) =>
     Results.Ok(ffmpeg.Status()));
 app.MapGet("/api/plugins/mdc-ng/status", async (MdcNgProvider provider, MetadataProviderSettingsService settings, CancellationToken token) =>
@@ -268,14 +281,15 @@ app.MapDelete("/api/tasks/{taskId:long}", async (long taskId, TaskCommandService
 app.MapPost("/api/tasks/cleanup", async (TaskCleanupCommand command, TaskCommandService service) => Results.Ok(await service.CleanupAsync(command.Status)));
 app.MapPost("/api/tasks/batch/cancel", async (IReadOnlyList<long> taskIds, TaskCommandService service) => Results.Ok(await service.CancelBatchAsync(taskIds)));
 app.MapPost("/api/tasks/batch/cancel-sync", async (IReadOnlyList<long> taskIds, TaskCommandService service) => Results.Ok(await service.CancelSyncBatchAsync(taskIds)));
-app.MapPost("/api/videos/{movieId:long}/sync", async (long movieId, string? source, MetadataSyncService service, CancellationToken token) => {
-    MetadataSyncResult result = await service.SyncMovieAsync(movieId, source, overwrite: false, token);
-    return Results.Ok(new MetadataSyncLaunchResult(result.ImportTaskId ?? 0, result.Success ? "Completed" : "Failed",
-        result.Success ? "元数据同步完成。" : result.ErrorMessage ?? "元数据同步失败。"));
-});
+app.MapPost("/api/videos/{movieId:long}/sync", async (long movieId, string? source, MetadataSyncExecutor service) =>
+    Results.Ok(await service.EnqueueAsync(movieId, "Manual", overwrite: false, source)));
 app.MapPost("/api/videos/{movieId:long}/rescrape", async (long movieId, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueAsync(movieId, "Rescrape", overwrite: true)));
 app.MapPost("/api/videos/batch/sync", async (IReadOnlyList<long> movieIds, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueBatchAsync(movieIds)));
 app.MapPost("/api/videos/library/sync", async (SyncLibraryCommand command, MetadataSyncExecutor service) => Results.Ok(await service.EnqueueLibraryAsync(command.LibraryId)));
+app.MapPost("/api/videos/filter-sync/preview", async (FilteredMovieSyncCommand command, MetadataSyncExecutor service, CancellationToken token) =>
+    Results.Ok(await service.PreviewFilteredAsync(command, token)));
+app.MapPost("/api/videos/filter-sync", async (FilteredMovieSyncCommand command, MetadataSyncExecutor service, CancellationToken token) =>
+    Results.Ok(await service.EnqueueFilteredAsync(command, token)));
 app.MapPost("/api/delete/preview", async (SafeDeletePreviewCommand command, SafeDeleteWorkflowService service, CancellationToken token) =>
     Results.Ok(await service.PreviewAsync(command, token)));
 app.MapPost("/api/delete/execute", async (SafeDeleteExecuteRequest command, SafeDeleteWorkflowService service, CancellationToken token) =>
@@ -297,6 +311,8 @@ app.MapPost("/api/platform/open-directory", (PlatformPathCommand command, Platfo
     Results.Ok(platform.OpenDirectory(command.Path)));
 app.MapPost("/api/platform/reveal-file", (PlatformPathCommand command, PlatformCommandService platform) =>
     Results.Ok(platform.RevealFile(command.Path)));
+app.MapPost("/api/platform/open-url", (PlatformUrlCommand command, PlatformCommandService platform) =>
+    Results.Ok(platform.OpenUrl(command.Url)));
 
 app.MapGet("/api/entities/{entityType}", async (string entityType, string? search, string? sort, long? libraryId, int? limit, int? offset) => {
     if (!File.Exists(databasePath)) return Results.Problem($"找不到数据库：{databasePath}", statusCode: 503);
@@ -345,6 +361,16 @@ app.MapGet("/api/duplicates", async (string? rule, int? limit) => File.Exists(da
 app.MapGet("/api/maintenance/report", async (int? limit, int? offset) => File.Exists(databasePath)
     ? Results.Ok(await MaintenanceReader.ReadAsync(databasePath, imageRoot, bridgeUrl, Math.Clamp(limit ?? 50, 1, 200), Math.Max(offset ?? 0, 0)))
     : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
+
+app.MapGet("/api/metadata/health", async (MetadataHealthAnalysisService service, CancellationToken token) => File.Exists(databasePath)
+    ? Results.Ok(await service.GetAsync(token))
+    : Results.NotFound());
+app.MapGet("/api/metadata/health/analysis", (MetadataHealthAnalysisService service) => Results.Ok(service.GetState()));
+app.MapPost("/api/metadata/health/analysis", (MetadataHealthAnalysisService service) => Results.Ok(service.Start()));
+app.MapPost("/api/metadata/health/analysis/cancel", (MetadataHealthAnalysisService service) => Results.Ok(service.Cancel()));
+app.MapGet("/api/metadata/health/storage", async (MediaStoragePathResolver resolver, CancellationToken token) =>
+    Results.Ok(await resolver.AvailabilityAsync(token)));
+app.MapGet("/api/platform/path-exists", (string path) => Results.Ok(new { path, exists = File.Exists(path) }));
 
 app.MapGet("/api/library/summary", async () => {
     if (!File.Exists(databasePath))
@@ -454,10 +480,10 @@ app.MapPost("/api/images/cache/cleanup", async (ImageCacheCleanupCommand command
 app.MapPost("/api/images/cache/rebuild", async (ImageCacheTaskService tasks) =>
     Results.Ok(await tasks.EnqueueAsync()));
 
-app.MapGet("/api/videos/{movieId:long}/nfo/export-preview", async (long movieId, NfoService nfo, CancellationToken token) =>
-    Results.Ok(await nfo.PreviewExportAsync(movieId, token)));
-app.MapPost("/api/videos/{movieId:long}/nfo/export", async (long movieId, NfoConfirmCommand command, bool? separateWhenLocked, NfoService nfo, CancellationToken token) =>
-    Results.Ok(await nfo.ExportAsync(movieId, command.ConfirmationToken, separateWhenLocked ?? false, token)));
+app.MapGet("/api/videos/{movieId:long}/nfo/export-preview", async (long movieId, MovieNfoExporter exporter, CancellationToken token) =>
+    Results.Ok(await exporter.PreviewAsync(movieId, token)));
+app.MapPost("/api/videos/{movieId:long}/nfo/export", async (long movieId, NfoConfirmCommand command, bool? separateWhenLocked, MovieNfoExporter exporter, CancellationToken token) =>
+    Results.Ok(await exporter.ExportAsync(movieId, command.ConfirmationToken, separateWhenLocked ?? false, token)));
 app.MapGet("/api/videos/{movieId:long}/nfo/import-preview", async (long movieId, NfoService nfo, CancellationToken token) =>
     Results.Ok(await nfo.PreviewImportAsync(movieId, token)));
 app.MapPost("/api/videos/{movieId:long}/nfo/import", async (long movieId, NfoConfirmCommand command, NfoService nfo, CancellationToken token) =>

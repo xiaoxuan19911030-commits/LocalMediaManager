@@ -8,12 +8,13 @@ import { useNavigate } from 'react-router'
 import { MovieWall } from '@/components/workspace/MovieWall'
 import { StatusBadge } from '@/components/workspace/StatusBadges'
 import { bridge } from '@/services/bridge'
-import type { MediaItem } from '@/types/media'
+import type { AdvancedSearchFilters, MediaItem } from '@/types/media'
 
 export default function CollectionPage({ kind }: { kind: 'favorites' | 'history' }) {
   const favorite = kind === 'favorites'
   const navigate = useNavigate()
   const [notice, setNotice] = useState('')
+  const [syncAllBusy, setSyncAllBusy] = useState(false)
   const [reloadSignal, setReloadSignal] = useState(0)
   const [contextMenu, setContextMenu] = useState<{ mouseX: number; mouseY: number; item: MediaItem }>()
   const [subMenu, setSubMenu] = useState<{ kind: 'image' | 'open'; anchor: HTMLElement }>()
@@ -24,6 +25,18 @@ export default function CollectionPage({ kind }: { kind: 'favorites' | 'history'
   const cropContextImage = () => { const item = contextMenu?.item; closeContextMenu(); if (item) bridge.cropMovieCard(item.dataId, { aspectRatio: 16 / 9, anchor: 'center' }).then((result) => { setNotice(result.message); refresh() }).catch((reason: Error) => setNotice(reason.message)) }
   const generateContextImage = (type: string) => { const item = contextMenu?.item; closeContextMenu(); if (item) bridge.generateMovieImage(item.dataId, type).then((result) => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message)) }
   const openContextLocation = () => { const item = contextMenu?.item; closeContextMenu(); if (item?.path) bridge.revealFile(item.path).then((result) => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message)); else setNotice('没有可定位的影片文件') }
+  const createFilteredSync = async (filters: AdvancedSearchFilters) => {
+    if (syncAllBusy) return
+    setSyncAllBusy(true)
+    try {
+      const preview = await bridge.previewFilteredSync(filters)
+      if (preview.count === 0) { setNotice('当前筛选结果没有匹配影片。'); return }
+      if (!window.confirm(`将同步当前筛选结果，共 ${preview.count} 部影片。`)) return
+      const result = await bridge.createFilteredSync(filters)
+      setNotice(result.message)
+    } catch (reason) { setNotice((reason as Error).message) }
+    finally { setSyncAllBusy(false) }
+  }
 
   return <>
     <MovieWall title={favorite ? '我的收藏' : '最近播放'}
@@ -33,6 +46,7 @@ export default function CollectionPage({ kind }: { kind: 'favorites' | 'history'
       defaultLabel={<Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}><StatusBadge tone={favorite ? 'error' : 'success'} label={favorite ? '收藏' : '已观看'}/></Stack>}
       pageSize={24}
       reloadSignal={reloadSignal}
+      primaryActions={favorite ? (context) => [{ key: 'sync-current', label: syncAllBusy ? '同步中' : '同步当前结果', icon: <SyncRoundedIcon/>, variant: 'outlined', disabled: syncAllBusy, onClick: () => { void createFilteredSync(context.filters) } }] : undefined}
       onContextMenu={openContextMenu}
       emptyTitle={favorite ? '暂无收藏' : '暂无播放历史'}
       emptyDescription="数据存在时会通过 Bridge 显示在这里。"/>

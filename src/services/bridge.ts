@@ -1,9 +1,12 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActorDetail, ActorProfileCandidate, ActorProfilePreview, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateDeleteGroupCommand, DuplicateDeletePreview, DuplicateResults, EntityPageResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageCropCommand, ImageDeletePreview, ImageMutationResult, ImageTaskLaunchResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, PlatformOpenResult, RandomMovieResult, SafeDeleteLaunchResult, SafeDeletePreview, SafeDeletePreviewCommand, ScanLaunchResult, TaskCleanupResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
+import type { ActorDetail, ActorProfileCandidate, ActorProfileCompleteLaunchResult, ActorProfilePreview, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateDeleteGroupCommand, DuplicateDeletePreview, DuplicateResults, EntityPageResult, FilteredMovieSyncPreview, FilteredMovieSyncResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageCropCommand, ImageDeletePreview, ImageMutationResult, ImageTaskLaunchResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, PlatformOpenResult, RandomMovieResult, SafeDeleteLaunchResult, SafeDeletePreview, SafeDeletePreviewCommand, ScanLaunchResult, TaskCleanupResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
 import type { JavBusSettings } from '@/types/settings'
+import type { MediaStorageAvailability, MetadataHealthAnalysisState, MetadataHealthSummary } from '@/types/media'
 import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, FfmpegToolStatus, LogCleanupPreview, LogCleanupResult, MdcNgSettings, MdcNgToolStatus, MetaTubeSettings, ProviderConnectionResult, ProviderDiagnosticResult, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings, UnifiedSettingsSaveResult, UpdateCheckResult } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
+
+const bridgeRequestTimeoutMs = 15_000
 
 let tokenPromise: Promise<string> | undefined
 const sessionToken = (refresh = false) => {
@@ -23,7 +26,7 @@ function parseBridgeError(body: string, status: number) {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit, retrySession = true): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, retrySession = true, timeoutMs = bridgeRequestTimeoutMs): Promise<T> {
   const headers = new Headers(init?.headers)
   const method = (init?.method ?? 'GET').toUpperCase()
   if (method !== 'GET') {
@@ -31,21 +34,32 @@ async function request<T>(path: string, init?: RequestInit, retrySession = true)
     if (token) headers.set('X-LMM-Session', token)
   }
   if (init?.body) headers.set('Content-Type', 'application/json')
-  const response = await fetch(`${BRIDGE_ORIGIN}${path}`, { ...init, headers })
-  if (!response.ok) {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(`${BRIDGE_ORIGIN}${path}`, { ...init, headers, signal: controller.signal })
+    if (!response.ok) {
     const body = await response.text()
     const error = parseBridgeError(body, response.status)
     if (response.status === 401 && retrySession && method !== 'GET' && error.code === 'INVALID_SESSION') {
       console.warn('[bridge] Session token was rejected; refreshing once and retrying.', { path, method, status: response.status })
       await sessionToken(true)
-      return request<T>(path, init, false)
+      return request<T>(path, init, false, timeoutMs)
     }
     if (response.status === 401 && error.code === 'INVALID_SESSION') {
       throw new Error('本地服务会话已失效，设置没有保存。请关闭残留的 Local Media Manager 进程后重新打开。')
     }
     throw new Error(error.message)
+    }
+    return response.json() as Promise<T>
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('Local Bridge request timed out. Restart Local Media Manager and try again.')
+    }
+    throw error
+  } finally {
+    window.clearTimeout(timeout)
   }
-  return response.json() as Promise<T>
 }
 
 function searchParams(filters: AdvancedSearchFilters, includePaging = true) {
@@ -60,6 +74,12 @@ function searchParams(filters: AdvancedSearchFilters, includePaging = true) {
 
 export const bridge = {
   health: () => request<BridgeHealth>('/health'),
+  metadataHealth: () => request<MetadataHealthSummary>('/api/metadata/health'),
+  metadataHealthAnalysis: () => request<MetadataHealthAnalysisState>('/api/metadata/health/analysis'),
+  startMetadataHealthAnalysis: () => request<MetadataHealthAnalysisState>('/api/metadata/health/analysis', { method: 'POST' }),
+  cancelMetadataHealthAnalysis: () => request<MetadataHealthAnalysisState>('/api/metadata/health/analysis/cancel', { method: 'POST' }),
+  metadataHealthStorage: () => request<MediaStorageAvailability>('/api/metadata/health/storage'),
+  pathExists: (path: string) => request<{ path: string; exists: boolean }>(`/api/platform/path-exists?${new URLSearchParams({ path })}`),
   summary: () => request<LibrarySummary>('/api/library/summary'),
   dashboard: () => request<DashboardSummary>('/api/dashboard'),
   videos: (limit = 24, offset = 0, search = '', sort = 'newest') => {
@@ -80,10 +100,10 @@ export const bridge = {
   logCleanupPreview: (retentionDays: number, includeAllHistory = false) => request<LogCleanupPreview>(`/api/system/logs/cleanup-preview?${new URLSearchParams({ retentionDays: String(retentionDays), includeAllHistory: String(includeAllHistory) })}`),
   cleanupLogs: (retentionDays: number, includeAllHistory: boolean, confirmationToken: string) => request<LogCleanupResult>('/api/system/logs/cleanup', { method: 'POST', body: JSON.stringify({ retentionDays, includeAllHistory, confirmationToken }) }),
   checkUpdates: () => request<UpdateCheckResult>('/api/system/update/check', { method: 'POST' }),
-  testMdcNg: (value: MdcNgSettings) => request<ProviderConnectionResult>('/api/settings/providers/mdc-ng/test', { method: 'POST', body: JSON.stringify(value) }),
-  testMetaTube: (value: MetaTubeSettings) => request<ProviderConnectionResult>('/api/settings/providers/metatube/test', { method: 'POST', body: JSON.stringify(value) }),
-  testJavBus: (value: JavBusSettings) => request<ProviderConnectionResult>('/api/settings/providers/javbus/test', { method: 'POST', body: JSON.stringify(value) }),
-  providerDiagnostics: () => request<ProviderDiagnosticResult[]>('/api/settings/providers/diagnostics', { method: 'POST' }),
+  testMdcNg: (value: MdcNgSettings) => request<ProviderConnectionResult>('/api/settings/providers/mdc-ng/test', { method: 'POST', body: JSON.stringify(value) }, true, 60_000),
+  testMetaTube: (value: MetaTubeSettings) => request<ProviderConnectionResult>('/api/settings/providers/metatube/test', { method: 'POST', body: JSON.stringify(value) }, true, 60_000),
+  testJavBus: (value: JavBusSettings) => request<ProviderConnectionResult>('/api/settings/providers/javbus/test', { method: 'POST', body: JSON.stringify(value) }, true, 60_000),
+  providerDiagnostics: () => request<ProviderDiagnosticResult[]>('/api/settings/providers/diagnostics', { method: 'POST' }, true, 60_000),
   ffmpegStatus: () => request<FfmpegToolStatus>('/api/plugins/ffmpeg/status'),
   mdcNgStatus: () => request<MdcNgToolStatus>('/api/plugins/mdc-ng/status'),
   movie: (id: number) => request<MovieDetail>(`/api/videos/${id}`),
@@ -113,6 +133,8 @@ export const bridge = {
     request<SafeDeleteLaunchResult>('/api/organizer/duplicates/execute-delete', { method: 'POST', body: JSON.stringify({ groups, mode, deleteDatabaseInfo, confirmationToken, confirmOriginalMedia }) }),
   syncMovie: (id: number, source?: 'MetaTube' | 'JavBus') => request<ScanLaunchResult>(`/api/videos/${id}/sync${source ? `?${new URLSearchParams({ source })}` : ''}`, { method: 'POST' }),
   rescrapeMovie: (id: number) => request<ScanLaunchResult>(`/api/videos/${id}/rescrape`, { method: 'POST' }),
+  previewHealthRepair: (metadataStatus: string, targetFields: string[]) => request<FilteredMovieSyncPreview>('/api/videos/filter-sync/preview', { method: 'POST', body: JSON.stringify({ metadataStatus, targetFields }) }),
+  launchHealthRepair: (metadataStatus: string, targetFields: string[]) => request<FilteredMovieSyncResult>('/api/videos/filter-sync', { method: 'POST', body: JSON.stringify({ metadataStatus, targetFields }) }),
   neighbors: (id: number, search = '', sort = 'newest') => request<NeighborResult>(`/api/videos/${id}/neighbors?${new URLSearchParams({ search, sort })}`),
   search: (query: string, limit = 12) => request<GlobalSearchResult>(`/api/search?${new URLSearchParams({ q: query, limit: String(limit) })}`),
   libraries: () => request<MediaLibrary[]>('/api/libraries'),
@@ -133,6 +155,7 @@ export const bridge = {
   cleanupTasks: (status: 'completed' | 'failed' | 'cancelled' | 'terminal' | 'all-tasks') => request<TaskCleanupResult>('/api/tasks/cleanup', { method: 'POST', body: JSON.stringify({ status }) }),
   openDirectory: (path: string) => request<PlatformOpenResult>('/api/platform/open-directory', { method: 'POST', body: JSON.stringify({ path }) }),
   revealFile: (path: string) => request<PlatformOpenResult>('/api/platform/reveal-file', { method: 'POST', body: JSON.stringify({ path }) }),
+  openUrl: (url: string) => request<PlatformOpenResult>('/api/platform/open-url', { method: 'POST', body: JSON.stringify({ url }) }),
   entities: (type: 'actors' | 'directors' | 'series' | 'studios' | 'genres' | 'tags' | 'custom-tags' | 'movie-tags', search = '', sort = 'count', limit = 48, offset = 0, libraryId?: number) => {
     const query = new URLSearchParams({ search, sort, limit: String(limit), offset: String(offset) })
     if (libraryId) query.set('libraryId', String(libraryId))
@@ -141,6 +164,7 @@ export const bridge = {
   actor: (id: number) => request<ActorDetail>(`/api/actors/${id}`),
   actorProfilePreview: (id: number, source?: 'Minnano' | 'Wikipedia JP') => request<ActorProfilePreview>(`/api/actors/${id}/profile-preview${source ? `?${new URLSearchParams({ source })}` : ''}`),
   applyActorProfile: (id: number, candidate: ActorProfileCandidate) => request<{ actorId: number; updatedFields: string[]; conflicts: string[] }>(`/api/actors/${id}/profile-apply`, { method: 'POST', body: JSON.stringify(candidate) }),
+  completeActorProfiles: (allActors = false, search = '', limit = 24) => request<ActorProfileCompleteLaunchResult>('/api/actors/profile-complete', { method: 'POST', body: JSON.stringify({ search, limit, allActors }) }),
   entityMovies: (type: 'actors' | 'directors' | 'series' | 'studios' | 'genres' | 'tags' | 'custom-tags' | 'movie-tags', id: number, limit = 48, offset = 0) => request<MediaPageResult>(`/api/entities/${type}/${id}/movies?${new URLSearchParams({ limit: String(limit), offset: String(offset) })}`),
   collection: (kind: 'favorites' | 'history', limit = 48, offset = 0) => request<MediaPageResult>(`/api/collections/${kind}?${new URLSearchParams({ limit: String(limit), offset: String(offset) })}`),
   advancedSearch: (filters: AdvancedSearchFilters) => {
@@ -161,6 +185,8 @@ export const bridge = {
   setBatchRating: (movieIds: number[], rating?: number, clearRating = false) => request<MutationResult>('/api/videos/batch/rating', { method: 'POST', body: JSON.stringify({ movieIds, rating: rating ?? null, clearRating }) }),
   createBatchSync: (movieIds: number[]) => request<{ count: number; message: string }>('/api/videos/batch/sync', { method: 'POST', body: JSON.stringify(movieIds) }),
   createLibrarySync: (libraryId?: number) => request<{ count: number; message: string }>('/api/videos/library/sync', { method: 'POST', body: JSON.stringify({ libraryId: libraryId ?? null }) }),
+  previewFilteredSync: (filters: AdvancedSearchFilters) => request<FilteredMovieSyncPreview>('/api/videos/filter-sync/preview', { method: 'POST', body: JSON.stringify(filters) }),
+  createFilteredSync: (filters: AdvancedSearchFilters) => request<FilteredMovieSyncResult>('/api/videos/filter-sync', { method: 'POST', body: JSON.stringify(filters) }),
   previewSafeDelete: (value: SafeDeletePreviewCommand) => request<SafeDeletePreview>('/api/delete/preview', { method: 'POST', body: JSON.stringify(value) }),
   executeSafeDelete: (preview: SafeDeletePreviewCommand, confirmationToken: string, confirmOriginalMedia = false) =>
     request<SafeDeleteLaunchResult>('/api/delete/execute', { method: 'POST', body: JSON.stringify({ ...preview, confirmationToken, confirmOriginalMedia }) }),

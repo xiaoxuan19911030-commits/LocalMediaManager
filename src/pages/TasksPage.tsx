@@ -27,6 +27,7 @@ const taskNames: Record<string, string> = {
   Crop: '裁切任务',
   AI: 'AI 任务',
   ActorRepair: '演员修复',
+  ActorProfileComplete: '演员资料补全',
   ImageCacheRebuild: '图片缓存重建',
   Organizer: '批量整理',
   Rename: '重命名',
@@ -47,6 +48,7 @@ const sourceNames: Record<string, string> = {
   DeleteMetadata: 'Safe Delete',
   DeleteMedia: 'Safe Delete',
   ImageCacheRebuild: '图片缓存',
+  ActorProfileComplete: '演员资料',
 }
 
 const statusOptions = [
@@ -67,6 +69,7 @@ const terminalStates = ['Completed', 'CompletedWithErrors', 'Failed', 'Cancelled
 const preferredTypeOptions: TaskTypeOption[] = [
   { value: 'all', label: '全部类型', types: [] },
   { value: 'Sync', label: '同步信息', types: ['Sync'] },
+  { value: 'ActorProfileComplete', label: '演员资料补全', types: ['ActorProfileComplete'] },
   { value: 'Scan', label: '扫描影片', types: ['Scan'] },
   { value: 'Screenshot', label: '生成截图', types: ['Screenshot'] },
   { value: 'GIF', label: '生成 GIF', types: ['GIF'] },
@@ -111,6 +114,19 @@ export default function TasksPage() {
   const active = tasks?.filter(item => activeStates.includes(item.status)).length ?? 0
   const completed = tasks?.filter(item => item.status === 'Completed').length ?? 0
   const failed = tasks?.filter(item => item.status === 'Failed').length ?? 0
+
+  useEffect(() => {
+    if (active === 0 && !logs) return
+    const timer = window.setInterval(() => {
+      void load()
+      if (logs) {
+        bridge.taskLogs(logs.task.id)
+          .then(items => setLogs(current => current && current.task.id === logs.task.id ? { ...current, items } : current))
+          .catch(() => undefined)
+      }
+    }, 2000)
+    return () => window.clearInterval(timer)
+  }, [active, load, logs])
 
   useEffect(() => {
     if (!typeOptions.some(item => item.value === typeFilter)) setTypeFilter('all')
@@ -183,7 +199,11 @@ export default function TasksPage() {
   }
   const openLogs = async (task: TaskItem) => {
     setLogs({ task }); setError('')
-    try { setLogs({ task, items: await bridge.taskLogs(task.id) }) }
+    try {
+      const items = await bridge.taskLogs(task.id)
+      setLogs({ task, items })
+      await load()
+    }
     catch (reason) { setError((reason as Error).message); setLogs(undefined) }
   }
 
@@ -225,6 +245,8 @@ export default function TasksPage() {
 function TaskCard({ task, busy, onMutate, onCancel, onDelete, onLogs }: { task: TaskItem; busy?: number; onMutate: (task: TaskItem, action: 'pause' | 'resume' | 'retry') => void; onCancel: () => void; onDelete: () => void; onLogs: () => void }) {
   const complete = task.status === 'Completed' || task.status === 'CompletedWithErrors'
   const failedTask = task.status === 'Failed'
+  const progress = complete ? 100 : Math.max(0, Math.min(100, task.progress))
+  const completedItems = complete ? Math.max(task.completedItems, task.totalItems) : task.completedItems
   const Icon = complete ? CheckCircleRoundedIcon : failedTask ? ErrorRoundedIcon : HourglassTopRoundedIcon
   const canPause = ['Scan', 'Sync', 'Screenshot', 'GIF', 'Organizer', 'DeleteMetadata', 'DeleteMedia'].includes(task.type) && activeStates.includes(task.status) && task.status !== 'Paused'
   const canResume = ['Scan', 'Sync', 'Screenshot', 'GIF', 'Organizer', 'DeleteMetadata', 'DeleteMedia'].includes(task.type) && task.status === 'Paused'
@@ -235,7 +257,7 @@ function TaskCard({ task, busy, onMutate, onCancel, onDelete, onLogs }: { task: 
     <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}><Icon color={complete ? 'success' : failedTask ? 'error' : 'primary'}/><Typography sx={{ fontWeight: 750 }}>{labelForType(task.type)}</Typography></Box>
     <TaskStatusBadge status={task.status}/>
     <Box sx={{ minWidth: 0 }}><Typography noWrap title={task.name}>{task.name}</Typography><Typography variant="caption" color="text.secondary">{task.provider || sourceNames[task.type] || '本地任务'}{task.retryCount ? ` · 重试 ${task.retryCount}` : ''}</Typography></Box>
-    <Box><LinearProgress variant="determinate" value={Math.max(0, Math.min(100, task.progress))}/><Typography variant="caption" color="text.secondary">{task.completedItems}/{task.totalItems} · {task.progress.toFixed(0)}%</Typography></Box>
+    <Box><LinearProgress variant="determinate" value={progress}/><Typography variant="caption" color="text.secondary">{completedItems}/{task.totalItems} · {progress.toFixed(0)}%</Typography></Box>
     <Typography variant="body2" color="text.secondary">{formatDate(task.createdAt)}</Typography>
     <Stack direction="row" spacing={0.25}>
       {canPause && <Tooltip title="暂停"><span><IconButton size="small" aria-label="暂停任务" disabled={busy === task.id} onClick={() => onMutate(task, 'pause')}><PauseRoundedIcon/></IconButton></span></Tooltip>}

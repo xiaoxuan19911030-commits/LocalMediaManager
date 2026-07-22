@@ -52,7 +52,7 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
         IReadOnlyList<SavedImage> second = await service.DownloadAsync(Resolver(), new(1, "TEST-001", "Test Title"), [new("Poster", "https://img.example/poster")], 10, false, CancellationToken.None);
 
         Assert.Single(first); Assert.True(first[0].Created); Assert.Equal(48, first[0].Width); Assert.Equal(72, first[0].Height);
-        Assert.EndsWith(Path.Combine("MediaStorage", "Posters", "TEST-001", "TEST-001.png"), first[0].Path, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(Path.Combine("MediaStorage", "Posters", "TEST-001.png"), first[0].Path, StringComparison.OrdinalIgnoreCase);
         Assert.Single(second); Assert.False(second[0].Created);
         string mediaRoot = Path.Combine(root, "MediaStorage");
         Assert.Empty(Directory.Exists(Path.Combine(mediaRoot, ".lmm-temp"))

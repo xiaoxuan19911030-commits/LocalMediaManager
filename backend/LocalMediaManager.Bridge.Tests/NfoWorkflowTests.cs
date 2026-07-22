@@ -1,5 +1,6 @@
 using LocalMediaManager.Bridge;
 using Microsoft.Data.Sqlite;
+using System.Xml.Linq;
 using Xunit;
 
 namespace LocalMediaManager.Bridge.Tests;
@@ -18,7 +19,7 @@ public sealed class NfoWorkflowTests : IAsyncLifetime
         Directory.CreateDirectory(InstallRoot);
         await using var connection = new SqliteConnection($"Data Source={Database}");
         await connection.OpenAsync();
-        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0012_MediaStorageSettings.sql" }) {
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0012_MediaStorageSettings.sql", "0013_DirectorMetadata.sql" }) {
             await using var command = connection.CreateCommand();
             command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
             await command.ExecuteNonQueryAsync();
@@ -38,12 +39,13 @@ public sealed class NfoWorkflowTests : IAsyncLifetime
     [Fact]
     public async Task ExportAndParseRoundTripPreservesUnicodeRelationshipsAndEscaping()
     {
-        var service = Service();
-        NfoPreview preview = await service.PreviewExportAsync(1);
-        NfoMutationResult result = await service.ExportAsync(1, preview.ConfirmationToken);
+        var exporter = new MovieNfoExporter(Service());
+        NfoPreview preview = await exporter.PreviewAsync(1);
+        NfoMutationResult result = await exporter.ExportAsync(1, preview.ConfirmationToken, false);
         NfoData parsed = await NfoService.ParseAsync(result.Path);
 
         Assert.True(result.Changed); Assert.Equal("LMM", result.Ownership); Assert.False(result.Locked);
+        Assert.Equal(Path.ChangeExtension(Video, ".nfo"), result.Path);
         Assert.Equal("标题 & <测试>", parsed.Title); Assert.Equal("Original \"Title\"", parsed.OriginalTitle);
         Assert.Equal("Unicode 简介：日本語", parsed.Plot); Assert.Equal(4.25, parsed.Rating);
         Assert.Contains("演员 A", parsed.Actors); Assert.Contains("自定义标签", parsed.Tags);
@@ -55,7 +57,37 @@ public sealed class NfoWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ExistingUserNfoIsPreservedWhenExportWritesMediaStorageNfo()
+    public async Task SQLiteExporterUsesSavedLocalImagePaths()
+    {
+        string imageDirectory = Path.Combine(root, "images");
+        Directory.CreateDirectory(imageDirectory);
+        string poster = Path.Combine(imageDirectory, "poster.jpg");
+        string fanart = Path.Combine(imageDirectory, "fanart.jpg");
+        string actor = Path.Combine(imageDirectory, "actor.jpg");
+        await File.WriteAllBytesAsync(poster, [1]);
+        await File.WriteAllBytesAsync(fanart, [2]);
+        await File.WriteAllBytesAsync(actor, [3]);
+        await using (SqliteConnection connection = await Open()) {
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, "INSERT INTO Images(MovieId,ImageType,FilePath,SourceUrl,IsPrimary,CreatedAt,UpdatedAt,Ownership,ValidationStatus) VALUES(1,'Poster',$path,'https://example.invalid/poster.jpg',1,$at,$at,'Provider','Valid')", ("$path", poster), ("$at", at));
+            await Execute(connection, "INSERT INTO Images(MovieId,ImageType,FilePath,SourceUrl,IsPrimary,CreatedAt,UpdatedAt,Ownership,ValidationStatus) VALUES(1,'Fanart',$path,'https://example.invalid/fanart.jpg',1,$at,$at,'Provider','Valid')", ("$path", fanart), ("$at", at));
+            await Execute(connection, "INSERT INTO Images(ActorId,ImageType,FilePath,SourceUrl,IsPrimary,CreatedAt,UpdatedAt,Ownership,ValidationStatus) VALUES(1,'ActorAvatar',$path,'https://example.invalid/actor.jpg',1,$at,$at,'Provider','Valid')", ("$path", actor), ("$at", at));
+        }
+        var exporter = new MovieNfoExporter(Service());
+        NfoPreview preview = await exporter.PreviewAsync(1);
+        NfoMutationResult result = await exporter.ExportAsync(1, preview.ConfirmationToken, false);
+        string xml = await File.ReadAllTextAsync(result.Path);
+
+        Assert.DoesNotContain("https://example.invalid", xml);
+        Assert.Contains(poster, xml);
+        Assert.Contains(fanart, xml);
+        Assert.Contains(actor, xml);
+        XDocument document = XDocument.Parse(xml);
+        Assert.Equal(actor, document.Root!.Element("actor")!.Element("thumb")!.Value);
+    }
+
+    [Fact]
+    public async Task ExistingUserNfoIsPreservedWhenExportTargetsMovieDirectory()
     {
         string path = Path.ChangeExtension(Video, ".nfo");
         const string original = "<?xml version=\"1.0\" encoding=\"utf-8\"?><movie><title>User title</title><id>SPECIAL-001</id></movie>";
@@ -65,9 +97,8 @@ public sealed class NfoWorkflowTests : IAsyncLifetime
         NfoPreview preview = await service.PreviewExportAsync(1);
         NfoMutationResult exported = await service.ExportAsync(1, preview.ConfirmationToken);
 
-        Assert.True(exported.Changed);
-        Assert.Contains(Path.Combine("MediaStorage", "NFO", "SPECIAL-001", "SPECIAL-001.nfo"), exported.Path, StringComparison.OrdinalIgnoreCase);
-        Assert.True(File.Exists(exported.Path));
+        Assert.False(exported.Changed);
+        Assert.Equal(path, exported.Path);
         Assert.Equal(original, await File.ReadAllTextAsync(path));
     }
 

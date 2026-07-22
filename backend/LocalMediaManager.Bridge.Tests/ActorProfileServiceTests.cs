@@ -62,6 +62,23 @@ public sealed class ActorProfileServiceTests : IAsyncLifetime
             new("Minnano", "Test Actor", "https://example.test", 0.99, new(HeightCm: 160)), CancellationToken.None));
     }
 
+    [Fact]
+    public async Task ActorProfileCompletionCanSelectAllMissingActorsBeyondDefaultBatch()
+    {
+        await using (var connection = await Open()) {
+            for (int id = 8; id <= 37; id++)
+                await Execute(connection, "INSERT INTO Actors(Id,Name,NormalizedName,LegacySource,CreatedAt,UpdatedAt) VALUES($id,$name,$name,'Test',$at,$at)",
+                    ("$id", id), ("$name", $"Actor {id:D2}"), ("$at", DateTimeOffset.UtcNow.ToString("O")));
+        }
+        var service = new ActorProfileProviderService(Database, null!, null!, null!, new ActorProfileService(Database));
+
+        ActorProfileCompleteResult batch = await service.CompleteMissingAsync(new(), CancellationToken.None);
+        ActorProfileCompleteResult all = await service.CompleteMissingAsync(new(AllActors: true), CancellationToken.None);
+
+        Assert.Equal(24, batch.Checked);
+        Assert.Equal(31, all.Checked);
+    }
+
     public Task DisposeAsync() { SqliteConnection.ClearAllPools(); if (Directory.Exists(root)) Directory.Delete(root, true); return Task.CompletedTask; }
     private async Task<SqliteConnection> Open() { var connection = new SqliteConnection($"Data Source={Database}"); await connection.OpenAsync(); return connection; }
     private static async Task Execute(SqliteConnection connection, string sql, params (string, object)[] args) { await using var command=connection.CreateCommand();command.CommandText=sql;foreach(var (name,value) in args)command.Parameters.AddWithValue(name,value);await command.ExecuteNonQueryAsync(); }

@@ -29,8 +29,9 @@ export interface MetaTubeSettings {
 }
 export interface MdcNgSettings {
   enabled: boolean; serviceUrl: string; apiUrl: string; timeoutSeconds: number
-  apiKey: string; downloadImages: boolean
+  apiKey: string; downloadImages: boolean; pathMappings?: MdcNgPathMapping[]
 }
+export interface MdcNgPathMapping { localPathPrefix: string; providerPathPrefix: string; enabled: boolean; order: number }
 export interface JavBusSettings {
   enabled: boolean; priority: number; baseUrl: string; timeoutSeconds: number; retryCount: number
   cookie: string; downloadImages: boolean; fillMissingOnly: boolean; mirrorUrls?: string[]

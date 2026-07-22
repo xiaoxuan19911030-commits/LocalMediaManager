@@ -26,6 +26,7 @@ export function MediaCardGrid({ children, display = defaultMovieWallDisplay }: {
 
 export function MediaCard({ item, display = defaultMovieWallDisplay, onPlay, onOpen, selected, onSelect, onRatingClick, onContextMenu }: { item: MediaItem; display?: MovieWallDisplaySettings; onPlay: (item: MediaItem) => void; onOpen?: (item: MediaItem) => void; selected?: boolean; onSelect?: (item: MediaItem, selected: boolean) => void; onRatingClick?: (item: MediaItem, value: number | null) => void; onContextMenu?: (event: MouseEvent, item: MediaItem) => void }) {
   const [coverFailed, setCoverFailed] = useState(false)
+  if (import.meta.env.DEV) console.debug('[MediaCard] Render Start', { id: item.dataId, code: item.code })
   const clickTimer = useRef<number | undefined>(undefined)
   useEffect(() => setCoverFailed(false), [item.coverUrl])
   useEffect(() => () => { if (clickTimer.current) window.clearTimeout(clickTimer.current) }, [])
@@ -75,14 +76,14 @@ export function MediaCard({ item, display = defaultMovieWallDisplay, onPlay, onO
           </Box>
         </Tooltip>}
       </Box>
-      <CardContent sx={{ p: 1.4, '&:last-child': { pb: 1.4 } }}>
-        <Tooltip title={primaryText} placement="top"><Typography sx={{ fontWeight: 800, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', minHeight: '2.8em' }}>{primaryText}</Typography></Tooltip>
-        {displayTitle && displayTitle !== item.code && <Typography variant="caption" color="text.secondary" sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', mt: .25 }}>{displayTitle}</Typography>}
-        <Typography variant="body2" color="text.secondary" noWrap sx={{ mt: 0.7 }}>
+      <CardContent sx={{ p: 1.1, '&:last-child': { pb: 1.1 } }}>
+        <Typography noWrap align="center" sx={{ fontWeight: 800 }}>{item.code || `#${item.dataId}`}</Typography>
+        <Tooltip title={displayTitle || primaryText} placement="top"><Typography variant="caption" color="text.secondary" noWrap align="center" sx={{ display: 'block', mt: .15 }}>{displayTitle || primaryText}</Typography></Tooltip>
+        <Typography variant="body2" color="text.secondary" noWrap align="center" sx={{ mt: .6 }}>
           {item.importedAt?.slice(0, 10) || '日期未知'}
         </Typography>
-        <Box onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} sx={{ display: 'inline-flex' }}>
-          <Rating size="small" value={Math.max(0, Math.min(5, item.grade))} onChange={(_, value) => onRatingClick?.(item, value)} sx={{ mt: 0.55, display: 'flex' }} />
+        <Box onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} sx={{ display: 'flex', justifyContent: 'center' }}>
+          <Rating size="small" value={Math.max(0, Math.min(5, item.grade))} onChange={(_, value) => onRatingClick?.(item, value)} sx={{ mt: .5, display: 'flex' }} />
         </Box>
       </CardContent>
     </Card>

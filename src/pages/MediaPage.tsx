@@ -7,7 +7,8 @@ import { SafeDeleteDialog } from '@/components/SafeDeleteDialog'
 import { MovieWall, type MovieWallDefaults } from '@/components/workspace/MovieWall'
 import { StatusBadge } from '@/components/workspace/StatusBadges'
 import { bridge } from '@/services/bridge'
-import type { MediaItem, SafeDeletePreview, SafeDeletePreviewCommand } from '@/types/media'
+import { isMetadataHealthFilter, metadataHealthFilters } from '@/features/metadataHealth'
+import type { AdvancedSearchFilters, MediaItem, SafeDeletePreview, SafeDeletePreviewCommand } from '@/types/media'
 
 const numericParam = (params: URLSearchParams, name: string) => {
   const value = Number(params.get(name) || 0)
@@ -25,6 +26,8 @@ export default function MediaPage() {
     const seriesId = numericParam(params, 'seriesId')
     const studioId = numericParam(params, 'studioId')
     const libraryId = numericParam(params, 'libraryId')
+    const health = params.get('health')
+    const healthFilter = isMetadataHealthFilter(health) ? health : undefined
     const label = actorId ? `演员：${params.get('actorName') || actorId}` :
       directorId ? `导演：${params.get('directorName') || directorId}` :
       movieTagId ? `影片标签：${params.get('movieTagName') || movieTagId}` :
@@ -33,7 +36,7 @@ export default function MediaPage() {
       seriesId ? `系列：${params.get('seriesName') || seriesId}` :
       studioId ? `厂商：${params.get('studioName') || studioId}` :
       libraryId ? `媒体库：${params.get('libraryName') || libraryId}` : ''
-    return { defaults: { actorId, directorId, movieTagId, customTagId, genreId, seriesId, studioId, libraryId } satisfies MovieWallDefaults, label }
+    return { defaults: { actorId, directorId, movieTagId, customTagId, genreId, seriesId, studioId, libraryId, metadataStatus: healthFilter === 'missing-media' ? undefined : healthFilter, fileStatus: healthFilter === 'missing-media' ? 'missing' : undefined } satisfies MovieWallDefaults, label: healthFilter ? metadataHealthFilters[healthFilter] : label }
   }, [params])
   const [notice, setNotice] = useState('')
   const [selected, setSelected] = useState<number[]>([])
@@ -91,12 +94,15 @@ export default function MediaPage() {
   const createBatchSync = () => selected.length && bridge.createBatchSync(selected)
     .then((result) => { setNotice(result.message); setSelected([]) })
     .catch((reason: Error) => setNotice(reason.message))
-  const createLibrarySync = async () => {
+  const createFilteredSync = async (filters: AdvancedSearchFilters) => {
     if (syncAllBusy) return
     setSyncAllBusy(true)
     try {
-      const result = await bridge.createLibrarySync(category.defaults.libraryId)
-      setNotice(`已为库内 ${result.count} 部影片创建刮削任务，可在任务中心查看进度。`)
+      const preview = await bridge.previewFilteredSync(filters)
+      if (preview.count === 0) { setNotice('当前筛选结果没有匹配影片。'); return }
+      if (!window.confirm(`将同步当前筛选结果，共 ${preview.count} 部影片。`)) return
+      const result = await bridge.createFilteredSync(filters)
+      setNotice(result.message)
     } catch (reason) {
       setNotice((reason as Error).message)
     } finally {
@@ -146,7 +152,7 @@ export default function MediaPage() {
         const allSelected = pageIds.length > 0 && pageIds.every((id) => selected.includes(id))
         return !editMode
           ? [
-            { key: 'sync-all', label: syncAllBusy ? '同步中' : '同步所有影片', icon: <SyncRoundedIcon/>, variant: 'outlined', disabled: syncAllBusy, onClick: () => { void createLibrarySync() } },
+            { key: 'sync-all', label: syncAllBusy ? '同步中' : '同步当前结果', icon: <SyncRoundedIcon/>, variant: 'outlined', disabled: syncAllBusy, onClick: () => { void createFilteredSync(context.filters) } },
             { key: 'edit', label: '编辑', icon: <EditRoundedIcon/>, variant: 'outlined', onClick: enterEditMode },
           ]
           : [

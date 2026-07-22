@@ -95,7 +95,7 @@ public sealed class LogMaintenanceService(string? logRoot = null)
 
 public sealed class UpdateCheckService(HttpClient http, string databasePath)
 {
-    private const string CurrentVersion = "0.7.0";
+    private const string CurrentVersion = "0.7.1";
     private const string LatestReleaseUrl = "https://api.github.com/repos/xiaoxuan19911030-commits/LocalMediaManager/releases/latest";
     private const string ReleasesPage = "https://github.com/xiaoxuan19911030-commits/LocalMediaManager/releases";
 
@@ -105,7 +105,7 @@ public sealed class UpdateCheckService(HttpClient http, string databasePath)
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, LatestReleaseUrl);
-            request.Headers.UserAgent.ParseAdd("LocalMediaManager/0.7.0");
+            request.Headers.UserAgent.ParseAdd("LocalMediaManager/0.7.1");
             using HttpResponseMessage response = await http.SendAsync(request, token);
             if (!response.IsSuccessStatusCode)
                 return await SaveResultAsync(new(CurrentVersion, "network-error", $"无法连接更新服务：HTTP {(int)response.StatusCode}", null, ReleasesPage, null, checkedAt), token);

@@ -34,6 +34,18 @@ public sealed class PlatformCommandService
         return new(fullPath, "已定位文件。");
     }
 
+    public PlatformOpenResult OpenUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) || uri.Scheme is not ("http" or "https"))
+            throw new ArgumentException("网址无效。");
+
+        Process.Start(new ProcessStartInfo {
+            FileName = uri.ToString(),
+            UseShellExecute = true,
+        });
+        return new(uri.ToString(), "已用浏览器打开。");
+    }
+
     private static string ResolveDirectory(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -47,4 +59,5 @@ public sealed class PlatformCommandService
 }
 
 public sealed record PlatformPathCommand(string Path);
+public sealed record PlatformUrlCommand(string Url);
 public sealed record PlatformOpenResult(string Path, string Message);

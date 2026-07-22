@@ -2,6 +2,7 @@ import FavoriteRoundedIcon from '@mui/icons-material/FavoriteRounded'
 import FolderRoundedIcon from '@mui/icons-material/FolderRounded'
 import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded'
 import HomeRoundedIcon from '@mui/icons-material/HomeRounded'
+import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded'
 import LocalOfferRoundedIcon from '@mui/icons-material/LocalOfferRounded'
 import MovieRoundedIcon from '@mui/icons-material/MovieRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
@@ -21,7 +22,7 @@ import { bridge } from '@/services/bridge'
 import type { BridgeHealth, TaskItem } from '@/types/media'
 
 type NavItem = readonly [string,string,ReactNode]
-const primary:NavItem[]=[['首页','/',<HomeRoundedIcon/>],['影片墙','/media',<MovieRoundedIcon/>],['媒体库','/libraries',<FolderRoundedIcon/>],['标签','/tags',<LocalOfferRoundedIcon/>],['收藏','/favorites',<FavoriteRoundedIcon/>],['最近播放','/history',<HistoryRoundedIcon/>]]
+const primary:NavItem[]=[['首页','/',<HomeRoundedIcon/>],['影片墙','/media',<MovieRoundedIcon/>],['媒体库','/libraries',<FolderRoundedIcon/>],['演员','/actors',<GroupsRoundedIcon/>],['标签','/tags',<LocalOfferRoundedIcon/>],['收藏','/favorites',<FavoriteRoundedIcon/>],['最近播放','/history',<HistoryRoundedIcon/>]]
 const visibleUtility:NavItem[]=[['数据中心','/data-center',<BuildRoundedIcon/>],['任务中心','/tasks',<TaskRoundedIcon/>],['AI Provider','/ai-providers',<AutoAwesomeRoundedIcon/>],['设置','/settings',<SettingsRoundedIcon/>]]
 
 export default function AppShell(){

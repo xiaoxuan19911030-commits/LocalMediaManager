@@ -54,12 +54,26 @@ public sealed class MdcNgProvider(IHttpClientFactory? clients = null) : IMetadat
     public async Task<ProviderMetadata?> GetMetadataAsync(MetadataSearchResult result, MetadataProviderContext settings, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(settings.CurrentMoviePath)) return null;
+        bool windowsPath = Path.IsPathFullyQualified(settings.CurrentMoviePath);
+        if (windowsPath && !File.Exists(settings.CurrentMoviePath)) throw new FileNotFoundException($"[MDC-NG] Windows media file does not exist: {settings.CurrentMoviePath}");
+        MdcNgPathMappingResult? mapping = windowsPath
+            ? MdcNgPathMapper.Map(settings.CurrentMoviePath, settings.MdcNg.PathMappings ?? [])
+            : new(settings.CurrentMoviePath, settings.CurrentMoviePath.Replace('\\', '/'), new("/", "/", true, 0));
+        if (mapping is null) {
+            string enabled = string.Join("; ", (settings.MdcNg.PathMappings ?? []).Where(value => value.Enabled).Select(value => $"{value.LocalPathPrefix} -> {value.ProviderPathPrefix}"));
+            await (settings.ProviderLog?.Invoke(Name, $"未找到媒体路径映射：{settings.CurrentMoviePath}; 已启用规则：{(enabled.Length == 0 ? "none" : enabled)}", cancellationToken) ?? Task.CompletedTask);
+            throw new InvalidOperationException($"MDC-NG path mapping is not configured for {settings.CurrentMoviePath}");
+        }
+        await (settings.ProviderLog?.Invoke(Name, $"路径映射：Windows={settings.CurrentMoviePath}; Rule={mapping.Rule.LocalPathPrefix} -> {mapping.Rule.ProviderPathPrefix}; Provider={mapping.ProviderPath}", cancellationToken) ?? Task.CompletedTask);
         MdcNgScrapeResult scrape = await ScrapeAsync(
-            new(settings.CurrentMoviePath, result.Code, TimeoutSeconds: settings.MdcNg.TimeoutSeconds),
+            new(mapping.ProviderPath, result.Code, TimeoutSeconds: settings.MdcNg.TimeoutSeconds),
             settings.MdcNg,
-            cancellationToken);
+            cancellationToken,
+            (message, token) => settings.ProviderDebugLog?.Invoke(Name, message, token) ?? Task.CompletedTask);
         if (!scrape.Success || scrape.Metadata is null)
             throw new InvalidOperationException(scrape.Message);
+        if (scrape.Message.Contains("file operation failed", StringComparison.OrdinalIgnoreCase))
+            await (settings.ProviderLog?.Invoke(Name, scrape.Message, cancellationToken) ?? Task.CompletedTask);
 
         return ToProviderMetadata(scrape.Metadata);
     }
@@ -87,7 +101,8 @@ public sealed class MdcNgProvider(IHttpClientFactory? clients = null) : IMetadat
         if (!string.IsNullOrWhiteSpace(url)) images.Add(new(type, url));
     }
 
-    public async Task<MdcNgScrapeResult> ScrapeAsync(MdcNgScrapeCommand command, MdcNgSettingsDto settings, CancellationToken cancellationToken)
+    public async Task<MdcNgScrapeResult> ScrapeAsync(MdcNgScrapeCommand command, MdcNgSettingsDto settings, CancellationToken cancellationToken,
+        Func<string, CancellationToken, Task>? diagnosticLog = null)
     {
         if (string.IsNullOrWhiteSpace(command.MoviePath))
             throw new ArgumentException("MoviePath is required.", nameof(command));
@@ -96,16 +111,21 @@ public sealed class MdcNgProvider(IHttpClientFactory? clients = null) : IMetadat
         using HttpClient client = clients?.CreateClient("MDC-NG") ?? new HttpClient();
         client.Timeout = TimeSpan.FromSeconds(Math.Min(timeoutSeconds, 60));
         Uri apiRoot = await ResolveApiRootAsync(client, normalized, cancellationToken);
+        await DebugAsync(diagnosticLog, $"ServiceUrl={normalized.ServiceUrl}; ApiUrl={normalized.ApiUrl}; ResolvedApiRoot={apiRoot}", cancellationToken);
 
         JsonElement beforeJobs = await ReadJsonElementAsync(client, new Uri(apiRoot, "api/manual-jobs?page=1&page_size=20"), cancellationToken);
         long beforeMaxJobId = MaxId(beforeJobs);
         Dictionary<string, object> payload = new() {
+            ["source_pathes"] = new[] { command.MoviePath },
             ["pathes"] = new[] { command.MoviePath },
+            ["target_dir"] = string.IsNullOrWhiteSpace(command.TargetFolder) ? DefaultPreviewTargetFolder : command.TargetFolder,
             ["target_folder"] = string.IsNullOrWhiteSpace(command.TargetFolder) ? DefaultPreviewTargetFolder : command.TargetFolder,
             ["link_mode"] = 3,
             ["delete_empty_parent_after_move"] = false,
         };
-        await PostManualJobAsync(client, new Uri(apiRoot, "api/manual-jobs"), payload, cancellationToken);
+        Uri jobUri = new Uri(apiRoot, "api/manual-jobs");
+        await DebugAsync(diagnosticLog, $"POST {jobUri}; Query=none; ContentType=application/json; Body={RedactJson(JsonSerializer.Serialize(payload))}; SourcePath={RedactPath(command.MoviePath)}; Code={command.Code}", cancellationToken);
+        await PostManualJobAsync(client, jobUri, payload, diagnosticLog, cancellationToken);
 
         DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(timeoutSeconds);
         JsonElement latest = beforeJobs;
@@ -114,6 +134,7 @@ public sealed class MdcNgProvider(IHttpClientFactory? clients = null) : IMetadat
         string status = "created";
         while (DateTimeOffset.UtcNow < deadline) {
             JsonElement jobs = await ReadJsonElementAsync(client, new Uri(apiRoot, "api/manual-jobs?page=1&page_size=20"), cancellationToken);
+            await DebugAsync(diagnosticLog, $"GET {new Uri(apiRoot, "api/manual-jobs?page=1&page_size=20")}; Response={RedactJson(jobs.GetRawText())}", cancellationToken);
             JsonElement? job = FindManualJob(jobs, command.MoviePath, beforeMaxJobId);
             if (job is not null) {
                 latest = job.Value;
@@ -122,6 +143,7 @@ public sealed class MdcNgProvider(IHttpClientFactory? clients = null) : IMetadat
             }
 
             JsonElement tasks = await ReadJsonElementAsync(client, new Uri(apiRoot, "api/tasks_full?page=1&page_size=20"), cancellationToken);
+            await DebugAsync(diagnosticLog, $"GET {new Uri(apiRoot, "api/tasks_full?page=1&page_size=20")}; Response={RedactJson(tasks.GetRawText())}", cancellationToken);
             JsonElement? task = FindTask(tasks, command.MoviePath, command.Code, jobId);
             bool latestIsTask = task is not null;
             if (task is not null) {
@@ -133,7 +155,11 @@ public sealed class MdcNgProvider(IHttpClientFactory? clients = null) : IMetadat
             status = FirstScalar(latest, "status", "state") ?? status;
             if (TryFindProperty(latest, "metadata", out JsonElement metadataValue) && metadataValue.ValueKind == JsonValueKind.Object) {
                 MovieMetadata metadata = MdcNgAdapter.ToMovieMetadata(latest, command.Code);
-                return new(Name, true, status, jobId, taskId, metadata, latest.GetRawText(), "MDC-NG scrape task returned metadata.");
+                string? fileError = FirstScalar(latest, "error_message", "errorMessage");
+                string message = string.IsNullOrWhiteSpace(fileError)
+                    ? "MDC-NG scrape task returned metadata."
+                    : $"MDC-NG metadata returned; provider file operation failed: {fileError}";
+                return new(Name, true, status, jobId, taskId, metadata, latest.GetRawText(), message);
             }
             if (!latestIsTask && IsSuccessStatus(latest, status) && FirstScalar(latest, "total_count", "totalCount") is not "0") {
                 await Task.Delay(250, cancellationToken);
@@ -207,12 +233,20 @@ public sealed class MdcNgProvider(IHttpClientFactory? clients = null) : IMetadat
         }
     }
 
-    private static async Task PostManualJobAsync(HttpClient client, Uri uri, object payload, CancellationToken cancellationToken)
+    private static async Task PostManualJobAsync(HttpClient client, Uri uri, object payload, Func<string, CancellationToken, Task>? diagnosticLog, CancellationToken cancellationToken)
     {
         using HttpResponseMessage response = await client.PostAsJsonAsync(uri, payload, cancellationToken);
+        string body = await response.Content.ReadAsStringAsync(cancellationToken);
+        await DebugAsync(diagnosticLog, $"POST Response: HTTP {(int)response.StatusCode} {response.ReasonPhrase}; Body={RedactJson(body)}; MDC-NG Version=unknown", cancellationToken);
         if (!response.IsSuccessStatusCode)
-            throw new HttpRequestException($"MDC-NG request failed: HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
+            throw new HttpRequestException($"MDC-NG request failed: HTTP {(int)response.StatusCode} {response.ReasonPhrase}; response={RedactJson(body)}");
     }
+
+    private static Task DebugAsync(Func<string, CancellationToken, Task>? diagnosticLog, string message, CancellationToken token) =>
+        diagnosticLog is null ? Task.CompletedTask : diagnosticLog(message, token);
+
+    private static string RedactPath(string value) => value.Length <= 180 ? value : value[..180] + "…";
+    private static string RedactJson(string value) => value.Length <= 1200 ? value : value[..1200] + "…";
 
     private static async Task<JsonElement> ReadJsonElementAsync(HttpClient client, Uri uri, CancellationToken cancellationToken)
     {
@@ -426,7 +460,7 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
             : ProviderHttpClients.Create(settings.TimeoutSeconds, network);
         client.Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.Clear();
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.7.0"));
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.7.1"));
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         return client;
     }

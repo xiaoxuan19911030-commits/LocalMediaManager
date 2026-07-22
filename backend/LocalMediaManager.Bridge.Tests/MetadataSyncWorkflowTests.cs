@@ -486,6 +486,28 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ManualSyncCreatesNewTaskAfterCompletedWithErrors()
+    {
+        await using (var connection = await Open()) {
+            await InsertMovie(connection, 1, "RETRY-001");
+            await InsertPrimaryFile(connection, 1, "RETRY-001");
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Stage,Provider,Progress,TotalItems,CompletedItems,CreatedAt,UpdatedAt,CurrentMovieId) VALUES(10,'Sync','CompletedWithErrors','CompletedWithErrors','Composite',100,1,1,$at,$at,1)", ("$at", at));
+        }
+        MetadataProviderSettingsService settings = new(Database);
+        var factory = new FakeHttpClientFactory(_ => new(HttpStatusCode.NotFound));
+        var resolver = new MediaStoragePathResolver(Database, root);
+        var executor = new MetadataSyncExecutor(Database, resolver, settings, CreateDiagnostics(settings, factory), new MetaTubeProvider(factory),
+            new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database, resolver), new TaskLogService(Database));
+
+        MetadataSyncLaunchResult launch = await executor.EnqueueAsync(1, "Manual");
+
+        Assert.NotEqual(10, launch.TaskId);
+        await using SqliteConnection verify = await Open();
+        Assert.Equal("Pending", await Text(verify, $"SELECT Status FROM Tasks WHERE Id={launch.TaskId}"));
+    }
+
+    [Fact]
     public async Task ManualSyncWritesProviderImagesToTheCurrentPresentMovieOnly()
     {
         await using (var connection = await Open()) {

@@ -1,21 +1,36 @@
-import ExpandLessRoundedIcon from '@mui/icons-material/ExpandLessRounded'
-import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded'
+import CheckRoundedIcon from '@mui/icons-material/CheckRounded'
+import KeyboardArrowDownRoundedIcon from '@mui/icons-material/KeyboardArrowDownRounded'
 import NavigateBeforeRoundedIcon from '@mui/icons-material/NavigateBeforeRounded'
 import NavigateNextRoundedIcon from '@mui/icons-material/NavigateNextRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import ShuffleRoundedIcon from '@mui/icons-material/ShuffleRounded'
-import { Box, Button, Collapse, IconButton, InputAdornment, MenuItem, Paper, Snackbar, Stack, TextField, Tooltip, Typography } from '@mui/material'
+import { Box, Button, Divider, IconButton, InputAdornment, Menu, MenuItem, Paper, Snackbar, Stack, TextField, Tooltip, Typography } from '@mui/material'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
-import { useNavigate } from 'react-router'
 import { MovieResultContainer, useMovieActions } from '@/components/workspace/MovieResults'
-import { ViewModeToggle, WorkspacePage, WorkspaceToolbar, refreshAction, type WorkspaceAction, type WorkspaceViewMode } from '@/components/workspace/Workspace'
+import { WorkspacePage, refreshAction, type WorkspaceAction, type WorkspaceViewMode } from '@/components/workspace/Workspace'
 import { defaultMovieWallDisplay, normalizeMovieWallDisplay, type MovieWallDisplaySettings } from '@/components/workspace/movieWallDisplay'
 import { bridge } from '@/services/bridge'
 import type { AdvancedSearchFilters, MediaItem, MediaLibrary } from '@/types/media'
 
-const normalizeSearch = (value: string) => value.replace(/\u3000/g, ' ').replace(/\s+/g, ' ').trim()
-const fieldSx = { width: { xs: '100%', sm: 164 } }
-const filterOpenStorageKey = 'lmm.movieWall.filters.open'
+const toolbarScrollSx = {
+  overflowX: 'auto',
+  scrollbarWidth: 'none',
+  msOverflowStyle: 'none',
+  '&::-webkit-scrollbar': { display: 'none' },
+}
+const controlSx = {
+  height: 36,
+  borderRadius: 1.25,
+  borderColor: 'divider',
+  bgcolor: 'background.paper',
+  color: 'text.primary',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,.04)',
+  whiteSpace: 'nowrap',
+  '&:hover': {
+    borderColor: 'primary.main',
+    bgcolor: 'action.hover',
+  },
+}
 
 export interface MovieWallDefaults {
   actorId?: number
@@ -28,6 +43,8 @@ export interface MovieWallDefaults {
   libraryId?: number
   favorite?: boolean
   watched?: boolean
+  metadataStatus?: string
+  fileStatus?: string
 }
 
 interface SavedMovieWallState {
@@ -39,7 +56,6 @@ interface SavedMovieWallState {
   metadataStatus?: string
   imageStatus?: string
   libraryId?: number
-  moreOpen?: boolean
   view?: WorkspaceViewMode
   defaultsSignature?: string
   scrollY?: number
@@ -52,14 +68,81 @@ export interface MovieWallRenderContext {
   items: MediaItem[]
   loading: boolean
   query: string
+  filters: AdvancedSearchFilters
   reload: () => void
+}
+
+type MenuKind = 'sort' | 'rating' | 'metadata' | 'image' | 'library'
+
+const sortOptions = [
+  { value: 'newest', label: '最新导入' },
+  { value: 'code', label: '番号' },
+  { value: 'title', label: '标题' },
+  { value: 'release', label: '发行日期' },
+  { value: 'rating', label: '个人评分' },
+]
+
+const ratingOptions = [
+  { value: 'all', label: '全部评分' },
+  { value: 'unrated', label: '未评分' },
+  { value: '5', label: '★★★★★' },
+  { value: '4', label: '★★★★' },
+  { value: '3', label: '★★★' },
+  { value: '2', label: '★★' },
+  { value: '1', label: '★' },
+]
+
+const metadataOptions = [
+  { value: 'all', label: '全部元数据' },
+  { value: 'complete', label: '已完成' },
+  { value: 'unscraped', label: '未刮削' },
+  { value: 'missing-nfo', label: '缺 NFO' },
+  { value: 'missing-actors', label: '缺演员' },
+  { value: 'missing-tags', label: '缺标签' },
+  { value: 'missing-description', label: '缺简介' },
+]
+
+const imageOptions = [
+  { value: 'all', label: '全部图片' },
+  { value: 'missing', label: '缺少图片' },
+  { value: 'normal', label: '图片正常' },
+]
+
+const EMPTY_MOVIE_WALL_DEFAULTS: MovieWallDefaults = {}
+
+function libraryOptions(libraries: MediaLibrary[]) {
+  return [
+    { value: '0', label: '全部媒体库' },
+    ...libraries.map((library) => ({ value: String(library.id), label: library.name })),
+  ]
+}
+
+function labelForSort(value: string) {
+  return sortOptions.find((item) => item.value === value)?.label ?? '最新导入'
+}
+
+function labelForRating(value: string) {
+  return ratingOptions.find((item) => item.value === value)?.label ?? '全部评分'
+}
+
+function labelForMetadata(value: string) {
+  return metadataOptions.find((item) => item.value === value)?.label ?? '全部元数据'
+}
+
+function labelForImage(value: string) {
+  return imageOptions.find((item) => item.value === value)?.label ?? '全部图片'
+}
+
+function labelForLibrary(value: number, libraries: MediaLibrary[]) {
+  if (!value) return '全部媒体库'
+  return libraries.find((item) => item.id === value)?.name ?? '全部媒体库'
 }
 
 export function MovieWall({
   title,
   description,
   stateKey,
-  defaults = {},
+  defaults = EMPTY_MOVIE_WALL_DEFAULTS,
   defaultLabel,
   initialSearch = '',
   emptyTitle = '暂无影片',
@@ -96,10 +179,10 @@ export function MovieWall({
   childrenAfterResults?: (context: MovieWallRenderContext) => ReactNode
   reloadSignal?: number
 }) {
-  const navigate = useNavigate()
   const saved = useMemo(() => readSavedState(stateKey), [stateKey])
   const defaultsSignature = useMemo(() => JSON.stringify(defaults), [defaults])
   const canReuseSavedState = saved.defaultsSignature === defaultsSignature
+
   const [items, setItems] = useState<MediaItem[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(canReuseSavedState ? saved.page ?? 1 : 1)
@@ -110,7 +193,6 @@ export function MovieWall({
   const [metadataStatus, setMetadataStatus] = useState(canReuseSavedState ? saved.metadataStatus ?? 'all' : 'all')
   const [imageStatus, setImageStatus] = useState(canReuseSavedState ? saved.imageStatus ?? 'all' : 'all')
   const [libraryId, setLibraryId] = useState(canReuseSavedState ? saved.libraryId ?? 0 : defaults.libraryId ?? 0)
-  const [moreOpen, setMoreOpen] = useState(canReuseSavedState ? saved.moreOpen ?? readFilterOpenPreference() : readFilterOpenPreference())
   const [view, setView] = useState<WorkspaceViewMode>(canReuseSavedState ? saved.view ?? 'grid' : 'grid')
   const [movieWallDisplay, setMovieWallDisplay] = useState<MovieWallDisplaySettings>(defaultMovieWallDisplay)
   const [shortcutsEnabled, setShortcutsEnabled] = useState(true)
@@ -121,18 +203,21 @@ export function MovieWall({
   const [randomLoading, setRandomLoading] = useState(false)
   const [ratingSavingId, setRatingSavingId] = useState<number>()
   const [pageInputFocusSignal, setPageInputFocusSignal] = useState(0)
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
+  const [menuKind, setMenuKind] = useState<MenuKind>()
   const loadSeq = useRef(0)
   const movieActions = useMovieActions({ onNotice: setNotice, play: bridge.play })
+
   const stateSignature = useMemo(() => JSON.stringify({ defaultsSignature, page, query, sort, rating, metadataStatus, imageStatus, libraryId, view }), [defaultsSignature, imageStatus, libraryId, metadataStatus, page, query, rating, sort, view])
   const shouldRestoreScroll = useRef(saved.restoreScroll === true && saved.restoreSignature === stateSignature)
   const pendingScrollY = useRef(typeof saved.scrollY === 'number' ? saved.scrollY : 0)
-  const buildSavedState = useCallback((): SavedMovieWallState => ({ page, search, query, sort, rating, metadataStatus, imageStatus, libraryId, defaultsSignature, moreOpen, view }), [defaultsSignature, imageStatus, libraryId, metadataStatus, moreOpen, page, query, rating, search, sort, view])
+  const buildSavedState = useCallback((): SavedMovieWallState => ({ page, search, query, sort, rating, metadataStatus, imageStatus, libraryId, view, defaultsSignature }), [defaultsSignature, imageStatus, libraryId, metadataStatus, page, query, rating, search, sort, view])
   const filterDirty = rating !== 'all' || metadataStatus !== 'all' || imageStatus !== 'all' || libraryId !== (defaults.libraryId ?? 0)
   const activeFilterCount = (query ? 1 : 0) + (sort !== 'newest' ? 1 : 0) + (filterDirty ? 1 : 0)
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const buildSearchFilters = useCallback((nextLimit = pageSize, nextOffset = (page - 1) * pageSize): AdvancedSearchFilters => {
-    const effectiveMetadataStatus = imageStatus === 'missing' ? 'missing-images' : imageStatus === 'normal' ? 'complete' : metadataStatus
+    const effectiveMetadataStatus = defaults.metadataStatus ?? (imageStatus === 'missing' ? 'missing-images' : imageStatus === 'normal' ? 'complete' : metadataStatus)
     return {
       query,
       ...defaults,
@@ -147,11 +232,18 @@ export function MovieWall({
 
   const load = useCallback(() => {
     const seq = ++loadSeq.current
-    setLoading(true); setError('')
+    if (import.meta.env.DEV) console.debug('[MovieWall] Loading Start', { query, page, seq })
+    setLoading(true)
+    setError('')
     bridge.advancedSearch(buildSearchFilters())
-      .then((result) => { if (seq === loadSeq.current) { setItems(result.items); setTotal(result.total) } })
-      .catch((reason: Error) => { if (seq === loadSeq.current) setError(reason.message) })
-      .finally(() => { if (seq === loadSeq.current) setLoading(false) })
+      .then((result) => {
+        if (seq === loadSeq.current) {
+          if (import.meta.env.DEV) console.debug('[MovieWall] Search Response Count', { count: result.items.length, total: result.total, seq })
+          setItems(result.items); setTotal(result.total)
+        }
+      })
+      .catch((reason: Error) => { if (seq === loadSeq.current) { if (import.meta.env.DEV) console.debug('[MovieWall] Search Error', reason); setError(reason.message) } })
+      .finally(() => { if (seq === loadSeq.current) { if (import.meta.env.DEV) console.debug('[MovieWall] Loading End', { seq }); setLoading(false) } })
   }, [buildSearchFilters])
 
   useEffect(load, [load, reloadSignal])
@@ -162,12 +254,8 @@ export function MovieWall({
       const display = normalizeMovieWallDisplay(settings.movieWallDisplay)
       setMovieWallDisplay(display)
       setShortcutsEnabled(settings.system?.globalShortcutsEnabled ?? true)
-      if (!canReuseSavedState) {
-        setView(display.defaultViewMode)
-        if (settings.search?.defaultSort) setSort(settings.search.defaultSort)
-      }
     }).catch(() => undefined)
-  }, [canReuseSavedState])
+  }, [])
   useEffect(() => {
     if (!loading && total > 0 && page > totalPages) setPage(totalPages)
   }, [loading, page, total, totalPages])
@@ -208,7 +296,7 @@ export function MovieWall({
       if (!shortcutsEnabled) return
       if (event.ctrlKey && event.key.toLowerCase() === 'g') {
         event.preventDefault()
-        setPageInputFocusSignal(value => value + 1)
+        setPageInputFocusSignal((value) => value + 1)
         return
       }
       if (event.ctrlKey || event.altKey || event.metaKey) return
@@ -223,6 +311,7 @@ export function MovieWall({
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [goToPage, page, shortcutsEnabled, totalPages])
+
   const openMovie = (item: MediaItem) => {
     const openDefault = () => {
       rememberScrollForDetail()
@@ -237,7 +326,7 @@ export function MovieWall({
     bridge.randomMovie(buildSearchFilters(pageSize, 0))
       .then((result) => {
         if (result.items.length === 0) {
-          setNotice('当前条件下没有可随机的影片')
+          setNotice('当前条件下没有可随机的影片。')
           return
         }
         setItems(result.items)
@@ -262,48 +351,74 @@ export function MovieWall({
   }
   const submitSearch = () => { setPage(1); setQuery(normalizeSearch(search)) }
   const clearSearch = () => { setSearch(''); setQuery(''); setPage(1) }
-  const clearFilters = () => {
-    setRating('all'); setMetadataStatus('all'); setImageStatus('all'); setLibraryId(defaults.libraryId ?? 0); setPage(1)
-  }
-  const dataCenterProblemType = imageStatus === 'missing' ? 'missing-cover' : metadataToProblemType(metadataStatus)
-  const openDataCenter = () => navigate(`/data-center?tab=diagnostics&type=${dataCenterProblemType}`)
   const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') { event.preventDefault(); submitSearch() }
     else if (event.key === 'Escape') { if (search) clearSearch(); else event.currentTarget.blur() }
   }
-  const context = { total, items, loading, query, reload: load } satisfies MovieWallRenderContext
+  const context = { total, items, loading, query, filters: buildSearchFilters(1, 0), reload: load } satisfies MovieWallRenderContext
   const stats = defaultLabel || renderStats ? <Stack spacing={1}>{defaultLabel}{renderStats?.(context)}</Stack> : undefined
 
-  const filters = <Stack component="form" onSubmit={(event) => { event.preventDefault(); submitSearch() }} spacing={1.25}>
-    <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} useFlexGap sx={{ alignItems: { xs: 'stretch', md: 'center' }, flexWrap: 'wrap' }}>
-      <TextField size="small" value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={handleSearchKeyDown} placeholder="搜索标题、番号、演员、标签，或输入“评分>=4 收藏”" sx={{ flex: '1 1 280px' }} slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchRoundedIcon/></InputAdornment> } }}/>
-      <TextField select size="small" label="排序" value={sort} onChange={(event) => { setPage(1); setSort(event.target.value) }} sx={fieldSx}>
-        <MenuItem value="newest">最新导入</MenuItem><MenuItem value="code">番号</MenuItem><MenuItem value="title">标题</MenuItem><MenuItem value="release">发行日期</MenuItem><MenuItem value="rating">个人评分</MenuItem>
-      </TextField>
-      <Button type="submit" variant="contained">搜索</Button>
-      <ViewModeToggle value={view} onChange={setView}/>
-      <Button color="inherit" endIcon={moreOpen ? <ExpandLessRoundedIcon/> : <ExpandMoreRoundedIcon/>} onClick={() => setMoreOpen((value) => { const next = !value; writeFilterOpenPreference(next); return next })}>{moreOpen ? '收起筛选' : '更多筛选'}</Button>
-      <Box sx={{ flex: '1 1 auto' }}/>
-      <WorkspaceToolbar primaryActions={[...(primaryActions?.(context) ?? []), { key: 'random', label: '随机', icon: <ShuffleRoundedIcon/>, variant: 'outlined', disabled: randomLoading, onClick: openRandomMovie }, refreshAction(load)]}/>
-    </Stack>
-    <Collapse in={moreOpen} unmountOnExit={false}>
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} useFlexGap sx={{ alignItems: { xs: 'stretch', md: 'center' }, flexWrap: 'wrap' }}>
-        <TextField select size="small" label="评分" value={rating} onChange={(event) => { setPage(1); setRating(event.target.value) }} sx={fieldSx}>
-          <MenuItem value="all">全部评分</MenuItem><MenuItem value="unrated">未评分</MenuItem>{[5, 4, 3, 2, 1].map((value) => <MenuItem key={value} value={String(value)}>{'★'.repeat(value)}</MenuItem>)}
-        </TextField>
-        <TextField select size="small" label="元数据状态" value={metadataStatus} onChange={(event) => { setPage(1); setMetadataStatus(event.target.value) }} sx={fieldSx}>
-          <MenuItem value="all">全部</MenuItem><MenuItem value="complete">已完整</MenuItem><MenuItem value="unscraped">未刮削</MenuItem><MenuItem value="missing-nfo">缺 NFO</MenuItem><MenuItem value="missing-actors">缺演员</MenuItem><MenuItem value="missing-tags">缺标签</MenuItem><MenuItem value="missing-description">缺简介</MenuItem>
-        </TextField>
-        <TextField select size="small" label="图片状态" value={imageStatus} onChange={(event) => { setPage(1); setImageStatus(event.target.value) }} sx={fieldSx}>
-          <MenuItem value="all">全部图片</MenuItem><MenuItem value="missing">缺少图片</MenuItem><MenuItem value="normal">图片正常</MenuItem>
-        </TextField>
-        <TextField select size="small" label="媒体库" value={libraryId} onChange={(event) => { setPage(1); setLibraryId(Number(event.target.value)) }} sx={fieldSx}>
-          <MenuItem value={0}>全部媒体库</MenuItem>{libraries.map((library) => <MenuItem key={library.id} value={library.id}>{library.name}</MenuItem>)}
-        </TextField>
-        {dataCenterProblemType !== 'all' && <Button variant="outlined" startIcon={<SearchRoundedIcon/>} onClick={openDataCenter}>在数据中心查看</Button>}
-        {filterDirty && <Button color="inherit" onClick={clearFilters}>清空</Button>}
-      </Stack>
-    </Collapse>
+  const actionItems: WorkspaceAction[] = [...(primaryActions?.(context) ?? []), { key: 'random', label: '随机', icon: <ShuffleRoundedIcon/>, variant: 'text', disabled: randomLoading, onClick: openRandomMovie }, refreshAction(load, '刷新')]
+  const menuOptions = menuKind === 'sort'
+    ? sortOptions
+    : menuKind === 'rating'
+      ? ratingOptions
+      : menuKind === 'metadata'
+        ? metadataOptions
+        : menuKind === 'image'
+          ? imageOptions
+          : libraryOptions(libraries)
+  const menuValue = menuKind === 'sort'
+    ? sort
+    : menuKind === 'rating'
+      ? rating
+      : menuKind === 'metadata'
+        ? metadataStatus
+        : menuKind === 'image'
+          ? imageStatus
+          : String(libraryId || 0)
+  const openMenu = (anchor: HTMLElement, kind: MenuKind) => { setMenuAnchor(anchor); setMenuKind(kind) }
+  const closeMenu = () => { setMenuAnchor(null); setMenuKind(undefined) }
+  const applyMenuValue = (kind: MenuKind, value: string) => {
+    setPage(1)
+    if (kind === 'sort') setSort(value)
+    else if (kind === 'rating') setRating(value)
+    else if (kind === 'metadata') setMetadataStatus(value)
+    else if (kind === 'image') setImageStatus(value)
+    else setLibraryId(Number(value))
+    closeMenu()
+  }
+
+  const filters = <Stack component="form" onSubmit={(event) => { event.preventDefault(); submitSearch() }} direction="row" spacing={0.75} useFlexGap sx={{ alignItems: 'center', flexWrap: 'nowrap', minWidth: 0, ...toolbarScrollSx }}>
+    <TextField
+      size="small"
+      value={search}
+      onChange={(event) => setSearch(event.target.value)}
+      onKeyDown={handleSearchKeyDown}
+      placeholder="搜索标题、番号、演员、标签……"
+      sx={{ flex: '1 0 360px', minWidth: 280, '& .MuiInputBase-root': { height: 36, borderRadius: 1.25, bgcolor: 'background.paper', boxShadow: 'inset 0 1px 0 rgba(255,255,255,.04)' } }}
+      slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchRoundedIcon fontSize="small"/></InputAdornment> } }}
+    />
+    <Divider flexItem orientation="vertical" sx={{ mx: .25 }} />
+    {[{ key: 'rating', label: labelForRating(rating) }, { key: 'metadata', label: labelForMetadata(metadataStatus) }, { key: 'image', label: labelForImage(imageStatus) }, { key: 'library', label: labelForLibrary(libraryId, libraries) }, { key: 'sort', label: labelForSort(sort) }].map((item, index, array) => <Box key={item.key} sx={{ display: 'flex', alignItems: 'center', flex: '0 0 auto' }}>
+      <Button size="small" variant="outlined" color="inherit" endIcon={<KeyboardArrowDownRoundedIcon fontSize="small"/>} onClick={(event) => openMenu(event.currentTarget, item.key as MenuKind)} sx={{ ...controlSx, minWidth: item.key === 'metadata' || item.key === 'library' ? 126 : 104, px: 1.25, fontWeight: 750 }}>
+        {item.label}
+      </Button>
+      {index < array.length - 1 && <Box sx={{ width: 2 }} />}
+    </Box>)}
+    <Divider flexItem orientation="vertical" sx={{ mx: .25 }} />
+    {actionItems.map((action, index, array) => <Box key={action.key} sx={{ display: 'flex', alignItems: 'center', flex: '0 0 auto' }}>
+      <Button size="small" variant="outlined" color={action.color ?? 'inherit'} disabled={action.disabled} onClick={action.onClick} startIcon={action.icon} sx={{ ...controlSx, minWidth: 0, px: 1.15, fontWeight: 750 }}>
+        {action.label}
+      </Button>
+      {index < array.length - 1 && <Box sx={{ width: 2 }} />}
+    </Box>)}
+    <Menu open={Boolean(menuAnchor && menuKind)} anchorEl={menuAnchor} onClose={closeMenu}>
+      {menuOptions.map((item) => <MenuItem key={item.value} selected={menuValue === item.value} onClick={() => menuKind && applyMenuValue(menuKind, item.value)}>
+        {menuValue === item.value && <CheckRoundedIcon fontSize="small" sx={{ mr: 1 }}/>}
+        {item.label}
+      </MenuItem>)}
+    </Menu>
   </Stack>
 
   return <WorkspacePage title={title} description={description?.(total)} stats={stats} filters={filters} activeFilterCount={activeFilterCount} loading={loading} error={error}>
@@ -324,32 +439,20 @@ function readSavedState(key: string): SavedMovieWallState {
   }
 }
 
-function readFilterOpenPreference() {
-  try {
-    const saved = window.localStorage.getItem(filterOpenStorageKey)
-    return saved === null ? true : saved !== 'false'
-  } catch {
-    return true
-  }
+function normalizeSearch(value: string) {
+  return value.replace(/\u3000/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-function writeFilterOpenPreference(value: boolean) {
-  try {
-    window.localStorage.setItem(filterOpenStorageKey, String(value))
-  } catch {
-    // Ignore storage errors; the current page state still updates.
-  }
-}
-
-function metadataToProblemType(value: string) {
-  switch (value) {
-    case 'missing-nfo': return 'missing-nfo'
-    case 'missing-actors': return 'missing-actors'
-    case 'missing-tags': return 'missing-tags'
-    case 'missing-description': return 'missing-description'
-    case 'missing-images': return 'missing-cover'
-    default: return 'all'
-  }
+function isMovieWallShortcutBlocked(event: globalThis.KeyboardEvent) {
+  if (document.querySelector('.MuiModal-root, .MuiPopover-root')) return true
+  const target = event.target
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  const tag = target.tagName.toLowerCase()
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return true
+  const role = target.getAttribute('role')
+  if (role === 'textbox' || role === 'combobox' || role === 'spinbutton') return true
+  return Boolean(target.closest('[contenteditable="true"], input, textarea, select, [role="textbox"], [role="combobox"], [role="spinbutton"]'))
 }
 
 function FloatingPagination({ page, totalPages, onPageChange, focusSignal }: { page: number; totalPages: number; onPageChange: (page: number) => void; focusSignal: number }) {
@@ -360,12 +463,10 @@ function FloatingPagination({ page, totalPages, onPageChange, focusSignal }: { p
   useEffect(() => {
     if (!editing) setDraft(String(page))
   }, [editing, page])
-
   useEffect(() => {
     if (focusSignal <= 0) return
     setEditing(true)
   }, [focusSignal])
-
   useEffect(() => {
     if (!editing) return
     window.requestAnimationFrame(() => {
@@ -377,10 +478,6 @@ function FloatingPagination({ page, totalPages, onPageChange, focusSignal }: { p
   const commit = () => {
     const value = Number.parseInt(draft, 10)
     if (Number.isFinite(value) && value >= 1 && value <= totalPages) onPageChange(value)
-    setEditing(false)
-    setDraft(String(page))
-  }
-  const cancel = () => {
     setEditing(false)
     setDraft(String(page))
   }
@@ -410,7 +507,7 @@ function FloatingPagination({ page, totalPages, onPageChange, focusSignal }: { p
           onChange={(event) => setDraft(event.target.value.replace(/[^\d]/g, '').slice(0, 6))}
           onKeyDown={(event) => {
             if (event.key === 'Enter') { event.preventDefault(); commit() }
-            else if (event.key === 'Escape') { event.preventDefault(); cancel() }
+            else if (event.key === 'Escape') { event.preventDefault(); setEditing(false); setDraft(String(page)) }
           }}
           onBlur={commit}
           slotProps={{ input: { inputMode: 'numeric', sx: { width: 54, height: 30, px: 0.75, textAlign: 'center' } } }}
@@ -429,16 +526,4 @@ function FloatingPagination({ page, totalPages, onPageChange, focusSignal }: { p
       </Tooltip>
     </Stack>
   </Paper>
-}
-
-function isMovieWallShortcutBlocked(event: globalThis.KeyboardEvent) {
-  if (document.querySelector('.MuiModal-root, .MuiPopover-root')) return true
-  const target = event.target
-  if (!(target instanceof HTMLElement)) return false
-  if (target.isContentEditable) return true
-  const tag = target.tagName.toLowerCase()
-  if (tag === 'input' || tag === 'textarea' || tag === 'select') return true
-  const role = target.getAttribute('role')
-  if (role === 'textbox' || role === 'combobox' || role === 'spinbutton') return true
-  return Boolean(target.closest('[contenteditable="true"], input, textarea, select, [role="textbox"], [role="combobox"], [role="spinbutton"]'))
 }

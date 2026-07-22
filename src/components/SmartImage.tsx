@@ -8,7 +8,7 @@ export function clearImageMemoryCache(url?: string) {
   else memoryCache.clear()
 }
 
-export function SmartImage({ src, alt, fit = 'cover', eager = false, onError }: { src?: string; alt: string; fit?: 'cover' | 'contain'; eager?: boolean; onError?: () => void }) {
+export function SmartImage({ src, alt, fit = 'cover', eager = false, onError, bgcolor = 'action.hover' }: { src?: string; alt: string; fit?: 'cover' | 'contain'; eager?: boolean; onError?: () => void; bgcolor?: string }) {
   const ref = useRef<HTMLDivElement | null>(null)
   const [visible, setVisible] = useState(eager)
   const [loaded, setLoaded] = useState(src ? memoryCache.get(src) : undefined)
@@ -43,5 +43,5 @@ export function SmartImage({ src, alt, fit = 'cover', eager = false, onError }: 
   }, [src, visible, onError])
 
   return <Box ref={ref} component={loaded ? 'img' : 'div'} src={loaded} alt={alt}
-    sx={{ width: '100%', height: '100%', objectFit: fit, display: 'block', bgcolor: 'action.hover' }}/>
+    sx={{ width: '100%', height: '100%', objectFit: fit, display: 'block', bgcolor }}/>
 }

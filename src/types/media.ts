@@ -227,6 +227,7 @@ export interface MovieDetail {
   lastPositionSeconds: number
   notes?: string
   coverUrl?: string
+  sourceUrl?: string
   metadataStatus: MetadataStatus
   mediaFiles: MediaFileItem[]
   actors: NamedItem[]
@@ -243,7 +244,7 @@ export interface EntityPageResult { items: EntityCard[]; total: number; limit: n
 export interface RandomMovieResult { item?: MediaItem; items: MediaItem[]; total: number; limit: number }
 export interface AdvancedSearchFilters {
   query: string; actorId?: number; tagId?: number; directorId?: number; movieTagId?: number; customTagId?: number; genreId?: number; seriesId?: number; studioId?: number; favorite?: boolean; watched?: boolean; ratingMin?: number; ratingFilter?: string
-  metadata?: string; fileStatus?: string; metadataStatus?: string; libraryId?: number; sort?: string; limit?: number; offset?: number
+  metadata?: string; fileStatus?: string; metadataStatus?: string; libraryId?: number; sort?: string; limit?: number; offset?: number; targetFields?: string[]
 }
 export interface MetadataOverview {
   totalMovies: number; scrapedMovies: number; completeMovies: number; pendingMovies: number; unscrapedMovies: number
@@ -251,6 +252,12 @@ export interface MetadataOverview {
   missingActors: number; missingTags: number; missingDescription: number; missingNfo: number; missingFiles: number
   missingScreenshots: number; missingGif: number; missingDirectors: number; missingSeries: number; missingStudios: number; missingCustomTags: number
 }
+export interface FilteredMovieSyncPreview { count: number }
+export interface MetadataHealthField { key: string; missing: number; required: boolean }
+export interface MetadataHealthSummary { totalMovies: number; completeMovies: number; incompleteMovies: number; completeRate: number; fields: MetadataHealthField[]; analysisDurationMs: number; analyzedAt: string }
+export interface MetadataHealthAnalysisState { running: boolean; invalidated: boolean; stage: string; completedSteps: number; totalSteps: number; percent: number; elapsedMilliseconds: number; result?: MetadataHealthSummary; error?: string }
+export interface MediaStorageAvailability { rootPath: string; available: boolean; error?: string }
+export interface FilteredMovieSyncResult { count: number; message: string }
 export interface DiagnosticItem { severity: 'error' | 'warning' | 'info'; code: string; title: string; detail: string; count: number }
 export interface DiagnosticsResult { integrity: string; foreignKeyErrors: number; items: DiagnosticItem[] }
 export interface DuplicateMovie {
@@ -303,6 +310,8 @@ export interface MaintenanceIssue { category: string; severity: string; title: s
 export interface ActorProfileData { birthDate?: string; heightCm?: number; cup?: string; birthPlace?: string; activityPeriod?: string; description?: string; aliases?: string[]; avatarUrl?: string }
 export interface ActorProfileCandidate { source: string; matchedName: string; sourceUrl: string; confidence: number; profile: ActorProfileData }
 export interface ActorProfilePreview { actorId: number; candidates: ActorProfileCandidate[]; warnings: string[] }
+export interface ActorProfileCompleteResult { checked: number; updatedProfiles: number; downloadedAvatars: number; skipped: number; warnings: string[] }
+export interface ActorProfileCompleteLaunchResult { taskId: number; status: string; totalItems: number; message: string }
 export interface MaintenancePath { kind: string; path: string; reason: string }
 export interface MaintenanceReport {
   stats: MaintenanceStats

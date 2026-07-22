@@ -8,6 +8,7 @@ import MovieDetailPage from '@/pages/MovieDetailPage'
 import SearchPage from '@/pages/SearchPage'
 import TasksPage from '@/pages/TasksPage'
 import EntityPage from '@/pages/EntityPage'
+import ActorDetailPage from '@/pages/ActorDetailPage'
 import TagCategoriesPage from '@/pages/TagCategoriesPage'
 import CollectionPage from '@/pages/CollectionPage'
 import DataCenterPage from '@/pages/DataCenterPage'
@@ -27,6 +28,7 @@ export const router = createHashRouter([{ path: '/', Component: AppShell, childr
   { path: 'tags/series', element: <EntityPage type="series" /> },
   { path: 'tags/studios', element: <EntityPage type="studios" /> },
   { path: 'actors', element: <EntityPage type="actors" /> },
+  { path: 'actors/:id', Component: ActorDetailPage },
   { path: 'favorites', element: <CollectionPage kind="favorites" /> },
   { path: 'history', element: <CollectionPage kind="history" /> },
   { path: 'data-center', Component: DataCenterPage },

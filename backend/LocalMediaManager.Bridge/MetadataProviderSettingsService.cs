@@ -18,7 +18,9 @@ public sealed record MdcNgSettingsDto(
     string ApiUrl,
     int TimeoutSeconds,
     string ApiKey = "",
-    bool DownloadImages = true);
+    bool DownloadImages = true,
+    IReadOnlyList<MdcNgPathMappingDto>? PathMappings = null);
+public sealed record MdcNgPathMappingDto(string LocalPathPrefix, string ProviderPathPrefix, bool Enabled = true, int Order = 0);
 
 public sealed record JavBusSettingsDto(
     bool Enabled,
@@ -46,6 +48,7 @@ public sealed record MetadataProviderContext(MetaTubeSettingsDto MetaTube, JavBu
     public MdcNgSettingsDto MdcNg { get; init; } = SettingsDefaults.MdcNg;
     public string? CurrentMoviePath { get; init; }
     public Func<string, string, CancellationToken, Task>? ProviderLog { get; init; }
+    public Func<string, string, CancellationToken, Task>? ProviderDebugLog { get; init; }
     public ProviderNetworkSettingsDto NetworkSettings => Network ?? ProviderNetworkSettingsDto.Default;
 
     public int TimeoutSeconds(string provider) =>
@@ -122,7 +125,8 @@ public sealed class MetadataProviderSettingsService(string databasePath)
             Text(values, "metadata.mdcNg.apiUrl", defaults.ApiUrl),
             Int(values, "metadata.mdcNg.timeoutSeconds", defaults.TimeoutSeconds),
             Text(values, "metadata.mdcNg.apiKey", defaults.ApiKey),
-            Bool(values, "metadata.mdcNg.downloadImages", defaults.DownloadImages)));
+            Bool(values, "metadata.mdcNg.downloadImages", defaults.DownloadImages),
+            JsonValue(values, "metadata.mdcNg.pathMappings", defaults.PathMappings ?? Array.Empty<MdcNgPathMappingDto>())));
     }
 
     public async Task<ProviderNetworkSettingsDto> ReadNetworkAsync()
@@ -203,6 +207,7 @@ public sealed class MetadataProviderSettingsService(string databasePath)
             TimeoutSeconds = Math.Clamp(input.TimeoutSeconds, 10, 600),
             ApiKey = input.ApiKey?.Trim() ?? "",
             DownloadImages = input.DownloadImages,
+            PathMappings = MdcNgPathMapper.Normalize(input.PathMappings ?? []),
         };
     }
 
@@ -228,6 +233,7 @@ public sealed class MetadataProviderSettingsService(string databasePath)
         await StoreAsync(connection, transaction, "metadata.mdcNg.timeoutSeconds", clean.TimeoutSeconds, "integer");
         await StoreAsync(connection, transaction, "metadata.mdcNg.apiKey", clean.ApiKey, "secret");
         await StoreAsync(connection, transaction, "metadata.mdcNg.downloadImages", clean.DownloadImages, "boolean");
+        await StoreAsync(connection, transaction, "metadata.mdcNg.pathMappings", clean.PathMappings ?? [], "json");
     }
 
     public static async Task StoreJavBusAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction, JavBusSettingsDto clean)
@@ -353,5 +359,9 @@ public sealed class MetadataProviderSettingsService(string databasePath)
     private static string Text(IReadOnlyDictionary<string, string> values, string key, string fallback) {
         if (!values.TryGetValue(key, out string? raw)) return fallback;
         try { return JsonSerializer.Deserialize<string>(raw) ?? fallback; } catch (JsonException) { return fallback; }
+    }
+    private static IReadOnlyList<T> JsonValue<T>(IReadOnlyDictionary<string, string> values, string key, IReadOnlyList<T> fallback) {
+        if (!values.TryGetValue(key, out string? raw)) return fallback;
+        try { return JsonSerializer.Deserialize<T[]>(raw) ?? fallback; } catch (JsonException) { return fallback; }
     }
 }

@@ -8,7 +8,7 @@ import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded'
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
 import RestoreRoundedIcon from '@mui/icons-material/RestoreRounded'
 import VerifiedRoundedIcon from '@mui/icons-material/VerifiedRounded'
-import { Alert, Box, Button, ButtonBase, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, FormControlLabel, List, ListItemButton, ListItemText, MenuItem, Paper, Snackbar, Stack, Switch, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, ButtonBase, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Divider, FormControlLabel, List, ListItemButton, ListItemText, MenuItem, Paper, Snackbar, Stack, Switch, TextField, Typography } from '@mui/material'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { FormEvent, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
@@ -21,6 +21,7 @@ import { WorkspacePage, refreshAction } from '@/components/workspace/Workspace'
 import { buildInfo } from '@/buildInfo'
 import { defaultMovieWallDisplay, normalizeMovieWallDisplay } from '@/components/workspace/movieWallDisplay'
 import { bridge } from '@/services/bridge'
+import { testMdcPathMapping } from '@/features/mdcPathMapping'
 import { useColorMode } from '@/themes/ThemeContext'
 import type { BridgeHealth, TaskItem } from '@/types/media'
 import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegToolStatus, JavBusSettings, LogCleanupPreview, LogCleanupResult, MdcNgSettings, MdcNgToolStatus, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, PlaybackSettings, ProviderDiagnosticResult, ProviderNetworkSettings, RatingRetentionSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult, WebMetadataSettings } from '@/types/settings'
@@ -280,7 +281,7 @@ export default function SettingsPage() {
         </Paper>
         {category === 'general' && <GeneralSection snapshot={snapshot} system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
         {category === 'metadata' && <MetadataSection/>}
-        {category === 'plugins' && <PluginsSection snapshot={snapshot} mdcNg={draft.mdcNg} setMdcNg={(value) => updateDraft('mdcNg', value)} metaTube={draft.metaTube} setMetaTube={(value) => updateDraft('metaTube', value)} providerNetwork={draft.providerNetwork} setProviderNetwork={(value) => updateDraft('providerNetwork', value)} javBus={draft.javBus} setJavBus={(value) => updateDraft('javBus', value)} dmm={draft.dmm} setDmm={(value) => updateDraft('dmm', value)} javDb={draft.javDb} setJavDb={(value) => updateDraft('javDb', value)} minnano={draft.minnano} setMinnano={(value) => updateDraft('minnano', value)} wikipediaJp={draft.wikipediaJp} setWikipediaJp={(value) => updateDraft('wikipediaJp', value)} setNotice={setNotice}/>}
+        {category === 'plugins' && <><MdcPathMappingsSection value={draft.mdcNg} onChange={(value) => updateDraft('mdcNg', value)}/><PluginsSection snapshot={snapshot} mdcNg={draft.mdcNg} setMdcNg={(value) => updateDraft('mdcNg', value)} metaTube={draft.metaTube} setMetaTube={(value) => updateDraft('metaTube', value)} providerNetwork={draft.providerNetwork} setProviderNetwork={(value) => updateDraft('providerNetwork', value)} javBus={draft.javBus} setJavBus={(value) => updateDraft('javBus', value)} dmm={draft.dmm} setDmm={(value) => updateDraft('dmm', value)} javDb={draft.javDb} setJavDb={(value) => updateDraft('javDb', value)} minnano={draft.minnano} setMinnano={(value) => updateDraft('minnano', value)} wikipediaJp={draft.wikipediaJp} setWikipediaJp={(value) => updateDraft('wikipediaJp', value)} setNotice={setNotice}/></>}
         {category === 'mediaStorage' && <MediaStorageSection mediaStorage={draft.mediaStorage} defaults={defaults.mediaStorage} setMediaStorage={(value) => updateDraft('mediaStorage', value)} setNotice={setNotice}/>}
         {category === 'search' && <SearchSection search={draft.search} setSearch={(value) => updateDraft('search', value)}/>}
         {category === 'shortcuts' && <ShortcutSection system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
@@ -486,6 +487,7 @@ function PluginsSection({ snapshot, mdcNg, setMdcNg, metaTube, setMetaTube, prov
         </ScraperServiceCard>
         <ScraperServiceCard title="JavBus 在线数据源" description="用于影片标题、导演、系列、标签及封面补充。" status={statusFor('JavBus', Boolean((javBus.baseUrl || 'https://www.javbus.com/').trim()))} tone={statusTone(statusFor('JavBus', Boolean((javBus.baseUrl || 'https://www.javbus.com/').trim())))} enabled={javBus.enabled} onEnabledChange={enabled => setJavBus({ ...javBus, enabled })} address={javBus.baseUrl || 'https://www.javbus.com/'} version={network.proxyMode === 'Manual' ? '手动代理' : network.proxyMode === 'Direct' ? '直连' : '系统代理'} auth={javBus.cookie ? '已配置 Cookie' : '未配置 Cookie'} capabilities="标题 / 导演 / 系列 / 类别 / 标签 / 封面" diagnostic={resultFor('JavBus')} actions={<><Button variant="outlined" onClick={() => setNotice('JavBus 网络配置在下方，修改后请保存设置。')}>网络配置</Button><Button variant="outlined" onClick={() => window.open(javBus.baseUrl || 'https://www.javbus.com/', '_blank')}>打开网站</Button><Button variant="outlined" startIcon={<RefreshRoundedIcon/>} disabled={diagnosticsBusy} onClick={refreshDiagnostics}>刷新检测</Button><Button variant="outlined" onClick={() => updateTestResult('JavBus', bridge.testJavBus(javBus))}>测试搜索</Button></>}>
           <TextField size="small" label="当前域名" value={javBus.baseUrl} placeholder="https://www.javbus.com/" onChange={event => setJavBus({ ...javBus, baseUrl: event.target.value })}/>
+          <TextField size="small" type="password" label="Cookie" value={javBus.cookie} autoComplete="off" onChange={event => setJavBus({ ...javBus, cookie: event.target.value })}/>
           <MirrorField label="镜像域名" value={javBus.mirrorUrls} onChange={mirrorUrls => setJavBus({ ...javBus, mirrorUrls })}/>
         </ScraperServiceCard>
       </Box>
@@ -1008,6 +1010,51 @@ function LogsSection({ system, setSystem, diagnostics, logPreview, includeAll, s
 function DiagnosticRow({ check }: { check: DiagnosticCheck }) {
   return <Card variant="outlined"><CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}><Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}><StatusBadge tone={check.status === 'success' ? 'success' : check.status === 'error' ? 'error' : 'warning'} label={check.label}/><Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{check.detail}</Typography></Stack></CardContent></Card>
 }
+function MdcPathMappingsSection({ value, onChange }: { value: MdcNgSettings; onChange: (value: MdcNgSettings) => void }) {
+  const mappings = value.pathMappings ?? []
+  const [testPath, setTestPath] = useState('')
+  const [testFileExists, setTestFileExists] = useState<boolean>()
+  const testResult = testMdcPathMapping(testPath, mappings)
+  const update = (index: number, patch: Partial<(typeof mappings)[number]>) => onChange({ ...value, pathMappings: mappings.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item) })
+  const chooseMappingDirectory = async (index: number) => {
+    const selected = await invoke<string | null>('choose_directory')
+    if (selected) update(index, { localPathPrefix: selected })
+  }
+  const chooseTestFile = async () => {
+    const selected = await invoke<string | null>('choose_file')
+    if (!selected) return
+    setTestPath(selected)
+    setTestFileExists(true)
+  }
+  return <SurfaceSection title="MDC-NG 路径映射" description="当 MDC-NG 运行在 Docker 中时，需要把本机媒体目录映射为容器内目录。该路径必须与 Docker Volume 配置一致。">
+    <Stack spacing={1}>
+      {mappings.map((mapping, index) => <Stack key={index} direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ alignItems: { md: 'center' } }}>
+        <TextField size="small" label="Windows 路径" value={mapping.localPathPrefix} onChange={event => update(index, { localPathPrefix: event.target.value })}/>
+        <Button variant="outlined" startIcon={<FolderRoundedIcon/>} onClick={() => chooseMappingDirectory(index)}>选择</Button>
+        <TextField size="small" label="容器路径" value={mapping.providerPathPrefix} onChange={event => update(index, { providerPathPrefix: event.target.value })}/>
+        <FormControlLabel control={<Switch checked={mapping.enabled} onChange={event => update(index, { enabled: event.target.checked })}/>} label="启用"/>
+        <Button color="error" onClick={() => onChange({ ...value, pathMappings: mappings.filter((_, itemIndex) => itemIndex !== index).map((item, order) => ({ ...item, order })) })}>删除</Button>
+      </Stack>)}
+      <Button variant="outlined" onClick={() => onChange({ ...value, pathMappings: [...mappings, { localPathPrefix: '', providerPathPrefix: '/', enabled: true, order: mappings.length }] })}>添加映射</Button>
+      <Divider sx={{ my: 1 }}/>
+      <Typography sx={{ fontWeight: 850 }}>测试路径映射</Typography>
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
+        <TextField fullWidth size="small" label="Windows 文件路径" value={testPath} onChange={event => { setTestPath(event.target.value); setTestFileExists(undefined) }}/>
+        <Button variant="outlined" startIcon={<FolderRoundedIcon/>} onClick={chooseTestFile}>选择文件</Button>
+        <Button variant="contained" disabled={!testPath.trim()} onClick={() => bridge.pathExists(testPath).then(result => setTestFileExists(result.exists))}>测试</Button>
+      </Stack>
+      {testPath && <Alert severity={testResult.status === 'matched' ? testFileExists === false ? 'warning' : 'success' : 'warning'}>
+        <Stack spacing={.5}>
+          <Typography variant="body2">原始路径：{testPath}</Typography>
+          <Typography variant="body2">命中规则：{testResult.mapping ? `${testResult.mapping.localPathPrefix} → ${testResult.mapping.providerPathPrefix}` : '未找到映射'}</Typography>
+          <Typography variant="body2">转换结果：{testResult.providerPath ?? '—'}</Typography>
+          <Typography variant="body2">状态：{testResult.status === 'matched' ? testFileExists === false ? '本地文件不存在' : testFileExists === true ? '映射成功' : '等待本地文件检查' : '未找到映射'}</Typography>
+        </Stack>
+      </Alert>}
+    </Stack>
+  </SurfaceSection>
+}
+
 function AboutSection({ overview, health, system, setSystem, updateResult, checkUpdates }: {
   overview: DataSafetyOverview
   health?: BridgeHealth

@@ -1,14 +1,10 @@
-import AccessTimeRoundedIcon from '@mui/icons-material/AccessTimeRounded'
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded'
-import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded'
 import CameraAltRoundedIcon from '@mui/icons-material/CameraAltRounded'
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded'
 import FavoriteBorderRoundedIcon from '@mui/icons-material/FavoriteBorderRounded'
 import FavoriteRoundedIcon from '@mui/icons-material/FavoriteRounded'
 import FolderRoundedIcon from '@mui/icons-material/FolderRounded'
-import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded'
-import ImageRoundedIcon from '@mui/icons-material/ImageRounded'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import NavigateBeforeRoundedIcon from '@mui/icons-material/NavigateBeforeRounded'
 import NavigateNextRoundedIcon from '@mui/icons-material/NavigateNextRounded'
@@ -24,7 +20,6 @@ import {
   Avatar,
   Box,
   Button,
-  Checkbox,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -32,7 +27,6 @@ import {
   DialogContentText,
   DialogTitle,
   Divider,
-  FormControlLabel,
   Paper,
   Rating,
   Snackbar,
@@ -65,46 +59,91 @@ function horizontalWheel(event: WheelEvent<HTMLElement>) {
   event.preventDefault()
 }
 
-function Fact({ icon, label }: { icon: ReactNode; label: string }) {
-  return <Box sx={{ display: 'flex', alignItems: 'center', gap: .75, color: 'text.secondary' }}>
-    <Box sx={{ display: 'flex', color: 'primary.main' }}>{icon}</Box>
-    <Typography variant="body2">{label}</Typography>
-  </Box>
+const horizontalScrollSx = {
+  scrollbarWidth: 'none',
+  msOverflowStyle: 'none',
+  '&::-webkit-scrollbar': { display: 'none' },
 }
 
 function SectionTitle({ icon, title }: { icon: ReactNode; title: string }) {
-  return <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1.5 }}>
+  return <Stack direction="row" spacing={.75} sx={{ alignItems: 'center', mb: .75 }}>
     <Box sx={{ color: 'primary.main', display: 'flex' }}>{icon}</Box>
-    <Typography variant="h6" sx={{ fontWeight: 850 }}>{title}</Typography>
+    <Typography variant="subtitle1" sx={{ fontWeight: 850, lineHeight: 1.2 }}>{title}</Typography>
   </Stack>
 }
 
 function LinkText({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return <Typography component="button" type="button" onClick={onClick} sx={{
     appearance: 'none',
-    border: 0,
-    bgcolor: 'transparent',
+    border: 1,
+    borderColor: 'divider',
+    borderRadius: 1,
+    bgcolor: 'action.hover',
     color: 'primary.main',
     cursor: 'pointer',
     font: 'inherit',
     fontWeight: 750,
-    p: 0,
+    lineHeight: 1.35,
+    maxWidth: '100%',
+    px: 1,
+    py: .35,
     textAlign: 'left',
-    '&:hover': { color: 'primary.light', textDecoration: 'underline' },
+    overflowWrap: 'anywhere',
+    transition: theme => theme.transitions.create(['background-color', 'border-color', 'color'], { duration: theme.transitions.duration.shortest }),
+    '&:hover': {
+      bgcolor: 'action.selected',
+      borderColor: 'primary.main',
+      color: 'primary.light',
+    },
   }}>{children}</Typography>
 }
 
 function DetailField({ label, children }: { label: string; children: ReactNode }) {
-  return <Box>
-    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 750, mb: .4 }}>{label}</Typography>
-    <Box sx={{ minHeight: 24 }}>{children}</Box>
+  return <Box sx={{
+    display: 'grid',
+    gridTemplateColumns: { xs: '82px minmax(0,1fr)', sm: '96px minmax(0,1fr)' },
+    columnGap: 1.5,
+    alignItems: 'start',
+    py: .85,
+    borderBottom: 1,
+    borderColor: 'divider',
+  }}>
+    <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 800, lineHeight: 1.7 }}>{label}</Typography>
+    <Box sx={{ minHeight: 24, minWidth: 0 }}>{children}</Box>
   </Box>
+}
+
+function SourceLink({ value, onOpen }: { value?: string; onOpen: (value: string) => void }) {
+  if (!value) return <Typography variant="body2" color="text.disabled">暂无</Typography>
+  return <Typography
+    component="button"
+    type="button"
+    onClick={() => onOpen(value)}
+    variant="body2"
+    color="primary"
+    sx={{
+      appearance: 'none',
+      border: 0,
+      bgcolor: 'transparent',
+      cursor: 'pointer',
+      display: 'inline-block',
+      lineHeight: 1.7,
+      maxWidth: '100%',
+      overflowWrap: 'anywhere',
+      p: 0,
+      textAlign: 'left',
+      textDecoration: 'none',
+      '&:hover': { textDecoration: 'underline' },
+    }}
+  >
+    {value}
+  </Typography>
 }
 
 function InlineEntityList({ items, empty = '暂无', onOpen }: { items: NamedItem[]; empty?: string; onOpen: (item: NamedItem) => void }) {
   const readable = (items ?? []).filter((item) => item.name && !item.name.includes('\uFFFD'))
   if (!readable.length) return <Typography variant="body2" color="text.disabled">{empty}</Typography>
-  return <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+  return <Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
     {readable.map((item) => <LinkText key={item.id} onClick={() => onOpen(item)}>{item.name}</LinkText>)}
   </Stack>
 }
@@ -125,6 +164,7 @@ export default function MovieDetailPage() {
   const [posterFailed, setPosterFailed] = useState(false)
   const [descriptionExpanded, setDescriptionExpanded] = useState(false)
   const [imageTab, setImageTab] = useState<'stills' | 'screenshots'>('stills')
+  const [heroOverrideUrl, setHeroOverrideUrl] = useState<string>()
 
   const [tagDialog, setTagDialog] = useState(false)
   const [tagOptions, setTagOptions] = useState<NamedItem[]>([])
@@ -165,6 +205,7 @@ export default function MovieDetailPage() {
     setMovie(undefined)
     setImageAssets([])
     setPosterFailed(false)
+    setHeroOverrideUrl(undefined)
     setDescriptionExpanded(false)
     setError('')
     loadMovie(movieId).catch((reason: Error) => setError(reason.message))
@@ -211,9 +252,13 @@ export default function MovieDetailPage() {
     ?? imageAssets.find(asset => asset.type === 'Poster' && asset.primary && asset.url)?.url
     ?? imageAssets.find(asset => asset.type === 'Poster' && asset.url)?.url
     ?? movie?.coverUrl
-  useEffect(() => { setPosterFailed(false) }, [heroImageUrl])
+  const displayedHeroImageUrl = heroOverrideUrl ?? heroImageUrl
+  useEffect(() => { setPosterFailed(false) }, [displayedHeroImageUrl])
 
   const displayedImages = imageTab === 'stills' ? stills : screenshots
+  useEffect(() => {
+    if (heroOverrideUrl && !displayedImages.some((asset) => asset.url === heroOverrideUrl)) setHeroOverrideUrl(undefined)
+  }, [displayedImages, heroOverrideUrl])
   const primaryFile = movie?.mediaFiles.find(file => file.primary) ?? movie?.mediaFiles[0]
   const metadataChecks = movie?.metadataStatus?.checks ?? []
   const metadataComplete = (matcher: (value: string) => boolean) => metadataChecks.some(item => matcher(`${item.key} ${item.label}`.toLowerCase()) && item.complete)
@@ -353,35 +398,31 @@ export default function MovieDetailPage() {
     if (value === 'stills' && stills.length === 0) setNotice('暂无剧照')
     if (value === 'screenshots' && screenshots.length === 0) setNotice('暂无截图')
   }
-  const heroColumns = { xs: '1fr', lg: 'minmax(420px, 1.45fr) minmax(320px, .9fr)' }
+  const normalizedTagSearch = tagSearch.trim().toLocaleLowerCase()
+  const filteredTagOptions = useMemo(() => tagOptions.filter((tag) => tag.name.toLocaleLowerCase().includes(normalizedTagSearch)), [normalizedTagSearch, tagOptions])
+  const selectedTagIds = useMemo(() => new Set(selectedTags.map((tag) => tag.id)), [selectedTags])
+  const heroColumns = { xs: '1fr', lg: 'minmax(420px, 1.2fr) minmax(440px, 1fr)' }
 
   return <Box sx={{ '@keyframes detailIn': { from: { opacity: 0, transform: 'translateY(10px)' }, to: { opacity: 1, transform: 'translateY(0)' } } }}>
     {error && <Alert severity="error">{error}</Alert>}
-    {!movie && !error ? <Box sx={{ minHeight: 420, display: 'grid', placeItems: 'center' }}><CircularProgress/></Box> : movie && <Stack spacing={2.25} sx={{ animation: 'detailIn .32s ease both', '@media (prefers-reduced-motion: reduce)': { animation: 'none' } }}>
+    {!movie && !error ? <Box sx={{ minHeight: 420, display: 'grid', placeItems: 'center' }}><CircularProgress/></Box> : movie && <Stack spacing={1.75} sx={{ animation: 'detailIn .32s ease both', '@media (prefers-reduced-motion: reduce)': { animation: 'none' } }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
         <Button color="inherit" startIcon={<ArrowBackRoundedIcon/>} onClick={() => navigate(-1)}>返回</Button>
         <Box sx={{ flex: '1 1 auto' }}/>
-        <Button variant="outlined" color={movie.favorite ? 'error' : 'primary'} startIcon={movie.favorite ? <FavoriteRoundedIcon/> : <FavoriteBorderRoundedIcon/>} disabled={busy} onClick={() => mutate(bridge.setUserState(movie.id, { favorite: !movie.favorite }))}>{movie.favorite ? '已收藏' : '收藏'}</Button>
-        <Button variant="contained" startIcon={<PlayArrowRoundedIcon/>} onClick={play}>播放影片</Button>
-        <Button variant="outlined" startIcon={<SyncRoundedIcon/>} onClick={syncMetadata}>重新同步</Button>
-      </Box>
-
-      <Box sx={{ display: 'grid', gridTemplateColumns: heroColumns }}>
-        <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 1, minWidth: 0 }}>
-          <Typography noWrap variant="h5" sx={{ fontWeight: 850 }}>{movie.title || movie.originalTitle || movie.code || `影片 ${movie.id}`}</Typography>
-        </Paper>
       </Box>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: heroColumns, border: 1, borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
-        <Box sx={{ height: 'clamp(480px, 64vh, 620px)', bgcolor: 'action.hover', display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
-          {heroImageUrl && !posterFailed ? <SmartImage src={heroImageUrl} alt={movie.code || movie.title || ''} fit="contain" eager onError={() => setPosterFailed(true)}/> : <Typography color="text.disabled">{posterFailed ? '图片损坏或不可用' : '暂无图片'}</Typography>}
+        <Box sx={{ height: 'clamp(720px, calc(72vh + 200px), 920px)', bgcolor: 'background.default', display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
+          {displayedHeroImageUrl && !posterFailed ? <SmartImage src={displayedHeroImageUrl} alt={movie.code || movie.title || ''} fit="contain" eager bgcolor="background.default" onError={() => setPosterFailed(true)}/> : <Typography color="text.disabled">{posterFailed ? '图片损坏或不可用' : '暂无图片'}</Typography>}
         </Box>
-        <Stack spacing={2} sx={{ minWidth: 0, p: { xs: 2, md: 3 }, borderLeft: { lg: 1 }, borderColor: 'divider' }}>
-          <Typography variant="h5" sx={{ fontWeight: 850 }}>{movie.code || '番号未知'}</Typography>
-          <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: 'wrap', color: 'text.secondary' }}>
-            <Fact icon={<CalendarMonthRoundedIcon fontSize="small"/>} label={date(movie.releaseDate)}/>
-            <Fact icon={<AccessTimeRoundedIcon fontSize="small"/>} label={formatDuration(movie.durationSeconds)}/>
-          </Stack>
+        <Stack spacing={2} sx={{ minWidth: 0, p: { xs: 2, md: 3 }, borderLeft: { lg: 1 }, borderColor: 'divider', height: '100%' }}>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="h5" sx={{ fontWeight: 850 }}>{movie.code || '番号未知'}</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: .75, lineHeight: 1.7, overflowWrap: 'anywhere' }}>{movie.title || movie.originalTitle || movie.code || `影片 ${movie.id}`}</Typography>
+          </Box>
+          <DetailField label="发行日期"><Typography variant="body2">{date(movie.releaseDate)}</Typography></DetailField>
+          <DetailField label="时长"><Typography variant="body2">{formatDuration(movie.durationSeconds)}</Typography></DetailField>
+          <DetailField label="文件大小"><Typography variant="body2">{formatSize(primaryFile?.fileSize ?? 0)}</Typography></DetailField>
           <DetailField label="厂商"><InlineEntityList items={movie.studios} onOpen={(item) => openFilteredWall('studioId', 'studioName', item)}/></DetailField>
           <DetailField label="导演"><InlineEntityList items={movie.directors} onOpen={(item) => openFilteredWall('directorId', 'directorName', item)}/></DetailField>
           <DetailField label="简介">
@@ -394,6 +435,7 @@ export default function MovieDetailPage() {
                 appearance: 'none',
                 border: 0,
                 bgcolor: 'transparent',
+                color: 'text.secondary',
                 cursor: movie.description ? 'pointer' : 'default',
                 font: 'inherit',
                 lineHeight: 1.7,
@@ -408,6 +450,7 @@ export default function MovieDetailPage() {
           </DetailField>
           <DetailField label="系列"><InlineEntityList items={movie.series} onOpen={(item) => openFilteredWall('seriesId', 'seriesName', item)}/></DetailField>
           <DetailField label="标签"><InlineEntityList items={movie.genres} onOpen={(item) => openFilteredWall('genreId', 'genreName', item)}/></DetailField>
+          <DetailField label="来源页"><SourceLink value={movie.sourceUrl} onOpen={(url) => bridge.openUrl(url).catch((reason: Error) => setNotice(reason.message))}/></DetailField>
           <DetailField label="评分">
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
               <Rating value={movie.userRatingSet ? movie.userRating : 0} precision={.5} disabled={busy} onChange={(_, value) => mutate(bridge.setUserState(movie.id, value === null ? { clearRating: true } : { rating: value }))}/>
@@ -420,33 +463,38 @@ export default function MovieDetailPage() {
               <Button size="small" variant="text" startIcon={<AddRoundedIcon/>} onClick={openTags} sx={{ alignSelf: 'flex-start', px: 0 }}>添加标签</Button>
             </Stack>
           </DetailField>
+          <Box sx={{ mt: 'auto', pt: 2 }}>
+            <Stack direction="row" spacing={1.25} useFlexGap sx={{ flexWrap: 'wrap' }}>
+              <Button variant="outlined" color={movie.favorite ? 'error' : 'primary'} startIcon={movie.favorite ? <FavoriteRoundedIcon/> : <FavoriteBorderRoundedIcon/>} disabled={busy} onClick={() => mutate(bridge.setUserState(movie.id, { favorite: !movie.favorite }))}>{movie.favorite ? '已收藏' : '收藏'}</Button>
+              <Button variant="contained" startIcon={<PlayArrowRoundedIcon/>} onClick={play}>播放影片</Button>
+              <Button variant="outlined" startIcon={<SyncRoundedIcon/>} onClick={syncMetadata}>重新同步</Button>
+            </Stack>
+          </Box>
         </Stack>
       </Box>
 
-      <Divider/>
+      <Divider sx={{ my: -.25 }}/>
 
       <Box>
-        <SectionTitle icon={<GroupsRoundedIcon/>} title="演员"/>
-        <Box onWheel={horizontalWheel} sx={{ display: 'flex', gap: 2.5, overflowX: 'auto', pb: 1.25, scrollBehavior: 'smooth' }}>
-          {movie.actors.length ? movie.actors.map(actor => <Box key={actor.id} onClick={() => openFilteredWall('actorId', 'actorName', actor)} sx={{ flex: '0 0 96px', textAlign: 'center', cursor: 'pointer', color: 'primary.main', '&:hover': { color: 'primary.light' } }}>
-            <Avatar src={`${BRIDGE_ORIGIN}/api/actors/${actor.id}/image`} alt={actor.name} sx={{ width: 72, height: 72, mx: 'auto', mb: 1, bgcolor: 'action.hover', color: 'text.secondary', border: 1, borderColor: 'divider' }}>{actor.name.slice(0, 1)}</Avatar>
+        <Box onWheel={horizontalWheel} sx={{ display: 'flex', gap: 2, overflowX: 'auto', pb: .25, scrollBehavior: 'smooth', ...horizontalScrollSx }}>
+          {movie.actors.length ? movie.actors.map(actor => <Box key={actor.id} onClick={() => navigate(`/actors/${actor.id}`)} sx={{ flex: '0 0 84px', textAlign: 'center', cursor: 'pointer', color: 'primary.main', '&:hover': { color: 'primary.light' } }}>
+            <Avatar src={`${BRIDGE_ORIGIN}/api/actors/${actor.id}/image`} alt={actor.name} sx={{ width: 64, height: 64, mx: 'auto', mb: .75, bgcolor: 'action.hover', color: 'text.secondary', border: 1, borderColor: 'divider' }}>{actor.name.slice(0, 1)}</Avatar>
             <Typography variant="body2" noWrap sx={{ fontWeight: 750 }}>{actor.name}</Typography>
           </Box>) : <Typography variant="body2" color="text.secondary">暂无演员信息</Typography>}
         </Box>
       </Box>
 
-      <Divider/>
+      <Divider sx={{ my: -.25 }}/>
 
       <Box>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ alignItems: { xs: 'stretch', sm: 'center' }, justifyContent: 'space-between', mb: 1.5 }}>
-          <SectionTitle icon={<ImageRoundedIcon/>} title="图片"/>
-          <ToggleButtonGroup exclusive size="small" value={imageTab} onChange={onImageTabChange} sx={{ alignSelf: { xs: 'flex-start', sm: 'center' } }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'flex-start', mb: .5 }}>
+          <ToggleButtonGroup exclusive size="small" value={imageTab} onChange={onImageTabChange} sx={{ alignSelf: 'flex-start', '& .MuiToggleButton-root': { minHeight: 31, px: 1.25, py: 0.25 } }}>
             <ToggleButton value="stills">剧照</ToggleButton>
             <ToggleButton value="screenshots">截图</ToggleButton>
           </ToggleButtonGroup>
         </Stack>
-        <Box onWheel={horizontalWheel} sx={{ display: 'flex', gap: 1.25, overflowX: 'auto', pb: 1.25, minHeight: 138, scrollBehavior: 'smooth' }}>
-          {displayedImages.length ? displayedImages.map((asset, index) => <Box key={`${asset.type}-${asset.id}`} onClick={() => openViewer(displayedImages, index)} onDoubleClick={() => { openViewer(displayedImages, index); window.setTimeout(enterFullscreen, 0) }} sx={{ flex: '0 0 184px', aspectRatio: '4/3', bgcolor: 'action.hover', border: 1, borderColor: 'divider', borderRadius: 1, overflow: 'hidden', cursor: 'zoom-in' }}>
+        <Box onWheel={horizontalWheel} sx={{ display: 'flex', gap: 1.25, overflowX: 'auto', pb: .5, minHeight: 185, scrollBehavior: 'smooth', ...horizontalScrollSx }}>
+          {displayedImages.length ? displayedImages.map((asset, index) => <Box key={`${asset.type}-${asset.id}`} onClick={() => { setHeroOverrideUrl(asset.url); setPosterFailed(false) }} sx={{ flex: '0 0 189px', height: 180, bgcolor: 'background.default', border: 1, borderColor: 'divider', borderRadius: 1, overflow: 'hidden', cursor: 'pointer' }}>
             <SmartImage src={asset.url} alt={asset.type}/>
           </Box>) : <Box sx={{ width: '100%', minHeight: 128, display: 'grid', placeItems: 'center', border: 1, borderColor: 'divider', borderRadius: 1, bgcolor: 'action.hover' }}>
             <Typography color="text.secondary">{imageTab === 'stills' ? '暂无剧照' : '暂无截图'}</Typography>
@@ -506,15 +554,26 @@ export default function MovieDetailPage() {
       <DialogTitle>选择我的标签</DialogTitle>
       <DialogContent>
         <TextField size="small" fullWidth value={tagSearch} onChange={(event) => setTagSearch(event.target.value)} placeholder="搜索标签" sx={{ mt: 1 }}/>
-        <Paper variant="outlined" sx={{ minHeight: 220, maxHeight: 360, overflowY: 'auto', mt: 1.25, p: 1.25, borderRadius: 2 }}>
-          <Stack spacing={.25}>
-            {tagOptions.filter((tag) => tag.name.toLocaleLowerCase().includes(tagSearch.trim().toLocaleLowerCase())).map((tag) => {
-              const checked = selectedTags.some((selected) => selected.id === tag.id)
-              return <FormControlLabel key={tag.id} control={<Checkbox checked={checked} onChange={() => toggleSelectedTag(tag)}/>} label={tag.name}/>
+        <Box sx={{ mt: 1.5 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 800, mb: .75 }}>已选择 {selectedTags.length} 个</Typography>
+          {selectedTags.length ? <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+            {selectedTags.map((tag) => <Button key={tag.id} size="small" variant="contained" onClick={() => toggleSelectedTag(tag)} sx={{ borderRadius: 999, minWidth: 0, px: 1.25, py: .35, textTransform: 'none' }}>
+              {tag.name}
+              <Box component="span" aria-label={`取消选择 ${tag.name}`} onClick={(event) => { event.stopPropagation(); toggleSelectedTag(tag) }} sx={{ ml: .75, fontWeight: 900, lineHeight: 1 }}>×</Box>
+            </Button>)}
+          </Box> : <Typography variant="body2" color="text.disabled">还没有选择标签</Typography>}
+        </Box>
+        <Paper variant="outlined" sx={{ minHeight: 220, maxHeight: 360, overflowY: 'auto', mt: 1.5, p: 1.25, borderRadius: 2 }}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignContent: 'flex-start' }}>
+            {filteredTagOptions.map((tag) => {
+              const selected = selectedTagIds.has(tag.id)
+              return <Button key={tag.id} size="small" variant={selected ? 'contained' : 'outlined'} color={selected ? 'primary' : 'inherit'} onClick={() => toggleSelectedTag(tag)} sx={{ borderRadius: 999, minWidth: 0, px: 1.25, py: .45, textTransform: 'none', borderColor: selected ? 'primary.main' : 'divider', bgcolor: selected ? 'primary.main' : 'transparent', color: selected ? 'primary.contrastText' : 'text.primary', '&:hover': { bgcolor: selected ? 'primary.dark' : 'action.hover', borderColor: 'primary.main' } }}>
+                {selected ? `✓ ${tag.name}` : tag.name}
+              </Button>
             })}
             {!tagOptions.length && <Typography variant="body2" color="text.disabled">暂无自定义标签</Typography>}
-            {tagOptions.length > 0 && !tagOptions.some((tag) => tag.name.toLocaleLowerCase().includes(tagSearch.trim().toLocaleLowerCase())) && <Typography variant="body2" color="text.disabled">没有匹配的标签</Typography>}
-          </Stack>
+            {tagOptions.length > 0 && !filteredTagOptions.length && <Typography variant="body2" color="text.disabled">没有匹配的标签</Typography>}
+          </Box>
         </Paper>
       </DialogContent>
       <DialogActions><Button onClick={() => setTagDialog(false)}>取消</Button><Button variant="contained" onClick={saveTags}>保存</Button></DialogActions>

@@ -5,9 +5,28 @@ namespace LocalMediaManager.Bridge;
 
 public sealed record MediaStorageMovie(long Id, string Code, string? Title);
 public sealed record MediaStorageResourcePath(string ResourceType, string Directory, string MovieFolder, string FileName, string FullPath);
+public sealed record MediaStorageAvailability(string RootPath, bool Available, string? Error);
+
+public static class MetadataNamingPolicy
+{
+    public const string Current = UpperCaseMovieNumber;
+    public const string UpperCaseMovieNumber = nameof(UpperCaseMovieNumber);
+
+    public static string NormalizeMovieNumber(string? value, long movieId)
+    {
+        string number = string.IsNullOrWhiteSpace(value) ? $"movie-{movieId}" : value.Trim();
+        return number.ToUpperInvariant();
+    }
+}
 
 public sealed class MediaStoragePathResolver(string databasePath, string installRoot)
 {
+    public async Task<MediaStorageAvailability> AvailabilityAsync(CancellationToken token = default)
+    {
+        MediaStorageSettingsDto settings = await ReadSettingsAsync(token);
+        try { string root = Path.GetFullPath(settings.RootPath); bool available = Directory.Exists(root); return new(root, available, available ? null : "Configured media storage directory is unavailable."); }
+        catch (Exception error) { return new(settings.RootPath, false, error.Message); }
+    }
     public async Task<MediaStorageResourcePath> ResolveForMovieAsync(
         long movieId,
         string resourceType,
@@ -31,11 +50,17 @@ public sealed class MediaStoragePathResolver(string databasePath, string install
         MediaStorageSettingsDto settings = await ReadSettingsAsync(cancellationToken);
         string normalizedType = NormalizeResourceType(resourceType);
         string resourceDirectory = ResourceDirectory(settings, normalizedType);
-        string movieFolder = SafePathSegment(RenderTemplate(settings.MovieFolderTemplate, movie));
-        string baseFileName = SafePathSegment(RenderTemplate(settings.FileNameTemplate, movie));
-        string suffix = index.HasValue ? $"_{index.Value:000}" : string.IsNullOrWhiteSpace(uniqueSuffix) ? "" : "_" + SafePathSegment(uniqueSuffix);
-        string fileName = baseFileName + suffix + NormalizeExtension(extension);
-        string fullPath = Path.Combine(settings.RootPath, resourceDirectory, movieFolder, fileName);
+        string movieNumber = SafePathSegment(MetadataNamingPolicy.NormalizeMovieNumber(movie.Code, movie.Id));
+        string normalizedExtension = NormalizeExtension(extension);
+        bool grouped = normalizedType is "Preview" or "Screenshot" or "GIF" or "NFO";
+        string movieFolder = grouped ? movieNumber : "";
+        string fileName = grouped
+            ? GroupedFileName(normalizedType, movieNumber, normalizedExtension, index, uniqueSuffix)
+            : SingletonFileName(movieNumber, normalizedExtension, uniqueSuffix);
+        string resourceRoot = Path.Combine(settings.RootPath, resourceDirectory);
+        string fullPath = grouped
+            ? Path.Combine(resourceRoot, movieFolder, fileName)
+            : Path.Combine(resourceRoot, fileName);
         return new(normalizedType, resourceDirectory, movieFolder, fileName, fullPath);
     }
 
@@ -123,15 +148,22 @@ public sealed class MediaStoragePathResolver(string databasePath, string install
         _ => "Poster",
     };
 
-    private static string RenderTemplate(string template, MediaStorageMovie movie)
+    private static string GroupedFileName(
+        string resourceType,
+        string movieNumber,
+        string extension,
+        int? index,
+        string? uniqueSuffix)
     {
-        string code = string.IsNullOrWhiteSpace(movie.Code) ? $"movie-{movie.Id}" : movie.Code.Trim();
-        string title = string.IsNullOrWhiteSpace(movie.Title) ? code : movie.Title.Trim();
-        return template
-            .Replace("{MovieCode}", code, StringComparison.Ordinal)
-            .Replace("{MovieTitle}", title, StringComparison.Ordinal)
-            .Trim();
+        if (resourceType == "NFO") return movieNumber + extension;
+        if (index.HasValue) return $"{index.Value:00}{extension}";
+        return string.IsNullOrWhiteSpace(uniqueSuffix)
+            ? $"01{extension}"
+            : SafePathSegment(uniqueSuffix) + extension;
     }
+
+    private static string SingletonFileName(string movieNumber, string extension, string? uniqueSuffix) =>
+        movieNumber + (string.IsNullOrWhiteSpace(uniqueSuffix) ? "" : "_" + SafePathSegment(uniqueSuffix)) + extension;
 
     private static string SafePathSegment(string value)
     {

@@ -30,7 +30,7 @@ function RelatedSection({ query }: { query: string }) {
   return <Stack spacing={2} sx={{ mt: 3 }}>
     <SectionTitle title="相关维度"/>
     <Stack direction="row" useFlexGap spacing={1} sx={{ flexWrap: 'wrap' }}>
-      {related.actors.map(item => <Chip clickable key={`actor-${item.id}`} label={`演员：${item.name} · ${item.movieCount}`} onClick={() => navigate(`/media?actorId=${item.id}&actorName=${encodeURIComponent(item.name)}`)}/>)}
+      {related.actors.map(item => <Chip clickable key={`actor-${item.id}`} label={`演员：${item.name} · ${item.movieCount}`} onClick={() => navigate(`/actors/${item.id}`)}/>)}
       {related.tags.map(item => <Chip clickable key={`tag-${item.id}`} color="primary" variant="outlined" label={`标签：${item.name} · ${item.movieCount}`} onClick={() => navigate('/tags')}/>)}
     </Stack>
   </Stack>

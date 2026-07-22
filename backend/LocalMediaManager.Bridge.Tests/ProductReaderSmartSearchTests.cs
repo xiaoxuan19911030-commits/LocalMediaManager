@@ -98,6 +98,118 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
         Assert.Equal([1], result.Items.Select(item => item.DataId).ToArray());
     }
 
+    [Theory]
+    [InlineData("missing-director", "3")]
+    [InlineData("missing-actors", "3")]
+    [InlineData("missing-series", "2,3")]
+    [InlineData("missing-fanart", "1,2,3")]
+    public async Task MetadataHealthFiltersReturnOnlyMatchingMovies(string status, string expectedIds)
+    {
+        MediaPageDto result = await ProductReader.AdvancedSearchAsync(Database, "http://localhost",
+            "", null, null, null, null, null, null, null, null, 0, "all", "all", "all", status, null, "newest", 24, 0);
+
+        long[] expected = expectedIds.Split(',').Select(long.Parse).ToArray();
+        Assert.Equal(expected.Order(), result.Items.Select(item => item.DataId).Order());
+    }
+
+    [Fact]
+    public async Task HealthFilterAndUserFilterAreCombined()
+    {
+        MediaPageDto result = await ProductReader.AdvancedSearchAsync(Database, "http://localhost",
+            "ABP", null, null, null, null, null, null, null, null, 0, "all", "all", "all", "missing-director", null, "newest", 24, 0);
+
+        Assert.Equal([3], result.Items.Select(item => item.DataId).ToArray());
+    }
+
+    [Fact]
+    public async Task MetadataHealthAnalysisReturnsAndCachesCompleteResult()
+    {
+        var service = new MetadataHealthAnalysisService(Database);
+
+        MetadataHealthSummary result = await service.GetAsync();
+        MetadataHealthAnalysisState state = service.GetState();
+
+        Assert.Equal(3, result.TotalMovies);
+        Assert.False(state.Running);
+        Assert.False(state.Invalidated);
+        Assert.Same(result, state.Result);
+    }
+
+    [Fact]
+    public async Task MetadataHealthInvalidationKeepsPreviousCompleteResult()
+    {
+        var service = new MetadataHealthAnalysisService(Database);
+        MetadataHealthSummary result = await service.GetAsync();
+
+        service.Invalidate();
+        MetadataHealthAnalysisState state = service.GetState();
+
+        Assert.True(state.Invalidated);
+        Assert.Same(result, state.Result);
+    }
+
+    [Fact]
+    public async Task MetadataHealthCacheInvalidatesAfterDatabaseWrite()
+    {
+        var service = new MetadataHealthAnalysisService(Database);
+        await service.GetAsync();
+        await Task.Delay(20);
+        await using (var connection = new SqliteConnection($"Data Source={Database}")) {
+            await connection.OpenAsync();
+            await Execute(connection, "UPDATE Movies SET UpdatedAt=$at WHERE Id=1", ("$at", DateTimeOffset.UtcNow.ToString("O")));
+        }
+
+        Assert.True(service.GetState().Invalidated);
+    }
+
+    [Fact]
+    public async Task MetadataHealthReaderHonorsCancellationBetweenQueries()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var progress = new InlineProgress<(string Stage, int Completed, int Total)>(_ => cancellation.Cancel());
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => MetadataHealthReader.ReadAsync(Database, progress, cancellation.Token));
+    }
+
+    [Fact]
+    public async Task FilteredMovieIdsIgnoreWallPaging()
+    {
+        await using var connection = new SqliteConnection($"Data Source={Database}");
+        await connection.OpenAsync();
+        for (int id = 4; id <= 30; id++) {
+            await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt,ImportedAt) VALUES($id,$code,$code,0,0,'pending','Test',$at,$at,$at)",
+                ("$id", id), ("$code", $"PAGE-{id:000}"), ("$at", At));
+            await Execute(connection, "INSERT INTO MediaFiles(MovieId,LibraryId,FilePath,NormalizedPath,FileName,FileSize,MediaType,SourceType,IsPrimary,ExistsState,DurationSeconds,CreatedAt,UpdatedAt) VALUES($movie,1,$path,$path,$name,1,'Video','Local',1,'Present',0,$at,$at)",
+                ("$movie", id), ("$path", $"C:\\media\\PAGE-{id:000}.mp4"), ("$name", $"PAGE-{id:000}.mp4"), ("$at", At));
+        }
+
+        MediaPageDto page = await ProductReader.AdvancedSearchAsync(Database, "http://localhost",
+            "", null, null, null, null, null, null, null, null, 0, "all", "all", "all", "all", 1, "newest", 24, 0);
+        IReadOnlyList<long> ids = await ProductReader.ReadAdvancedSearchMovieIdsAsync(Database,
+            "", null, null, null, null, null, null, null, null, 0, "all", "all", "all", "all", 1, "newest");
+
+        Assert.Equal(24, page.Items.Count);
+        Assert.Equal(29, ids.Count);
+    }
+
+    [Fact]
+    public async Task DuplicateCodeSearchAndWallPreferPresentMovieRecords()
+    {
+        await using (var connection = new SqliteConnection($"Data Source={Database}")) {
+            await connection.OpenAsync();
+            await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt,ImportedAt) VALUES(50,'SONE-104','Missing legacy duplicate',0,1,'migrated','Jvedio5',$at,$at,$at)",
+                ("$at", DateTimeOffset.UtcNow.AddDays(1).ToString("O")));
+            await Execute(connection, "INSERT INTO MediaFiles(MovieId,LibraryId,FilePath,NormalizedPath,FileName,FileSize,MediaType,SourceType,IsPrimary,ExistsState,DurationSeconds,CreatedAt,UpdatedAt) VALUES(50,1,'C:\\old\\SONE-104.mp4','c:\\old\\sone-104.mp4','SONE-104.mp4',1,'Video','Local',1,'Missing',0,$at,$at)",
+                ("$at", DateTimeOffset.UtcNow.AddDays(1).ToString("O")));
+        }
+
+        GlobalSearchDto global = await ProductReader.SearchAsync(Database, "http://localhost", "SONE-104", 10);
+        MediaPageDto wall = await ProductReader.ReadVideosPageAsync(Database, "http://localhost", "SONE-104", "newest", 10, 0);
+
+        Assert.Equal(1, global.Movies.First().DataId);
+        Assert.Equal(1, wall.Items.First().DataId);
+    }
+
     [Fact]
     public async Task EntityListsReturnDistinctMovieCounts()
     {
@@ -308,4 +420,9 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
         try { Directory.Delete(root, true); } catch { }
         return Task.CompletedTask;
     }
+}
+
+file sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+{
+    public void Report(T value) => report(value);
 }

@@ -51,6 +51,7 @@ export default function EntityPage({ type }: { type: EntityPageType }) {
   const [actorBirthDate, setActorBirthDate] = useState('')
   const [actorDescription, setActorDescription] = useState('')
   const [undoAudit, setUndoAudit] = useState<number>()
+  const [profileCompleting, setProfileCompleting] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -63,6 +64,10 @@ export default function EntityPage({ type }: { type: EntityPageType }) {
   useEffect(load, [load])
 
   const open = (item: EntityCard) => {
+    if (actorMode) {
+      navigate(`/actors/${item.id}`)
+      return
+    }
     const target = new URLSearchParams({ [meta.mediaParam]: String(item.id), [meta.mediaNameParam]: readable(item.name) })
     navigate(`/media?${target.toString()}`)
   }
@@ -106,11 +111,24 @@ export default function EntityPage({ type }: { type: EntityPageType }) {
     if (!actorRepair) return
     bridge.applyActorRepair(actorRepair.confirmationToken).then((result) => { setNotice(result.message); setActorRepair(undefined); load() }).catch((reason: Error) => setError(reason.message))
   }
+  const completeActorProfiles = () => {
+    if (!actorMode || profileCompleting) return
+    setProfileCompleting(true)
+    setError('')
+    setNotice('正在创建全部演员资料补全任务...')
+    bridge.completeActorProfiles(true)
+      .then((result) => {
+        setNotice(`${result.message} 可在任务中心查看。`)
+      })
+      .catch((reason: Error) => setError(reason.message))
+      .finally(() => setProfileCompleting(false))
+  }
 
   const filters = <Box component="form" onSubmit={submit} sx={{ display: 'flex', gap: 1.25, flexWrap: 'wrap' }}>
     <TextField size="small" value={input} onChange={(event) => setInput(event.target.value)} placeholder={meta.searchPlaceholder} sx={{ minWidth: 260 }} slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchRoundedIcon fontSize="small"/></InputAdornment> } }}/>
     <TextField select size="small" value={sort} onChange={(event) => { setPage(1); setSort(event.target.value) }} sx={{ width: 150 }}><MenuItem value="count">作品数量</MenuItem><MenuItem value="name">名称排序</MenuItem></TextField>
     <Button type="submit" variant="contained" size="small">搜索</Button>
+    {actorMode && <Button type="button" variant="outlined" size="small" disabled={profileCompleting} onClick={completeActorProfiles}>{profileCompleting ? '创建中' : '补全全部演员'}</Button>}
   </Box>
 
   const stats = <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
@@ -128,6 +146,7 @@ export default function EntityPage({ type }: { type: EntityPageType }) {
     filters={filters} activeFilterCount={(query ? 1 : 0) + (sort !== 'count' ? 1 : 0)} onClearFilters={clearFilters} loading={loading} error={error}
     primaryActions={primaryActions}
     secondaryActions={[refreshAction(load)]}>
+    {notice && <Alert severity="info" onClose={() => setNotice('')} action={undoAudit ? <Button color="inherit" size="small" onClick={undoDelete}>撤销</Button> : undefined} sx={{ mb: 2 }}>{notice}</Alert>}
     {items.length ? <Box sx={{ display: 'grid', gridTemplateColumns: actorMode ? 'repeat(auto-fill,minmax(150px,1fr))' : 'repeat(auto-fill,minmax(190px,1fr))', gap: 1.25 }}>
       {items.map((item) => <Card key={item.id} sx={{ display: 'flex', flexDirection: 'column' }}><CardActionArea onClick={() => open(item)} sx={{ flex: 1 }}><CardContent sx={{ display: 'flex', flexDirection: actorMode ? 'column' : 'row', alignItems: 'center', gap: 1.25, textAlign: actorMode ? 'center' : 'left' }}>
         {actorMode ? <Avatar src={item.imageUrl} alt={readable(item.name)} sx={{ width: 82, height: 82, bgcolor: 'action.selected' }}>{icon}</Avatar> : <Box sx={{ width: 38, height: 38, borderRadius: 2, bgcolor: 'action.hover', color: 'primary.main', display: 'grid', placeItems: 'center' }}>{icon}</Box>}
@@ -135,7 +154,6 @@ export default function EntityPage({ type }: { type: EntityPageType }) {
       </CardContent></CardActionArea>{(actorMode || customTagMode) && <CardActions sx={{ justifyContent: 'flex-end', pt: 0 }}><Tooltip title="编辑"><IconButton size="small" onClick={() => startEdit(item)}><EditRoundedIcon fontSize="small"/></IconButton></Tooltip>{customTagMode && <Tooltip title="删除"><IconButton size="small" color="error" onClick={() => requestDelete(item)}><DeleteOutlineRoundedIcon fontSize="small"/></IconButton></Tooltip>}</CardActions>}</Card>)}
     </Box> : <EmptyState title="没有匹配内容" description="尝试清除搜索条件。"/>}
     {total > pageSize && <Stack sx={{ pt: 3, alignItems: 'center' }}><Pagination count={Math.ceil(total / pageSize)} page={page} onChange={(_, value) => setPage(value)} color="primary"/></Stack>}
-    {notice && <Alert severity="info" onClose={() => setNotice('')} action={undoAudit ? <Button color="inherit" size="small" onClick={undoDelete}>撤销</Button> : undefined} sx={{ mt: 2 }}>{notice}</Alert>}
     <Dialog open={Boolean(editItem)} onClose={() => { setEditItem(null); setCreating(false) }} fullWidth maxWidth={actorMode ? 'sm' : 'xs'}><DialogTitle>{creating ? '新建标签' : `编辑${actorMode ? '演员' : '标签'}`}</DialogTitle><DialogContent dividers><TextField autoFocus fullWidth margin="normal" label="名称" value={editName} onChange={(event) => setEditName(event.target.value)} slotProps={{ htmlInput: { maxLength: 100 } }}/>{actorMode && <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 160px' }, gap: 1.5 }}><TextField label="别名" value={actorAlias} onChange={(event) => setActorAlias(event.target.value)}/><TextField select label="性别" value={actorGender} onChange={(event) => setActorGender(event.target.value)}><MenuItem value="">未设置</MenuItem><MenuItem value="0">未知</MenuItem><MenuItem value="1">男</MenuItem><MenuItem value="2">女</MenuItem></TextField><TextField label="生日" type="date" value={actorBirthDate.slice(0, 10)} onChange={(event) => setActorBirthDate(event.target.value)} slotProps={{ inputLabel: { shrink: true } }}/><TextField label="简介" multiline minRows={3} value={actorDescription} onChange={(event) => setActorDescription(event.target.value)} sx={{ gridColumn: { sm: '1 / -1' } }}/></Box>}</DialogContent><DialogActions><Button onClick={() => { setEditItem(null); setCreating(false) }}>取消</Button><Button variant="contained" disabled={!editName.trim()} onClick={saveEdit}>保存</Button></DialogActions></Dialog>
     <Dialog open={Boolean(deletePreview)} onClose={() => setDeletePreview(null)} fullWidth maxWidth="sm"><DialogTitle>删除标签？</DialogTitle><DialogContent dividers><DialogContentText>“{deletePreview?.item.name}”关联 {deletePreview?.count ?? 0} 部影片。删除只会解除标签关系，不会删除影片；操作会写入审计记录。</DialogContentText></DialogContent><DialogActions><Button onClick={() => setDeletePreview(null)}>取消</Button><Button color="error" variant="contained" onClick={confirmDelete}>确认删除</Button></DialogActions></Dialog>
     <Dialog open={Boolean(actorRepair)} onClose={() => setActorRepair(undefined)} fullWidth maxWidth="sm"><DialogTitle>修复演员关系？</DialogTitle><DialogContent dividers><Alert severity="warning" sx={{ mb: 1.5 }}>将修复 {actorRepair?.affectedRelations ?? 0} 条 ActorID=0 关系。</Alert>{actorRepair?.warnings.map((warning) => <Typography key={warning} variant="body2">{warning}</Typography>)}</DialogContent><DialogActions><Button onClick={() => setActorRepair(undefined)}>取消</Button><Button color="warning" variant="contained" onClick={confirmActorRepair}>确认修复</Button></DialogActions></Dialog>

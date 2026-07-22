@@ -28,7 +28,7 @@ public sealed class LegacyCompletionPart2Tests : IAsyncLifetime
         string at = DateTimeOffset.UtcNow.ToString("O");
         await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Progress,TotalItems,CompletedItems,CreatedAt,UpdatedAt) VALUES(1,'Sync','Completed',100,1,1,$at,$at),(2,'Scan','Failed',100,1,0,$at,$at),(3,'Organizer','Cancelled',20,2,1,$at,$at),(4,'Sync','Running',50,2,1,$at,$at)", ("$at", at));
         await Execute(connection, "INSERT INTO TaskLogs(TaskId,Level,Message,CreatedAt) VALUES(1,'Info','done',$at),(2,'Error','failed',$at),(4,'Info','running',$at)", ("$at", at));
-        var service = new TaskCommandService(Database, null!, null!, null!, null!, null!, null!);
+        var service = new TaskCommandService(Database, null!, null!, null!, null!, null!, null!, CreateActorProfileCompleteTaskService());
 
         TaskCleanupResult completed = await service.CleanupAsync("completed");
         Assert.Equal(1, completed.Count);
@@ -48,7 +48,7 @@ public sealed class LegacyCompletionPart2Tests : IAsyncLifetime
         string at = DateTimeOffset.UtcNow.ToString("O");
         await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Progress,TotalItems,CompletedItems,CreatedAt,UpdatedAt) VALUES(1,'Sync','Completed',100,1,1,$at,$at),(2,'Scan','Running',50,1,0,$at,$at)", ("$at", at));
         await Execute(connection, "INSERT INTO TaskLogs(TaskId,Level,Message,CreatedAt) VALUES(1,'Info','done',$at),(2,'Info','running',$at)", ("$at", at));
-        var service = new TaskCommandService(Database, null!, null!, null!, null!, null!, null!);
+        var service = new TaskCommandService(Database, null!, null!, null!, null!, null!, null!, CreateActorProfileCompleteTaskService());
 
         TaskCleanupResult result = await service.CleanupAsync("all-tasks");
 
@@ -72,6 +72,20 @@ public sealed class LegacyCompletionPart2Tests : IAsyncLifetime
         Assert.Equal(221, tasks.Count);
         Assert.Equal(221, tasks[0].Id);
         Assert.Equal("FetchingMetadata", tasks[0].Status);
+    }
+
+    [Fact]
+    public async Task TaskListNormalizesCompletedProgressToOneHundred()
+    {
+        await using var connection = await Open();
+        string at = DateTimeOffset.UtcNow.ToString("O");
+        await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Stage,Progress,TotalItems,CompletedItems,CreatedAt,UpdatedAt,CompletedAt) VALUES(1,'Sync','Completed','Completed',22,1,0,$at,$at,$at)", ("$at", at));
+
+        IReadOnlyList<TaskDto> tasks = await ProductReader.ReadTasksAsync(Database);
+
+        TaskDto task = Assert.Single(tasks);
+        Assert.Equal(100, task.Progress);
+        Assert.Equal(1, task.CompletedItems);
     }
 
     [Fact]
@@ -219,5 +233,18 @@ public sealed class LegacyCompletionPart2Tests : IAsyncLifetime
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         return Convert.ToInt64(await command.ExecuteScalarAsync() ?? 0L);
+    }
+
+    private ActorProfileCompleteTaskService CreateActorProfileCompleteTaskService()
+    {
+        var factory = new DummyHttpClientFactory();
+        var providerService = new ActorProfileProviderService(Database, new MetadataProviderSettingsService(Database),
+            new MinnanoActorProfileProvider(factory), new WikipediaJpActorProfileProvider(factory), new ActorProfileService(Database));
+        return new(Database, providerService, new TaskLogService(Database));
+    }
+
+    private sealed class DummyHttpClientFactory : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new();
     }
 }

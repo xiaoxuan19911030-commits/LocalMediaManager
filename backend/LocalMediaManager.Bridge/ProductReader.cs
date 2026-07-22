@@ -38,7 +38,7 @@ public sealed record MediaFileDto(long Id, string Path, string FileName, string?
 public sealed record MovieDetailDto(long Id, string? Code, string? Title, string? OriginalTitle, string? ReleaseDate,
     long DurationSeconds, string? Description, double ProviderRating, bool Scraped, string ScrapeStatus,
     string? NfoPath, string? ImportedAt, string UpdatedAt, bool Favorite, double UserRating, bool UserRatingSet, long PlayCount,
-    string? LastPlayedAt, long LastPositionSeconds, string? Notes, string? CoverUrl,
+    string? LastPlayedAt, long LastPositionSeconds, string? Notes, string? CoverUrl, string? SourceUrl,
     MetadataStatusDto MetadataStatus, IReadOnlyList<MediaFileDto> MediaFiles, IReadOnlyList<NamedDto> Actors, IReadOnlyList<NamedDto> Directors, IReadOnlyList<NamedDto> Tags,
     IReadOnlyList<NamedDto> Genres, IReadOnlyList<NamedDto> Studios, IReadOnlyList<NamedDto> Series);
 public sealed record EntityCardDto(long Id, string Name, long MovieCount, string? ImageUrl);
@@ -140,7 +140,7 @@ public static class ProductReader
                   LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video'
                   LEFT JOIN UserMovieState s ON s.MovieId=m.Id
                  WHERE m.Code LIKE $like ESCAPE '\' OR m.Title LIKE $like ESCAPE '\' OR m.OriginalTitle LIKE $like ESCAPE '\'
-                 ORDER BY CASE WHEN m.Code=$exact THEN 0 WHEN m.Code LIKE $prefix ESCAPE '\' THEN 1 ELSE 2 END,m.Id DESC
+                 ORDER BY {FilePresenceOrderSql()},CASE WHEN m.Code=$exact THEN 0 WHEN m.Code LIKE $prefix ESCAPE '\' THEN 1 ELSE 2 END,m.Id DESC
                  LIMIT $limit
                 """;
             command.Parameters.AddWithValue("$like", like); command.Parameters.AddWithValue("$exact", query.Trim());
@@ -209,7 +209,11 @@ public static class ProductReader
         }
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT Id,TaskType,Status,Progress,TotalItems,CompletedItems,ErrorMessage,CreatedAt,StartedAt,CompletedAt,PayloadJson,Stage,Provider,RetryCount,CurrentMovieId,ResultSummary
+            SELECT Id,TaskType,Status,
+                   CASE WHEN Status IN ('Completed','CompletedWithErrors') THEN 100 ELSE Progress END,
+                   TotalItems,
+                   CASE WHEN Status IN ('Completed','CompletedWithErrors') THEN MAX(TotalItems,CompletedItems) ELSE CompletedItems END,
+                   ErrorMessage,CreatedAt,StartedAt,CompletedAt,PayloadJson,Stage,Provider,RetryCount,CurrentMovieId,ResultSummary
             FROM Tasks
             ORDER BY CASE WHEN Status IN ('Preparing','FetchingMetadata','DownloadingImages','WritingMetadata','WritingNfo','Running') THEN 0
                           WHEN Status IN ('Pending','Retrying','Paused') THEN 1
@@ -261,9 +265,13 @@ public static class ProductReader
                     return libraryNames.GetValueOrDefault(libraryId, "媒体库任务");
                 if (json.RootElement.TryGetProperty("MovieId", out var movie) && movie.TryGetInt64(out long movieId))
                     return movieNames.GetValueOrDefault(movieId, type);
+                if (type == "ActorProfileComplete" && json.RootElement.TryGetProperty("Search", out var search)) {
+                    string? value = search.GetString();
+                    return string.IsNullOrWhiteSpace(value) ? "演员信息补全" : $"演员信息补全：{value.Trim()}";
+                }
             } catch (System.Text.Json.JsonException) { }
         }
-        return type switch { "ActorRepair" => "演员关系修复", _ => type };
+        return type switch { "ActorRepair" => "演员关系修复", "ActorProfileComplete" => "演员信息补全", _ => type };
     }
 
     public static async Task<EntityPageDto> ReadEntitiesPageAsync(string databasePath, string bridgeUrl,
@@ -356,6 +364,29 @@ public static class ProductReader
         AdvancedSearchPlan plan = await BuildAdvancedSearchPlanAsync(databasePath, query, actorId, tagId, directorId, movieTagId, customTagId, seriesId, favorite, watched,
             ratingMin, ratingFilter, metadata, fileStatus, metadataStatus, libraryId, sort, genreId, studioId);
         return await ReadFilteredCardsAsync(databasePath, bridgeUrl, plan.Condition, plan.Parameters, plan.OrderBy, limit, offset);
+    }
+
+    public static async Task<IReadOnlyList<long>> ReadAdvancedSearchMovieIdsAsync(string databasePath,
+        string query, long? actorId, long? tagId, long? directorId, long? movieTagId, long? customTagId, long? seriesId, bool? favorite, bool? watched, double ratingMin, string ratingFilter, string metadata,
+        string fileStatus, string metadataStatus, long? libraryId, string sort, long? genreId = null, long? studioId = null)
+    {
+        AdvancedSearchPlan plan = await BuildAdvancedSearchPlanAsync(databasePath, query, actorId, tagId, directorId, movieTagId, customTagId, seriesId, favorite, watched,
+            ratingMin, ratingFilter, metadata, fileStatus, metadataStatus, libraryId, sort, genreId, studioId);
+        await using var connection = await OpenAsync(databasePath);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT DISTINCT m.Id
+              FROM Movies m
+              LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video'
+              LEFT JOIN UserMovieState s ON s.MovieId=m.Id
+             WHERE {plan.Condition}
+             ORDER BY {FilePresenceOrderSql()},{plan.OrderBy}
+            """;
+        foreach ((string name, object value) in plan.Parameters) command.Parameters.AddWithValue(name, value);
+        var ids = new List<long>();
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) ids.Add(reader.GetInt64(0));
+        return ids;
     }
 
     public static async Task<RandomMovieDto> ReadRandomMovieAsync(string databasePath, string bridgeUrl,
@@ -706,14 +737,64 @@ public static class ProductReader
         if (movie is null) return null;
         var value = movie.Value;
         MetadataStatusDto metadataStatus = await ReadMetadataStatusAsync(connection, value.Id);
+        string? sourceUrl = await ReadSourceUrlAsync(connection, value.Id);
         var files = new List<MediaFileDto>();
         await using (var command = connection.CreateCommand()) {
             command.CommandText="SELECT Id,FilePath,FileName,Extension,FileSize,SourceType,ExistsState,IsPrimary FROM MediaFiles WHERE MovieId=$id ORDER BY IsPrimary DESC,Id"; command.Parameters.AddWithValue("$id",movieId);
             await using var reader=await command.ExecuteReaderAsync(); while(await reader.ReadAsync()) files.Add(new(reader.GetInt64(0),reader.GetString(1),reader.GetString(2),Text(reader,3),reader.GetInt64(4),reader.GetString(5),reader.GetString(6),reader.GetInt64(7)==1));
         }
         return new(value.Id,value.Code,value.Title,value.Original,value.Release,value.Duration,value.Description,value.Provider,value.Scraped,value.Status,value.Nfo,value.Imported,value.Updated,value.Favorite,value.Rating,value.RatingSet,value.Plays,value.LastPlayed,value.Position,value.Notes,value.HasCover?$"{bridgeUrl}/api/images/{movieId}/primary?source={detailImageSource}":null,
-            metadataStatus,files,await ReadNamesAsync(connection,"Actors","MovieActors","ActorId",movieId),await ReadNamesIfExistsAsync(connection,"Directors","MovieDirectors","DirectorId",movieId),await ReadNamesAsync(connection,"Tags","MovieTags","TagId",movieId),
+            sourceUrl,metadataStatus,files,await ReadNamesAsync(connection,"Actors","MovieActors","ActorId",movieId),await ReadNamesIfExistsAsync(connection,"Directors","MovieDirectors","DirectorId",movieId),await ReadNamesAsync(connection,"Tags","MovieTags","TagId",movieId),
             await ReadNamesAsync(connection,"Genres","MovieGenres","GenreId",movieId),await ReadNamesAsync(connection,"Studios","MovieStudios","StudioId",movieId),await ReadNamesAsync(connection,"Series","MovieSeries","SeriesId",movieId));
+    }
+
+    private static async Task<string?> ReadSourceUrlAsync(SqliteConnection connection, long movieId)
+    {
+        if (!await TableExistsAsync(connection, "ExternalIds")) return null;
+        var ids = new List<(string Provider, string ExternalId)>();
+        await using (var command = connection.CreateCommand()) {
+            command.CommandText = """
+                SELECT Provider,ExternalId
+                  FROM ExternalIds
+                 WHERE EntityType='Movie' AND EntityId=$id
+                 ORDER BY CASE WHEN lower(Provider) LIKE '%:url' THEN 0 WHEN ExternalId LIKE 'http%' THEN 1 ELSE 2 END, Id DESC
+                """;
+            command.Parameters.AddWithValue("$id", movieId);
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) ids.Add((reader.GetString(0), reader.GetString(1)));
+        }
+        foreach ((_, string externalId) in ids)
+            if (IsPublicSourceUrl(externalId)) return externalId;
+        foreach ((_, string externalId) in ids)
+            if (Uri.IsWellFormedUriString(externalId, UriKind.Absolute)) return externalId;
+        foreach ((string provider, string externalId) in ids) {
+            string? url = SourceUrlFromExternalId(provider, externalId);
+            if (!string.IsNullOrWhiteSpace(url)) return url;
+        }
+        return null;
+    }
+
+    private static bool IsPublicSourceUrl(string value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out Uri? uri)) return false;
+        return !uri.IsLoopback && !uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? SourceUrlFromExternalId(string provider, string externalId)
+    {
+        string id = externalId.Trim();
+        if (id.Length == 0) return null;
+        string key = provider.Trim().ToLowerInvariant();
+        if (key is "fanza" or "dmm") return $"https://www.dmm.co.jp/mono/dvd/-/detail/=/cid={Uri.EscapeDataString(id)}/";
+        if (key is "javbus" or "bus") return $"https://www.javbus.com/{Uri.EscapeDataString(id)}";
+        if (key is "fc2" or "fc2hub") {
+            string digits = new string(id.Where(char.IsDigit).ToArray());
+            return digits.Length > 0 ? $"https://adult.contents.fc2.com/article/{digits}/" : null;
+        }
+        if (key is "mgs") return $"https://www.mgstage.com/product/product_detail/{Uri.EscapeDataString(id)}/";
+        if (key is "jav321") return $"https://www.jav321.com/video/{Uri.EscapeDataString(id.ToLowerInvariant())}";
+        if (key is "tokyo-hot") return $"https://my.tokyo-hot.com/product/{Uri.EscapeDataString(id)}/";
+        return null;
     }
 
     public static async Task<ActorDetailDto?> ReadActorAsync(string databasePath, long actorId)
@@ -787,7 +868,7 @@ public static class ProductReader
                    COALESCE(s.UserRating,0),COALESCE(s.IsFavorite,0),COALESCE(m.ReleaseDate,''),COALESCE(m.ImportedAt,m.CreatedAt,''),EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id),
                    {metadataColumns}
               FROM Movies m LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video' LEFT JOIN UserMovieState s ON s.MovieId=m.Id
-             WHERE {condition} GROUP BY m.Id ORDER BY {orderBy} LIMIT $limit OFFSET $offset
+             WHERE {condition} GROUP BY m.Id ORDER BY {FilePresenceOrderSql()},{orderBy} LIMIT $limit OFFSET $offset
             """;
         foreach (var parameter in parameters) command.Parameters.AddWithValue(parameter.Name, parameter.Value);
         command.Parameters.AddWithValue("$limit", limit); command.Parameters.AddWithValue("$offset", offset);
@@ -858,7 +939,7 @@ public static class ProductReader
             command.CommandText = """
                 SELECT CurrentMovieId,TaskType,Status,COALESCE(CompletedAt,StartedAt,CreatedAt,'')
                   FROM Tasks
-                 WHERE TaskType LIKE '%Sync%' OR TaskType LIKE '%Metadata%' OR TaskType LIKE '%Scan%' OR TaskType='ImageCacheRebuild'
+                 WHERE TaskType LIKE '%Sync%' OR TaskType LIKE '%Metadata%' OR TaskType LIKE '%Scan%' OR TaskType='ImageCacheRebuild' OR TaskType='ActorProfileComplete'
                  ORDER BY Id DESC LIMIT 8
                 """;
             await using var reader = await command.ExecuteReaderAsync();
@@ -932,6 +1013,7 @@ public static class ProductReader
     }
     private static string ActiveImageSql(string alias) => $"COALESCE({alias}.SourceProvider,'')<>'LegacyFile' AND NOT (COALESCE({alias}.FilePath,'') LIKE '%JVDIO%' OR COALESCE({alias}.FilePath,'') LIKE '%Jvedio%' OR COALESCE({alias}.FilePath,'') LIKE '%BigPic%' OR COALESCE({alias}.FilePath,'') LIKE '%SmallPic%' OR COALESCE({alias}.FilePath,'') LIKE '%ExtraPic%')";
     private static string ActiveMovieSql(string alias) => $"EXISTS(SELECT 1 FROM MediaFiles af WHERE af.MovieId={alias}.Id AND af.IsPrimary=1 AND af.MediaType='Video' AND COALESCE(af.ExistsState,'')<>'Missing')";
+    private static string FilePresenceOrderSql() => "CASE WHEN COALESCE(f.ExistsState,'')<>'Missing' THEN 0 ELSE 1 END";
     private static string MissingCoverSql() => $"NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType IN ('Poster','GeneratedCard','Thumbnail'))";
     private static string MissingFanartSql() => $"NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType IN ('Fanart','BigPic'))";
     private static string MissingPreviewSql() => $"NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType IN ('Preview','ExtraPic','Screenshot'))";
@@ -1003,16 +1085,26 @@ public static class ProductReader
     }
     private static void AddMetadataStatusCondition(List<string> conditions, string metadataStatus, bool hasDirectors)
     {
-        string directorComplete = hasDirectors ? " AND EXISTS(SELECT 1 FROM MovieDirectors md WHERE md.MovieId=m.Id)" : "";
-        string complete = $"COALESCE(m.IsScraped,0)=1 AND NOT ({MissingCoverSql()}) AND NOT ({MissingFanartSql()}) AND NOT ({MissingPreviewSql()}) AND trim(COALESCE(m.NfoPath,''))<>'' AND EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id){directorComplete} AND EXISTS(SELECT 1 FROM MovieSeries mse WHERE mse.MovieId=m.Id) AND EXISTS(SELECT 1 FROM MovieGenres mg WHERE mg.MovieId=m.Id) AND trim(COALESCE(m.Description,''))<>''";
+        string officialTags = $"EXISTS(SELECT 1 FROM MovieTags mt JOIN Tags t ON t.Id=mt.TagId WHERE mt.MovieId=m.Id AND {NotStatusBadgeTagCondition("t")} AND COALESCE(t.Source,'User')<>'User')";
+        string complete = $"trim(COALESCE(m.Title,''))<>'' AND trim(COALESCE(m.Code,''))<>'' AND trim(COALESCE(m.ReleaseDate,''))<>'' AND trim(COALESCE(m.Description,''))<>'' AND NOT ({MissingCoverSql()}) AND NOT ({MissingFanartSql()}) AND trim(COALESCE(m.NfoPath,''))<>'' AND EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id) AND {officialTags}";
         switch (metadataStatus) {
             case "complete": conditions.Add(complete); break;
+            case "incomplete": conditions.Add($"NOT ({complete})"); break;
             case "unscraped": conditions.Add("COALESCE(m.IsScraped,0)=0"); break;
             case "missing-images": conditions.Add($"({MissingCoverSql()} OR {MissingFanartSql()} OR {MissingPreviewSql()})"); break;
+            case "missing-poster": conditions.Add(MissingCoverSql()); break;
+            case "missing-fanart": conditions.Add(MissingFanartSql()); break;
+            case "missing-preview": conditions.Add(MissingPreviewSql()); break;
+            case "missing-screenshot": conditions.Add($"NOT EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND {ActiveImageSql("i")} AND i.ImageType='Screenshot')"); break;
             case "missing-nfo": conditions.Add("trim(COALESCE(m.NfoPath,''))=''"); break;
             case "missing-actors": conditions.Add("NOT EXISTS(SELECT 1 FROM MovieActors ma WHERE ma.MovieId=m.Id)"); break;
-            case "missing-tags": conditions.Add("NOT EXISTS(SELECT 1 FROM MovieGenres mg WHERE mg.MovieId=m.Id)"); break;
+            case "missing-tags": conditions.Add($"NOT ({officialTags})"); break;
             case "missing-description": conditions.Add("trim(COALESCE(m.Description,''))=''"); break;
+            case "missing-duration": conditions.Add("COALESCE(m.DurationSeconds,0)=0"); break;
+            case "missing-director": conditions.Add(hasDirectors ? "NOT EXISTS(SELECT 1 FROM MovieDirectors md WHERE md.MovieId=m.Id)" : "1=1"); break;
+            case "missing-studio": conditions.Add("NOT EXISTS(SELECT 1 FROM MovieStudios ms WHERE ms.MovieId=m.Id)"); break;
+            case "missing-series": conditions.Add("NOT EXISTS(SELECT 1 FROM MovieSeries ms WHERE ms.MovieId=m.Id)"); break;
+            case "missing-media": conditions.Add("COALESCE(f.ExistsState,'Missing')='Missing'"); break;
         }
     }
     private static async Task<(long Complete, long Pending, long Unscraped)> ReadMetadataCountsAsync(SqliteConnection connection)

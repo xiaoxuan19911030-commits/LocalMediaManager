@@ -59,6 +59,9 @@ export function MovieResultContainer({
   onRatingClick?: (item: MediaItem, value: number | null) => void
   onContextMenu?: (event: MouseEvent, item: MediaItem) => void
 }) {
+  useEffect(() => {
+    if (import.meta.env.DEV) console.debug('[MovieWall] Received Count', { count: items.length, total })
+  }, [items.length, total])
   return <Stack spacing={2}>
     {title && <SectionTitle title={total === undefined ? title : `${title}（${total}）`}/>}
     {items.length === 0 ? <EmptyState title={emptyTitle} description={emptyDescription}/> : view === 'list'

@@ -89,6 +89,7 @@ public sealed class MdcNgScrapeTests
                           "manual_job_id":7,
                           "status":-1,
                           "stage":400,
+                          "error_message":"Read-only file system (os error 30)",
                           "metadata":{"Number":"abp_001","Title":"Remote title","Actors":"Actor A","Runtime":"90","Poster":"https://img.example/p.jpg","UserRating":"4.7"}
                         }],
                         "num_pages":1,
@@ -112,9 +113,13 @@ public sealed class MdcNgScrapeTests
         Assert.Equal("Remote title", result.Metadata.Title);
         Assert.Equal(5400, result.Metadata.DurationSeconds);
         Assert.Equal(4.7m, result.Metadata.Rating);
+        Assert.Contains("file operation failed", result.Message);
         HttpRequestMessage post = Assert.Single(requests, request => request.Method == HttpMethod.Post);
         string body = await post.Content!.ReadAsStringAsync();
+        Assert.Contains("\"source_pathes\"", body);
         Assert.Contains("\"pathes\"", body);
+        Assert.Contains("\"target_dir\"", body);
+        Assert.Contains("\"target_folder\"", body);
         Assert.Contains("ABP-001.mp4", body);
         Assert.Contains("\"link_mode\":3", body);
         Assert.True(manualJobPolls >= 2);
