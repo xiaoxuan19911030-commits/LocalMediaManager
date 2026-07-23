@@ -21,6 +21,28 @@ public static class MetadataNamingPolicy
 
 public sealed class MediaStoragePathResolver(string databasePath, string installRoot)
 {
+    public async Task<MediaStorageResourcePath> ResolveForLocalMovieAsync(
+        long movieId,
+        string resourceType,
+        string extension,
+        int? index = null,
+        CancellationToken cancellationToken = default)
+    {
+        string normalizedType = NormalizeResourceType(resourceType);
+        if (normalizedType is not ("Poster" or "Screenshot"))
+            throw new ArgumentException("Local media resources currently support Poster and Screenshot only.", nameof(resourceType));
+        MediaStorageSettingsDto settings = await ReadSettingsAsync(cancellationToken);
+        string resourceDirectory = ResourceDirectory(settings, normalizedType);
+        string stableId = movieId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        string normalizedExtension = NormalizeExtension(extension);
+        bool grouped = normalizedType == "Screenshot";
+        string movieFolder = grouped ? stableId : "";
+        string fileName = grouped ? $"{Math.Max(1, index ?? 1):00}{normalizedExtension}" : stableId + normalizedExtension;
+        string resourceRoot = Path.Combine(settings.RootPath, resourceDirectory);
+        string fullPath = grouped ? Path.Combine(resourceRoot, movieFolder, fileName) : Path.Combine(resourceRoot, fileName);
+        return new(normalizedType, resourceDirectory, movieFolder, fileName, fullPath);
+    }
+
     public async Task<MediaStorageAvailability> AvailabilityAsync(CancellationToken token = default)
     {
         MediaStorageSettingsDto settings = await ReadSettingsAsync(token);

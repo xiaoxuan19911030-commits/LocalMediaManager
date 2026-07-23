@@ -17,11 +17,39 @@ public sealed class LibraryWorkflowServiceTests : IAsyncLifetime
         service = new LibraryWorkflowService(Database);
         await using var connection = new SqliteConnection($"Data Source={Database}");
         await connection.OpenAsync();
-        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0010_DeletedMovieRatings.sql" }) {
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0010_DeletedMovieRatings.sql", "0015_LibraryTypesAndLocalMedia.sql" }) {
             await using var command = connection.CreateCommand();
             command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
             await command.ExecuteNonQueryAsync();
         }
+    }
+
+    [Fact]
+    public async Task LocalLibraryUsesFileNameAndNeverQueuesMetadataSync()
+    {
+        string path = Path.Combine(MediaRoot, "家庭视频 2026.mp4");
+        await File.WriteAllBytesAsync(path, [1, 2, 3]);
+        LibraryMutationResult library = await service.CreateLibraryAsync(new(
+            "普通媒体", null, true, [new(MediaRoot)], nameof(LibraryType.Local)));
+
+        ScanLaunchResult scan = await service.StartScanAsync(library.Id, new(FullScan: true, AutoSync: true));
+        Assert.True(await service.RunQueuedScanForTestsAsync(scan.TaskId));
+        Assert.Equal("Completed", await WaitForTask(scan.TaskId));
+
+        await using var connection = await Open();
+        Assert.Equal("Local", await TextScalar(connection, "SELECT LibraryType FROM Libraries WHERE Id=$id", ("$id", library.Id)));
+        Assert.Equal("家庭视频 2026", await TextScalar(connection, "SELECT Title FROM Movies LIMIT 1"));
+        Assert.Equal("", await TextScalar(connection, "SELECT Code FROM Movies LIMIT 1"));
+        Assert.Equal(Path.GetFullPath(path), await TextScalar(connection, "SELECT FilePath FROM MediaFiles LIMIT 1"));
+        Assert.Equal(Path.GetFileName(path), await TextScalar(connection, "SELECT FileName FROM MediaFiles LIMIT 1"));
+        Assert.Equal(0, await Scalar(connection, "SELECT COUNT(*) FROM Tasks WHERE TaskType='Sync'"));
+    }
+
+    [Fact]
+    public async Task LibraryTypeValidationRejectsUnknownValues()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() => service.CreateLibraryAsync(new(
+            "Invalid", null, true, [new(MediaRoot)], "Music")));
     }
 
     [Fact]

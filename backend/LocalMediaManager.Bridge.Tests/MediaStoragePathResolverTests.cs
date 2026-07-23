@@ -15,7 +15,7 @@ public sealed class MediaStoragePathResolverTests : IAsyncLifetime
         Directory.CreateDirectory(root);
         Directory.CreateDirectory(InstallRoot);
         await using SqliteConnection connection = await OpenAsync();
-        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0010_DeletedMovieRatings.sql", "0011_RemoveRatingRetentionClearSetting.sql", "0012_MediaStorageSettings.sql" })
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0010_DeletedMovieRatings.sql", "0011_RemoveRatingRetentionClearSetting.sql", "0012_MediaStorageSettings.sql", "0015_LibraryTypesAndLocalMedia.sql" })
         {
             await using SqliteCommand command = connection.CreateCommand();
             command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
@@ -60,6 +60,16 @@ public sealed class MediaStoragePathResolverTests : IAsyncLifetime
         Assert.False(Directory.Exists(Path.GetDirectoryName(result.FullPath)!));
         Resolver().EnsureDirectoryForWrite(result.FullPath);
         Assert.True(Directory.Exists(Path.GetDirectoryName(result.FullPath)!));
+    }
+
+    [Theory]
+    [InlineData("Poster", 1, "Posters", "42.jpg")]
+    [InlineData("Screenshot", 1, "Screenshots", "42", "01.jpg")]
+    [InlineData("Screenshot", 2, "Screenshots", "42", "02.jpg")]
+    public async Task LocalResourcesUseStableMovieId(string type, int index, string directory, params string[] segments)
+    {
+        MediaStorageResourcePath result = await Resolver().ResolveForLocalMovieAsync(42, type, ".jpg", index);
+        Assert.Equal(Path.Combine(new[] { MediaRoot, directory }.Concat(segments).ToArray()), result.FullPath);
     }
 
     [Fact]

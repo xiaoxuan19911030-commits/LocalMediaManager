@@ -17,7 +17,7 @@ import { bridge } from '@/services/bridge'
 import type { LibraryDeletePreview, LibraryFolderInput, LibraryInput, MediaLibrary } from '@/types/media'
 
 const blankFolder = (): LibraryFolderInput => ({ path: '', includeSubfolders: true, enabled: true, scanMode: 'normal', excludePatterns: [] })
-const blankLibrary = (): LibraryInput => ({ name: '', description: '', enabled: true, folders: [blankFolder()] })
+const blankLibrary = (): LibraryInput => ({ name: '', description: '', enabled: true, folders: [blankFolder()], libraryType: 'Standard' })
 const maxSourceFolders = 3
 
 export default function LibrariesPage() {
@@ -43,6 +43,7 @@ export default function LibrariesPage() {
     name: library.name,
     description: library.description || '',
     enabled: library.enabled,
+    libraryType: library.libraryType,
     folders: library.folders.slice(0, maxSourceFolders).map(folder => ({ path: folder.path, enabled: true, includeSubfolders: folder.includeSubfolders, scanMode: 'normal', excludePatterns: folder.excludePatterns || [] })),
   } })
   const updateEditor = (value: Partial<LibraryInput>) => setEditor(current => current ? ({ ...current, value: { ...current.value, ...value } }) : current)
@@ -86,7 +87,7 @@ export default function LibrariesPage() {
       const health = Math.round((library.movieCount - library.missingCount) / Math.max(1, library.movieCount) * 100)
       return <Card key={library.id}><CardContent>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 2, mb: 2, flexWrap: 'wrap' }}>
-          <Box sx={{ display: 'flex', gap: 1.5 }}><Box sx={{ width: 46, height: 46, borderRadius: 2.25, bgcolor: 'action.hover', display: 'grid', placeItems: 'center' }}><StorageRoundedIcon color="primary"/></Box><Box><Typography variant="h6" sx={{ fontWeight: 800 }}>{library.name}</Typography><Typography variant="body2" color="text.secondary">{library.description || '本地媒体库'} · {library.movieCount} 部影片</Typography></Box></Box>
+          <Box sx={{ display: 'flex', gap: 1.5 }}><Box sx={{ width: 46, height: 46, borderRadius: 2.25, bgcolor: 'action.hover', display: 'grid', placeItems: 'center' }}><StorageRoundedIcon color="primary"/></Box><Box><Typography variant="h6" sx={{ fontWeight: 800 }}>{library.name}</Typography><Typography variant="body2" color="text.secondary">{library.libraryType === 'Standard' ? '标准影片库' : '普通媒体库'} · {library.description || '本地媒体库'} · {library.movieCount} 部影片</Typography></Box></Box>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
             <StatusBadge tone={library.enabled ? 'success' : 'neutral'} label={library.enabled ? '已启用' : '已停用'}/>
             <Button size="small" variant="outlined" onClick={() => navigate(`/media?libraryId=${library.id}&libraryName=${encodeURIComponent(library.name)}`)}>查看影片</Button>
@@ -145,6 +146,13 @@ function LibraryEditor({ editor, busy, setEditor, updateEditor, updateFolder, sa
     <DialogTitle>{editor?.id ? '编辑媒体库' : '新建媒体库'}</DialogTitle>
     {editor && <DialogContent dividers><Stack spacing={2}>
       <TextField label="名称" value={editor.value.name} onChange={event => updateEditor({ name: event.target.value })} required fullWidth/>
+      <TextField select label="媒体库类型" value={editor.value.libraryType} onChange={event => updateEditor({ libraryType: event.target.value as LibraryInput['libraryType'] })} required fullWidth>
+        <MenuItem value="Standard">标准影片库</MenuItem>
+        <MenuItem value="Local">普通媒体库</MenuItem>
+      </TextField>
+      <Alert severity="info">{editor.value.libraryType === 'Standard'
+        ? '适用于具有标准番号的影片。支持自动识别番号，并通过 MDC-NG、MetaTube、JavBus 获取标题、演员、标签、封面、预览图和其他元数据。'
+        : '适用于国产、欧美、自拍、短视频及其他没有标准番号的本地视频。不进行番号刮削，支持本地封面、标签、收藏、评分、分类和智能搜索；自动视频截图入口已预留。'}</Alert>
       <TextField label="说明" value={editor.value.description || ''} onChange={event => updateEditor({ description: event.target.value })} fullWidth/>
       <FormControlLabel control={<Checkbox checked={editor.value.enabled} onChange={event => updateEditor({ enabled: event.target.checked })}/>} label="启用媒体库"/>
       <Typography variant="h6">来源文件夹</Typography>

@@ -7,6 +7,19 @@
 - **Branch policy:** Trunk-based development. `main` is the only long-lived development branch after this release.
 - **Restore policy:** Official version recovery uses immutable release tags, starting with `v0.6.0`; rollback branches are no longer long-term restore points.
 
+## Unreleased - Media Library Types
+
+**Status:** Develop / self-test
+**Date:** 2026-07-23
+
+Scope:
+
+- Add extensible Standard and Local media library types; migrate existing libraries to Standard.
+- Preserve the Standard metadata workflow unchanged.
+- Isolate Local scans from number recognition and all metadata Providers.
+- Reserve stable MovieId-based cover/screenshot paths, lifecycle fields, and screenshot service boundary.
+- Add library creation type selection without changing the movie detail UI.
+
 ## 0.6.2 - MovieWall Polish
 
 **Status:** Release candidate / verification in progress

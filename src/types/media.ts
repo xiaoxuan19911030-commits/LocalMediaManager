@@ -142,7 +142,12 @@ export interface MediaLibrary {
   movieCount: number
   missingCount: number
   folders: LibraryFolder[]
+  libraryType: LibraryType
 }
+
+export type LibraryType = 'Standard' | 'Local'
+export type ScreenshotStatus = 'None' | 'Pending' | 'Processing' | 'Completed' | 'Failed'
+export type CoverSource = 'None' | 'Uploaded' | 'Screenshot' | 'Scraped'
 
 export interface TaskItem {
   id: number
@@ -180,6 +185,7 @@ export interface LibraryInput {
   description?: string
   enabled: boolean
   folders: LibraryFolderInput[]
+  libraryType: LibraryType
 }
 
 export interface LibraryMutationResult extends MutationResult { id: number }

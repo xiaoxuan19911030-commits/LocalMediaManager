@@ -393,6 +393,11 @@ public sealed class MetadataSyncExecutor(
     public async Task<MetadataSyncLaunchResult> EnqueueAsync(long movieId, string trigger, bool overwrite = false, string? source = null, IReadOnlyList<string>? targetFields = null) {
         await using var connection = await OpenAsync();
         if (await ScalarLongAsync(connection, "SELECT COUNT(*) FROM Movies WHERE Id=$id", ("$id", movieId)) == 0) throw new KeyNotFoundException("影片不存在。");
+        if (await ScalarLongAsync(connection, """
+            SELECT COUNT(*) FROM MediaFiles f JOIN Libraries l ON l.Id=f.LibraryId
+             WHERE f.MovieId=$id AND l.LibraryType='Local'
+            """, ("$id", movieId)) > 0)
+            throw new InvalidOperationException("普通媒体库影片不执行番号刮削或 Provider 元数据同步。");
         if (await ScalarLongAsync(connection, "SELECT COUNT(*) FROM MediaFiles WHERE MovieId=$id AND IsPrimary=1 AND MediaType='Video' AND COALESCE(ExistsState,'')<>'Missing'", ("$id", movieId)) == 0)
             throw new InvalidOperationException("当前影片文件不存在，不能对 Missing 记录重新同步。请切换到文件存在的影片记录后再同步。");
         long existing = await ScalarLongAsync(connection, "SELECT COALESCE(MAX(Id),0) FROM Tasks WHERE TaskType='Sync' AND CurrentMovieId=$movie AND Status NOT IN ('Completed','CompletedWithErrors','Failed','Cancelled')", ("$movie", movieId));
@@ -414,6 +419,12 @@ public sealed class MetadataSyncExecutor(
 
     public async Task<BatchTaskMutationResult> EnqueueLibraryAsync(long? libraryId = null) {
         await using var connection = await OpenAsync();
+        if (libraryId.HasValue) {
+            string? type = await ScalarTextAsync(connection, "SELECT LibraryType FROM Libraries WHERE Id=$id", ("$id", libraryId.Value));
+            if (type is null) throw new KeyNotFoundException("Library does not exist.");
+            if (MediaLibraryType.Parse(type) == LibraryType.Local)
+                return new(0, "普通媒体库不创建元数据同步任务。");
+        }
         await using var command = connection.CreateCommand();
         command.CommandText = libraryId.HasValue
             ? """
@@ -427,6 +438,7 @@ public sealed class MetadataSyncExecutor(
               SELECT DISTINCT m.Id
               FROM Movies m
               JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video'
+              JOIN Libraries l ON l.Id=f.LibraryId AND l.LibraryType='Standard'
               WHERE COALESCE(f.ExistsState,'')<>'Missing'
               ORDER BY m.Id
               """;

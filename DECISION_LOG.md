@@ -50,6 +50,7 @@ docs/               → 证据、Release 验收、字段映射、矩阵
 | [DEC-015](#dec-015-duplicate-management-and-batch-organizer-convergence) | 查重与批量整理统一入口 | Organizer / Feature Parity | Feature Parity | `refactor(organizer)` |
 | [DEC-016](#dec-016-final-system-features-and-feature-freeze) | 最终系统功能迁移与 Feature Freeze | Settings / System / Feature Parity | Feature Parity | `feat(system)` |
 | [DEC-017](#dec-017-legacy-settings-migration-completion) | 旧设置迁移收口与兼容字段隐藏 | Settings / Feature Freeze | Feature Freeze | `fix(settings)` |
+| [DEC-021](#dec-021-extensible-media-library-types) | 可扩展媒体库类型与普通库隔离 | Libraries / Metadata | Library Types | `feat(libraries)` |
 
 ---
 
@@ -1496,3 +1497,29 @@ Minnano is preferred for `BirthDate`, `HeightCm`, and `Cup`. Wikipedia JP is pre
 - Do not overwrite non-empty or user-edited actor fields automatically.
 - Do not store derived age or embed structured height/cup values in description.
 - Do not display field provenance on actor detail pages in this scope.
+
+---
+
+### DEC-021: Extensible Media Library Types
+
+| Field | Value |
+|------|-----|
+| **Decision ID** | DEC-021 |
+| **Module** | Libraries / Metadata / MediaStorage |
+| **Sprint** | Library Types |
+| **Date** | 2026-07-23 |
+| **Status** | Accepted |
+
+#### Decision
+
+Libraries use the extensible `LibraryType` enum. Existing and number-based libraries are `Standard`; local videos without a standard number are `Local`. Standard libraries preserve the existing provider, merge, image, NFO, health, and repair workflows. Local scans use the source filename as the initial title and must not enqueue or execute metadata Provider tasks.
+
+Local generated resources use the stable MovieId rather than a filename or movie number. Screenshot and cover lifecycle state is stored as the fixed `ScreenshotStatus` and `CoverSource` enums. This sprint reserves the screenshot service boundary and storage paths; FFmpeg frame extraction and quality scoring remain later work.
+
+#### Prohibited
+
+- Do not model library behavior as a scraping boolean.
+- Do not send Local library movies to MDC-NG, MetaTube, or JavBus.
+- Do not classify Local movies as missing a number or scrape-failed in Standard metadata health.
+- Do not key Local covers or screenshots by mutable filenames.
+- Do not change the Standard metadata workflow or the movie detail UI for this feature.

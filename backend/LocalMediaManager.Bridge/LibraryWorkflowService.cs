@@ -19,7 +19,8 @@ public sealed record LibraryCommand(
     string Name,
     string? Description,
     bool Enabled,
-    IReadOnlyList<LibraryFolderCommand> Folders);
+    IReadOnlyList<LibraryFolderCommand> Folders,
+    string LibraryType = nameof(LocalMediaManager.Bridge.LibraryType.Standard));
 
 public sealed record LibraryMutationResult(long Id, bool Changed, long AuditId, string Message);
 public sealed record LibraryDeletePreview(
@@ -87,10 +88,10 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
         await using var transaction = await connection.BeginTransactionAsync();
         await ExecuteAsync(connection, transaction, """
             UPDATE Libraries
-               SET Name=$name,Description=$description,IsEnabled=$enabled,UpdatedAt=$at
+               SET Name=$name,Description=$description,IsEnabled=$enabled,LibraryType=$type,UpdatedAt=$at
              WHERE Id=$id
             """, ("$name", clean.Name), ("$description", clean.Description),
-            ("$enabled", clean.Enabled ? 1 : 0), ("$at", Now()), ("$id", libraryId));
+            ("$enabled", clean.Enabled ? 1 : 0), ("$type", clean.LibraryType), ("$at", Now()), ("$id", libraryId));
         await ReplaceFoldersAsync(connection, transaction, libraryId, clean.Folders);
         long auditId = await AuditAsync(connection, transaction, "LibraryUpdate", "Library", libraryId, before, clean);
         await transaction.CommitAsync();
@@ -340,6 +341,11 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
                 "UPDATE Tasks SET Status='Running',Stage='Running',StartedAt=COALESCE(StartedAt,$at),UpdatedAt=$at WHERE Id=$id", ("$at", Now()), ("$id", taskId));
             await LogAsync(connection, null, taskId, "Info", input.FullScan ? "开始全量扫描。" : "开始增量扫描。");
 
+            LibraryType libraryType = MediaLibraryType.Parse(await ScalarTextAsync(connection, null,
+                "SELECT LibraryType FROM Libraries WHERE Id=$id", ("$id", libraryId)));
+            bool autoSync = libraryType == LibraryType.Standard && input.AutoSync;
+            await LogAsync(connection, null, taskId, "Info", $"媒体库类型：{libraryType}；元数据自动同步：{autoSync}。");
+
             IReadOnlyList<ScanFolder> folders = await ReadScanFoldersAsync(connection, libraryId);
             if (folders.Count == 0) throw new InvalidOperationException("媒体库没有启用的来源文件夹。");
             long minimumFileSizeBytes = await ReadMinimumFileSizeBytesAsync(connection);
@@ -382,7 +388,7 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
                 await WaitIfPausedAsync(taskId, control);
                 control.Cancellation.Token.ThrowIfCancellationRequested();
                 try {
-                    ImportOutcome outcome = await ImportFileAsync(connection, libraryId, path, input.AutoSync);
+                    ImportOutcome outcome = await ImportFileAsync(connection, libraryId, path, autoSync, libraryType);
                     imported += outcome.Imported ? 1 : 0;
                     skipped += outcome.Imported ? 0 : 1;
                     restored += outcome.RatingRestored ? 1 : 0;
@@ -449,7 +455,7 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
         }
     }
 
-    private static async Task<ImportOutcome> ImportFileAsync(SqliteConnection connection, long libraryId, string path, bool autoSync)
+    private static async Task<ImportOutcome> ImportFileAsync(SqliteConnection connection, long libraryId, string path, bool autoSync, LibraryType libraryType)
     {
         string normalized = NormalizePath(path);
         await using var transaction = await connection.BeginTransactionAsync();
@@ -465,13 +471,14 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
 
         var file = new FileInfo(path);
         string baseName = Path.GetFileNameWithoutExtension(path).Trim();
-        string code = string.IsNullOrWhiteSpace(baseName) ? file.Name : baseName;
+        string title = string.IsNullOrWhiteSpace(baseName) ? file.Name : baseName;
+        string code = libraryType == LibraryType.Standard ? title : string.Empty;
         string at = Now();
         long movieId = await InsertIdAsync(connection, transaction, """
             INSERT INTO Movies(Code,Title,SortTitle,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt,ImportedAt)
             VALUES($code,$title,$title,0,0,'pending','LMM.Scan',$at,$at,$at);
             SELECT last_insert_rowid();
-            """, ("$code", code), ("$title", code), ("$at", at));
+            """, ("$code", code), ("$title", title), ("$at", at));
         string sourceType = path.StartsWith("\\\\", StringComparison.Ordinal) ? "NAS" : "Local";
         await ExecuteAsync(connection, transaction, """
             INSERT INTO MediaFiles(MovieId,LibraryId,FilePath,NormalizedPath,FileName,Extension,FileSize,MediaType,SourceType,IsPrimary,ExistsState,DurationSeconds,LastSeenAt,CreatedAt,UpdatedAt)
@@ -480,7 +487,7 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
             ("$name", file.Name), ("$extension", file.Extension.ToLowerInvariant()), ("$size", Math.Max(0, file.Length)),
             ("$source", sourceType), ("$at", at));
 
-        bool restored = await RatingHistoryService.RestoreForImportedMovieAsync(connection, transaction, movieId, code, at);
+        bool restored = libraryType == LibraryType.Standard && await RatingHistoryService.RestoreForImportedMovieAsync(connection, transaction, movieId, code, at);
         if (autoSync) {
             long syncTaskId = await InsertIdAsync(connection, transaction, """
                 INSERT INTO Tasks(TaskType,Status,Stage,Provider,Progress,TotalItems,CompletedItems,PayloadJson,CreatedAt,UpdatedAt,CurrentMovieId)
@@ -578,17 +585,18 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
             folders.Add(new(full, folder.IncludeSubfolders, folder.Enabled, scanMode, exclusions));
         }
         if (folders.Count == 0) throw new ArgumentException("媒体库至少需要一个来源文件夹。");
-        return new(name, input.Description?.Trim(), input.Enabled, folders);
+        string libraryType = MediaLibraryType.Parse(input.LibraryType).ToString();
+        return new(name, input.Description?.Trim(), input.Enabled, folders, libraryType);
     }
 
     private static async Task<long> InsertLibraryAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction, LibraryCommand input)
     {
         string at = Now();
         return await InsertIdAsync(connection, transaction, """
-            INSERT INTO Libraries(Name,Description,IsEnabled,SortOrder,CreatedAt,UpdatedAt)
-            VALUES($name,$description,$enabled,COALESCE((SELECT MAX(SortOrder)+1 FROM Libraries),0),$at,$at);
+            INSERT INTO Libraries(Name,Description,IsEnabled,SortOrder,CreatedAt,UpdatedAt,LibraryType)
+            VALUES($name,$description,$enabled,COALESCE((SELECT MAX(SortOrder)+1 FROM Libraries),0),$at,$at,$type);
             SELECT last_insert_rowid();
-            """, ("$name", input.Name), ("$description", input.Description), ("$enabled", input.Enabled ? 1 : 0), ("$at", at));
+            """, ("$name", input.Name), ("$description", input.Description), ("$enabled", input.Enabled ? 1 : 0), ("$at", at), ("$type", input.LibraryType));
     }
 
     private static async Task ReplaceFoldersAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,

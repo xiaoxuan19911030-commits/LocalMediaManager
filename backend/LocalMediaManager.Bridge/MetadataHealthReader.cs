@@ -8,7 +8,7 @@ public sealed record MetadataHealthSummary(long TotalMovies, long CompleteMovies
 
 public static class MetadataHealthReader
 {
-    private const string Active = "EXISTS(SELECT 1 FROM MediaFiles f WHERE f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video' AND COALESCE(f.ExistsState,'')<>'Missing')";
+    private const string Active = "EXISTS(SELECT 1 FROM MediaFiles f JOIN Libraries l ON l.Id=f.LibraryId AND l.LibraryType='Standard' WHERE f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video' AND COALESCE(f.ExistsState,'')<>'Missing')";
     private const string OfficialTags = "EXISTS(SELECT 1 FROM MovieTags x JOIN Tags t ON t.Id=x.TagId WHERE x.MovieId=m.Id AND COALESCE(t.Source,'User')<>'User')";
     private const string Poster = "EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND i.ImageType IN ('Poster','GeneratedCard','Thumbnail') AND trim(COALESCE(i.FilePath,''))<>'')";
     private const string Fanart = "EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND i.ImageType IN ('Fanart','BigPic') AND trim(COALESCE(i.FilePath,''))<>'')";

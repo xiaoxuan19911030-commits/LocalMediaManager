@@ -27,7 +27,7 @@ public sealed record GlobalSearchDto(string Query, IReadOnlyList<MediaCardDto> M
 public sealed record LibraryFolderDto(long Id, string Path, bool Enabled, bool IncludeSubfolders, string ScanMode,
     string? LastScannedAt, IReadOnlyList<string> ExcludePatterns);
 public sealed record LibraryDto(long Id, string Name, string? Description, bool Enabled, long MovieCount,
-    long MissingCount, IReadOnlyList<LibraryFolderDto> Folders);
+    long MissingCount, IReadOnlyList<LibraryFolderDto> Folders, string LibraryType);
 public sealed record TaskDto(long Id, string Type, string Status, string Name, double Progress, long TotalItems,
     long CompletedItems, string? ErrorMessage, string CreatedAt, string? StartedAt, string? CompletedAt,
     string? Stage, string? Provider, long RetryCount, long? CurrentMovieId, string? ResultSummary);
@@ -156,16 +156,16 @@ public static class ProductReader
     public static async Task<IReadOnlyList<LibraryDto>> ReadLibrariesAsync(string databasePath)
     {
         await using var connection = await OpenAsync(databasePath);
-        var libraries = new List<(long Id,string Name,string? Description,bool Enabled,long Movies,long Missing)>();
+        var libraries = new List<(long Id,string Name,string? Description,bool Enabled,long Movies,long Missing,string Type)>();
         await using (var command = connection.CreateCommand()) {
             command.CommandText = """
                 SELECT l.Id,l.Name,l.Description,l.IsEnabled,
-                       COUNT(DISTINCT f.MovieId),COUNT(DISTINCT CASE WHEN f.ExistsState='Missing' THEN f.MovieId END)
+                       COUNT(DISTINCT f.MovieId),COUNT(DISTINCT CASE WHEN f.ExistsState='Missing' THEN f.MovieId END),l.LibraryType
                   FROM Libraries l LEFT JOIN MediaFiles f ON f.LibraryId=l.Id
                  GROUP BY l.Id ORDER BY l.SortOrder,l.Name
                 """;
             await using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync()) libraries.Add((reader.GetInt64(0),reader.GetString(1),Text(reader,2),reader.GetInt64(3)==1,reader.GetInt64(4),reader.GetInt64(5)));
+            while (await reader.ReadAsync()) libraries.Add((reader.GetInt64(0),reader.GetString(1),Text(reader,2),reader.GetInt64(3)==1,reader.GetInt64(4),reader.GetInt64(5),reader.GetString(6)));
         }
         var result = new List<LibraryDto>();
         foreach (var library in libraries) {
@@ -181,7 +181,7 @@ public static class ProductReader
                 folders.Add(new(reader.GetInt64(0),reader.GetString(1),reader.GetInt64(2)==1,
                     reader.GetInt64(3)==1,reader.GetString(4),Text(reader,5),excludePatterns));
             }
-            result.Add(new(library.Id,library.Name,library.Description,library.Enabled,library.Movies,library.Missing,folders));
+            result.Add(new(library.Id,library.Name,library.Description,library.Enabled,library.Movies,library.Missing,folders,library.Type));
         }
         return result;
     }
