@@ -339,10 +339,17 @@ public sealed class ImageGenerationTaskService(
     MediaStoragePathResolver pathResolver,
     ImageWorkflowService images,
     TaskLogService logs,
-    FfmpegLocator ffmpegLocator) : BackgroundService
+    FfmpegLocator ffmpegLocator,
+    FfmpegPluginSettingsService pluginSettings,
+    IPersonDetectionService personDetection) : BackgroundService
 {
     private static readonly HashSet<string> Types = new(StringComparer.OrdinalIgnoreCase) { "Poster", "Preview", "Screenshot", "GIF" };
     private readonly ConcurrentDictionary<long, CancellationTokenSource> cancellations = new();
+
+    public ImageGenerationTaskService(string databasePath, MediaStoragePathResolver pathResolver, ImageWorkflowService images,
+        TaskLogService logs, FfmpegLocator ffmpegLocator)
+        : this(databasePath, pathResolver, images, logs, ffmpegLocator, new FfmpegPluginSettingsService(databasePath),
+            new OnnxPersonDetectionService(Path.Combine(AppContext.BaseDirectory, "models", "ssd_mobilenet_v1_12-int8.onnx"))) { }
 
     public async Task<ImageTaskLaunchResult> EnqueueAsync(long movieId, string type, CancellationToken cancellationToken = default)
     {
@@ -421,18 +428,34 @@ public sealed class ImageGenerationTaskService(
             string? videoPath = await ReadPrimaryVideoAsync(input.MovieId, token);
             if (string.IsNullOrWhiteSpace(videoPath) || !File.Exists(videoPath))
                 throw new FileNotFoundException("影片文件不存在，无法生成图片。", videoPath);
-            FfmpegLookupResult lookup = ffmpegLocator.Locate();
+            FfmpegPluginSettingsDto settings = await pluginSettings.ReadAsync(token);
+            if (input.Type.Equals("Screenshot", StringComparison.OrdinalIgnoreCase) && settings.SkipWhenScreenshotsExist
+                && await HasGeneratedScreenshotsAsync(input.MovieId, token))
+            {
+                await logs.WriteAsync(taskId, "Info", "已有截图，按 FFmpeg 插件设置跳过生成。", token);
+                await CompleteAsync(taskId, input, token);
+                return;
+            }
+            FfmpegLookupResult lookup = !string.IsNullOrWhiteSpace(settings.ExecutablePath) && File.Exists(settings.ExecutablePath)
+                ? new(true, settings.ExecutablePath, "Configured", "使用插件设置中的 FFmpeg。")
+                : ffmpegLocator.Locate();
             if (!lookup.Found || string.IsNullOrWhiteSpace(lookup.Path))
                 throw new FileNotFoundException(lookup.Message);
             string ffmpeg = lookup.Path;
-            string target = await TargetPathAsync(input.MovieId, input.Type, token);
-            pathResolver.EnsureDirectoryForWrite(target);
+            string? ffprobe = LocateProbe(ffmpeg, ffmpegLocator.LocateProbe());
             await logs.WriteAsync(taskId, "Info", $"使用 FFmpeg 生成 {ImageWorkflowService.Label(input.Type)}（{lookup.Source}）。", token);
             await ExecuteAsync(await OpenAsync(SqliteOpenMode.ReadWrite, token),
                 "UPDATE Tasks SET Status='Running',Stage='Running',Progress=25,StartedAt=COALESCE(StartedAt,$at),UpdatedAt=$at WHERE Id=$id",
                 token, ("$at", Now()), ("$id", taskId));
-            await RunFfmpegAsync(ffmpeg, videoPath, target, input.Type, token);
-            await images.RegisterGeneratedAsync(input.MovieId, input.Type, target, token);
+            TimeSpan? duration = await ProbeDurationAsync(ffprobe, videoPath, token);
+            if (input.Type.Equals("Screenshot", StringComparison.OrdinalIgnoreCase))
+                await GenerateScreenshotsAsync(taskId, input.MovieId, ffmpeg, videoPath, duration, settings, token);
+            else {
+                string target = await TargetPathAsync(input.MovieId, input.Type, null, token);
+                pathResolver.EnsureDirectoryForWrite(target);
+                await RunFfmpegAsync(ffmpeg, videoPath, target, input.Type, duration, settings.ThreadCount, token);
+                await images.RegisterGeneratedAsync(input.MovieId, input.Type, target, token);
+            }
             await CompleteAsync(taskId, input, token);
         }
         catch (OperationCanceledException) {
@@ -468,21 +491,185 @@ public sealed class ImageGenerationTaskService(
             token, ("$movie", movieId));
     }
 
-    private async Task<string> TargetPathAsync(long movieId, string type, CancellationToken token)
+    private async Task<string> TargetPathAsync(long movieId, string type, int? index, CancellationToken token)
     {
         string extension = type.Equals("GIF", StringComparison.OrdinalIgnoreCase) ? ".gif" : ".jpg";
         string suffix = $"generated-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}";
-        return (await pathResolver.ResolveForMovieAsync(movieId, type, extension, null, suffix, token)).FullPath;
+        return (await pathResolver.ResolveForMovieAsync(movieId, type, extension, index, suffix, token)).FullPath;
     }
 
-    private static async Task RunFfmpegAsync(string ffmpeg, string videoPath, string target, string type, CancellationToken token)
+    private async Task GenerateScreenshotsAsync(long taskId, long movieId, string ffmpeg, string videoPath, TimeSpan? duration,
+        FfmpegPluginSettingsDto settings, CancellationToken token)
     {
+        double totalSeconds = Math.Max(1, duration?.TotalSeconds ?? 5);
+        SafeIntervalResult interval = SafeInterval(totalSeconds, duration.HasValue, settings);
+        double start = interval.Start;
+        double end = interval.End;
+        int desired = Math.Min(settings.RetainedCount, settings.CandidateCount);
+        var retained = new List<ScreenshotCandidate>();
+        var candidates = new List<ScreenshotCandidate>();
+        bool detectorWarningLogged = false;
+        int attempts = Math.Max(settings.CandidateCount, settings.MaximumAttempts);
+        int actualAttempts = 0;
+        await logs.WriteAsync(taskId, "Info",
+            $"[Screenshot Interval] Duration={TimeSpan.FromSeconds(totalSeconds):hh\\:mm\\:ss}; Start={TimeSpan.FromSeconds(start):hh\\:mm\\:ss}; End={TimeSpan.FromSeconds(end):hh\\:mm\\:ss}; Reason={interval.Reason}", token);
+        for (int attempt = 0; attempt < attempts && (attempt < settings.CandidateCount || retained.Count < desired); attempt++)
+        {
+            actualAttempts++;
+            token.ThrowIfCancellationRequested();
+            bool isRetry = attempt >= settings.CandidateCount;
+            int retrySlots = Math.Max(1, attempts - settings.CandidateCount);
+            double fraction = isRetry
+                ? ((attempt - settings.CandidateCount) + 0.5) / retrySlots
+                : (attempt + 1d) / (settings.CandidateCount + 1d);
+            double captureAt = start + ((end - start) * fraction);
+            string target = await TargetPathAsync(movieId, "Screenshot", attempt + 1, token);
+            pathResolver.EnsureDirectoryForWrite(target);
+            try
+            {
+                await CaptureFrameAsync(ffmpeg, videoPath, target, captureAt, settings.ThreadCount, token);
+                ScreenshotQuality quality = ScreenshotQualityAnalyzer.Analyze(target);
+                PersonDetectionResult person = await personDetection.DetectAsync(target, TimeSpan.FromSeconds(5), token);
+                if (!person.Available && !detectorWarningLogged)
+                {
+                    detectorWarningLogged = true;
+                    await logs.WriteAsync(taskId, "Warning", person.UnavailableReason ?? "人物检测不可用，已降级为基础画质过滤。", token);
+                }
+                string? rejected = RejectReason(quality, person, retained, settings);
+                double score = Score(quality, person);
+                bool keep = rejected is null;
+                int duplicateDistance = retained.Count == 0 ? 64 : retained.Min(item => ScreenshotQualityAnalyzer.HashDistance(item.Quality.PerceptualHash, quality.PerceptualHash));
+                var candidate = new ScreenshotCandidate(attempt + 1, target, captureAt, quality, person, score,
+                    rejected is not null, rejected, isRetry, duplicateDistance);
+                candidates.Add(candidate);
+                if (keep) retained.Add(candidate);
+                else TryDelete(target);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception error)
+            {
+                TryDelete(target);
+                await logs.WriteAsync(taskId, "Warning", $"[Screenshot Candidate Failed] CandidateIndex={attempt + 1}; Timestamp={TimeSpan.FromSeconds(captureAt):hh\\:mm\\:ss\\.fff}; Duration={TimeSpan.FromSeconds(totalSeconds):hh\\:mm\\:ss\\.fff}; IsRetry={isRetry}; Error={error.Message}", token);
+            }
+        }
+        if (retained.Count == 0) throw new InvalidOperationException("所有候选截图均生成失败或被质量过滤。请调整 FFmpeg 插件截图设置。");
+        IReadOnlyList<ScreenshotCandidate> selected = retained.OrderByDescending(item => item.Score).Take(desired).ToArray();
+        foreach (ScreenshotCandidate discarded in retained.Except(selected)) TryDelete(discarded.Path);
+        ScreenshotCandidate recommended = selected[0];
+        foreach (ScreenshotCandidate candidate in candidates)
+        {
+            bool isRetained = selected.Contains(candidate);
+            await logs.WriteAsync(taskId, "Info",
+                $"[Screenshot Candidate] CandidateIndex={candidate.Index}; Timestamp={TimeSpan.FromSeconds(candidate.Seconds):hh\\:mm\\:ss\\.fff}; Duration={TimeSpan.FromSeconds(totalSeconds):hh\\:mm\\:ss\\.fff}; HasPerson={(candidate.Person.Available ? candidate.Person.HasPerson.ToString() : "Unavailable")}; PersonCount={(candidate.Person.Available ? candidate.Person.PersonCount.ToString() : "Unavailable")}; LargestPersonAreaRatio={(candidate.Person.Available ? candidate.Person.LargestPersonAreaRatio.ToString("0.000") : "Unavailable")}; Confidence={(candidate.Person.Available ? candidate.Person.Confidence.ToString("0.000") : "Unavailable")}; BrightnessScore={BrightnessScore(candidate.Quality):0.0}; BlurScore={BlurScore(candidate.Quality):0.0}; DuplicateScore={candidate.DuplicateDistance}/64; FinalScore={candidate.Score:0.0}; Filtered={candidate.Filtered}; FilterReason={candidate.FilterReason ?? "None"}; Retained={isRetained}; Recommended={candidate == recommended}; IsRetry={candidate.IsRetry}", token);
+        }
+        foreach (ScreenshotCandidate candidate in selected)
+        {
+            await images.RegisterGeneratedAsync(movieId, "Screenshot", candidate.Path, token);
+            await logs.WriteAsync(taskId, "Info",
+                $"[Screenshot Result] Time={TimeSpan.FromSeconds(candidate.Seconds):hh\\:mm\\:ss}; Score={candidate.Score:0.0}; Recommended={candidate == recommended}; Path={candidate.Path}", token);
+        }
+        await logs.WriteAsync(taskId, "Info", $"截图完成：初始候选 {settings.CandidateCount} 张，实际尝试 {actualAttempts} 次，最大尝试 {attempts} 次，保留 {selected.Count} 张，推荐 {Path.GetFileName(recommended.Path)}。自动普通库封面接入尚未启用。", token);
+    }
+
+    private static SafeIntervalResult SafeInterval(double duration, bool hasDuration, FfmpegPluginSettingsDto settings)
+    {
+        if (!hasDuration) return new(Math.Min(5, duration), Math.Min(5, duration), "ffprobe 未返回时长，回退到不超过视频边界的 5 秒位置");
+        double start = settings.SkipStartUnit == "Minutes" ? settings.SkipStartValue * 60 : duration * settings.SkipStartValue / 100;
+        double endSkip = settings.SkipEndUnit == "Minutes" ? settings.SkipEndValue * 60 : duration * settings.SkipEndValue / 100;
+        start = Math.Clamp(start, 0, Math.Max(0, duration - 0.5));
+        double end = Math.Clamp(duration - endSkip, start, Math.Max(start, duration - 0.25));
+        string reason = "按配置跳过开头和结尾";
+        if (end - start < 1) { start = Math.Min(0.25, duration * 0.1); end = Math.Max(start, duration - 0.25); reason = "视频过短或安全区间不足 1 秒，缩小为 10%/末尾 0.25 秒安全边界"; }
+        return new(start, end, reason);
+    }
+
+    private static string? RejectReason(ScreenshotQuality quality, PersonDetectionResult person,
+        IReadOnlyList<ScreenshotCandidate> retained, FfmpegPluginSettingsDto settings)
+    {
+        if (settings.FilterBlackFrames && quality.BlackRatio > 0.85) return "Black";
+        if (settings.FilterDarkFrames && quality.Brightness < 0.10) return "Dark";
+        if (settings.FilterBlurredFrames && quality.Sharpness < 0.018) return "Blurred";
+        if (settings.FilterDuplicateFrames && retained.Any(item => ScreenshotQualityAnalyzer.HashDistance(item.Quality.PerceptualHash, quality.PerceptualHash) <= 5)) return "Duplicate";
+        if (settings.FilterNoPerson && person.Available && !person.HasPerson) return "NoPerson";
+        return null;
+    }
+
+    public static double Score(ScreenshotQuality quality, PersonDetectionResult person)
+    {
+        double visual = (Math.Clamp(quality.Brightness, 0, 0.65) / 0.65 * 25) + Math.Clamp(quality.Sharpness / 0.10, 0, 1) * 20;
+        if (!person.Available || !person.HasPerson) return visual;
+        double size = person.LargestPersonAreaRatio switch { < 0.02 => 2, <= 0.45 => 30, <= 0.7 => 22, _ => 12 };
+        double center = (1 - person.LargestPersonCenterDistance) * 15;
+        return visual + size + center + Math.Clamp(person.Confidence, 0, 1) * 10 + Math.Min(person.PersonCount - 1, 3) * 2;
+    }
+
+    private static double BrightnessScore(ScreenshotQuality quality) => Math.Clamp(quality.Brightness, 0, 0.65) / 0.65 * 25;
+    private static double BlurScore(ScreenshotQuality quality) => Math.Clamp(quality.Sharpness / 0.10, 0, 1) * 20;
+
+    private static async Task CaptureFrameAsync(string ffmpeg, string videoPath, string target, double seconds, int threads, CancellationToken token)
+    {
+        string seek = seconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        await RunProcessAsync(ffmpeg, ["-y", "-threads", threads.ToString(), "-ss", seek, "-i", videoPath, "-frames:v", "1", "-q:v", "2", target], token);
+        if (!File.Exists(target)) throw new InvalidOperationException("FFmpeg 未生成候选截图文件。");
+    }
+
+    private async Task<bool> HasGeneratedScreenshotsAsync(long movieId, CancellationToken token)
+    {
+        await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadOnly, token);
+        return await ScalarLongAsync(connection,
+            "SELECT COUNT(*) FROM Images WHERE MovieId=$movie AND ImageType='Screenshot' AND FilePath IS NOT NULL",
+            token, ("$movie", movieId)) > 0;
+    }
+
+    private static string? LocateProbe(string ffmpeg, string? fallback)
+    {
+        string beside = Path.Combine(Path.GetDirectoryName(ffmpeg) ?? "", "ffprobe.exe");
+        return File.Exists(beside) ? beside : fallback;
+    }
+
+    private static async Task<TimeSpan?> ProbeDurationAsync(string? ffprobe, string videoPath, CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(ffprobe)) return null;
+        try {
+            using Process process = new() {
+                StartInfo = new ProcessStartInfo {
+                    FileName = ffprobe,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                }
+            };
+            foreach (string argument in new[] { "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", videoPath })
+                process.StartInfo.ArgumentList.Add(argument);
+            process.Start();
+            string output = await process.StandardOutput.ReadToEndAsync(token);
+            await process.WaitForExitAsync(token);
+            return process.ExitCode == 0 && double.TryParse(output.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double seconds) && seconds > 0
+                ? TimeSpan.FromSeconds(seconds) : null;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return null; }
+    }
+
+    private static async Task RunFfmpegAsync(string ffmpeg, string videoPath, string target, string type, TimeSpan? duration, int threads, CancellationToken token)
+    {
+        double seconds = duration?.TotalSeconds ?? 5;
+        double start = duration.HasValue ? Math.Clamp(seconds * 0.05, 1, Math.Max(1, seconds - 1)) : 5;
+        double end = duration.HasValue ? Math.Max(start, seconds * 0.90) : start;
+        double captureAt = duration.HasValue ? start + ((end - start) * 0.5) : start;
+        string seek = captureAt.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         List<string> args = type.Equals("GIF", StringComparison.OrdinalIgnoreCase)
-            ? ["-y", "-ss", "00:00:05", "-t", "3", "-i", videoPath, "-vf", "fps=8,scale=480:-1:flags=lanczos", target]
-            : ["-y", "-ss", "00:00:05", "-i", videoPath, "-frames:v", "1", target];
+            ? ["-y", "-threads", threads.ToString(), "-ss", seek, "-t", "3", "-i", videoPath, "-vf", "fps=8,scale=480:-1:flags=lanczos", target]
+            : ["-y", "-threads", threads.ToString(), "-ss", seek, "-i", videoPath, "-frames:v", "1", target];
+        await RunProcessAsync(ffmpeg, args, token);
+    }
+
+    private static async Task RunProcessAsync(string executable, IReadOnlyList<string> args, CancellationToken token)
+    {
         using Process process = new() {
             StartInfo = new ProcessStartInfo {
-                FileName = ffmpeg,
+                FileName = executable,
                 RedirectStandardError = true,
                 RedirectStandardOutput = true,
                 UseShellExecute = false,
@@ -494,9 +681,11 @@ public sealed class ImageGenerationTaskService(
         process.Start();
         string stderr = await process.StandardError.ReadToEndAsync(token);
         await process.WaitForExitAsync(token);
-        if (process.ExitCode != 0 || !File.Exists(target))
+        if (process.ExitCode != 0)
             throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "FFmpeg 生成失败。" : stderr.Trim().Split('\n').Last().Trim());
     }
+
+    private static void TryDelete(string path) { try { if (File.Exists(path)) File.Delete(path); } catch { } }
 
     private async Task CompleteAsync(long taskId, TaskInput input, CancellationToken token)
     {
@@ -591,4 +780,7 @@ public sealed class ImageGenerationTaskService(
 
     private static string Now() => DateTimeOffset.UtcNow.ToString("O");
     private sealed record TaskInput(long MovieId, string Type);
+    private sealed record ScreenshotCandidate(int Index, string Path, double Seconds, ScreenshotQuality Quality,
+        PersonDetectionResult Person, double Score, bool Filtered, string? FilterReason, bool IsRetry, int DuplicateDistance);
+    private sealed record SafeIntervalResult(double Start, double End, string Reason);
 }

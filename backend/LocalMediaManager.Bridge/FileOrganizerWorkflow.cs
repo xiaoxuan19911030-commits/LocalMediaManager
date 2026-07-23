@@ -8,13 +8,20 @@ using Microsoft.Extensions.Hosting;
 namespace LocalMediaManager.Bridge;
 
 public sealed record OrganizerPlanCommand(IReadOnlyList<long> MovieIds, string FileNameTemplate,
-    string? DestinationDirectory);
+    string? DestinationDirectory, string InformationSeparator = " - ", string ListSeparator = " - ", bool TrimTitle = true);
 public sealed record OrganizerItem(long MovieId, long MediaFileId, string SourcePath, string DestinationPath,
     string Operation, bool Valid, string? Conflict, long FileSize);
 public sealed record OrganizerPreview(long TaskId, string Status, string ConfirmationToken,
     IReadOnlyList<OrganizerItem> Items, IReadOnlyList<string> Warnings, long ValidItems, long ConflictItems);
 public sealed record OrganizerExecuteCommand(string ConfirmationToken);
 public sealed record OrganizerLaunchResult(long TaskId, string Status, long TotalItems, string Message);
+
+internal static class MovieNumberNormalizer
+{
+    public static string NormalizeMovieNumber(string? value) => string.IsNullOrWhiteSpace(value)
+        ? string.Empty
+        : MetadataNamingPolicy.NormalizeMovieNumber(value, 0);
+}
 
 public sealed class FileOrganizerService(
     string databasePath,
@@ -47,7 +54,7 @@ public sealed class FileOrganizerService(
         long[] movieIds = input.MovieIds.Where(id => id > 0).Distinct().Order().ToArray();
         if (movieIds.Length == 0) throw new ArgumentException("至少选择一部影片。");
         if (movieIds.Length > 500) throw new ArgumentException("单次整理最多 500 部影片。");
-        string template = string.IsNullOrWhiteSpace(input.FileNameTemplate) ? "{Code}" : input.FileNameTemplate.Trim();
+        string template = string.IsNullOrWhiteSpace(input.FileNameTemplate) ? "{VID}+{Label}+{ActorNames}" : input.FileNameTemplate.Trim();
         ValidateTemplate(template);
         string? destination = string.IsNullOrWhiteSpace(input.DestinationDirectory)
             ? null : Path.GetFullPath(input.DestinationDirectory.Trim());
@@ -58,7 +65,8 @@ public sealed class FileOrganizerService(
             INSERT INTO Tasks(TaskType,Status,Stage,Progress,TotalItems,CompletedItems,PayloadJson,CreatedAt,UpdatedAt)
             VALUES('Organizer','PreviewReady','DryRun',0,0,0,$payload,$at,$at); SELECT last_insert_rowid();
             """, cancellationToken, ("$payload", JsonSerializer.Serialize(new { MovieIds=movieIds, FileNameTemplate=template, DestinationDirectory=destination })), ("$at", now));
-        IReadOnlyList<OrganizerItem> items = await BuildItemsAsync(connection, transaction, movieIds, template, destination, cancellationToken);
+        IReadOnlyList<OrganizerItem> items = await BuildItemsAsync(connection, transaction, movieIds, template, destination,
+            NormalizeSeparator(input.InformationSeparator), NormalizeSeparator(input.ListSeparator), input.TrimTitle, cancellationToken);
         foreach (OrganizerItem item in items) {
             await ExecuteAsync(connection, transaction, """
                 INSERT INTO FileOperationJournal(TaskId,MovieId,MediaFileId,SourcePath,DestinationPath,OperationType,Status,SourceFingerprint,ErrorMessage,CreatedAt,UpdatedAt)
@@ -170,20 +178,30 @@ public sealed class FileOrganizerService(
         await ExecutePlainAsync(connection,"UPDATE Tasks SET Status='Failed',Stage='RecoveryReport',ErrorMessage='上次整理异常中断；请查看任务日志和恢复报告。',UpdatedAt=$at WHERE TaskType='Organizer' AND Status IN ('Preparing','Running')",token,("$at",Now()));
     }
 
-    private static async Task<IReadOnlyList<OrganizerItem>> BuildItemsAsync(SqliteConnection c,System.Data.Common.DbTransaction tx,long[] movieIds,string template,string? destination,CancellationToken token)
+    private static async Task<IReadOnlyList<OrganizerItem>> BuildItemsAsync(SqliteConnection c,System.Data.Common.DbTransaction tx,long[] movieIds,string template,string? destination,string informationSeparator,string listSeparator,bool trimTitle,CancellationToken token)
     {
         var items=new List<OrganizerItem>();
         foreach(long movieId in movieIds){
-            string code="",title="",release="",actors="";
-            await using(SqliteCommand movie=c.CreateCommand()){movie.Transaction=(SqliteTransaction)tx;movie.CommandText="""SELECT COALESCE(m.Code,''),COALESCE(m.Title,''),COALESCE(m.ReleaseDate,''),(SELECT group_concat(a.Name,' ') FROM MovieActors ma JOIN Actors a ON a.Id=ma.ActorId WHERE ma.MovieId=m.Id) FROM Movies m WHERE m.Id=$id""";movie.Parameters.AddWithValue("$id",movieId);await using SqliteDataReader r=await movie.ExecuteReaderAsync(token);if(!await r.ReadAsync(token))continue;code=r.GetString(0);title=r.GetString(1);release=r.GetString(2);actors=r.IsDBNull(3)?"":r.GetString(3);}
+            RenameValues values;
+            await using(SqliteCommand movie=c.CreateCommand()){movie.Transaction=(SqliteTransaction)tx;movie.CommandText="""
+                SELECT COALESCE(m.Code,''),COALESCE(m.Title,''),COALESCE(m.ReleaseDate,''),COALESCE(m.DurationSeconds,0),COALESCE(m.ProviderRating,0),
+                       COALESCE((SELECT group_concat(a.Name,' - ') FROM MovieActors ma JOIN Actors a ON a.Id=ma.ActorId WHERE ma.MovieId=m.Id),''),
+                       COALESCE((SELECT group_concat(t.Name,' - ') FROM MovieTags mt JOIN Tags t ON t.Id=mt.TagId WHERE mt.MovieId=m.Id),''),
+                       COALESCE((SELECT group_concat(d.Name,' - ') FROM MovieDirectors md JOIN Directors d ON d.Id=md.DirectorId WHERE md.MovieId=m.Id),''),
+                       COALESCE((SELECT group_concat(se.Name,' - ') FROM MovieSeries ms JOIN Series se ON se.Id=ms.SeriesId WHERE ms.MovieId=m.Id),''),
+                       COALESCE((SELECT group_concat(g.Name,' - ') FROM MovieGenres mg JOIN Genres g ON g.Id=mg.GenreId WHERE mg.MovieId=m.Id),''),
+                       COALESCE((SELECT group_concat(st.Name,' - ') FROM MovieStudios mst JOIN Studios st ON st.Id=mst.StudioId WHERE mst.MovieId=m.Id),'')
+                  FROM Movies m WHERE m.Id=$id
+                """;movie.Parameters.AddWithValue("$id",movieId);await using SqliteDataReader r=await movie.ExecuteReaderAsync(token);if(!await r.ReadAsync(token))continue;values=new(r.GetString(0),r.GetString(1),r.GetString(2),r.GetInt64(3),r.GetDouble(4),r.GetString(5),r.GetString(6),r.GetString(7),r.GetString(8),r.GetString(9),r.GetString(10));}
             var files=new List<(long Id,string Path,long Size)>();await using(SqliteCommand query=c.CreateCommand()){query.Transaction=(SqliteTransaction)tx;query.CommandText="SELECT Id,FilePath,COALESCE(FileSize,0) FROM MediaFiles WHERE MovieId=$id AND MediaType='Video' ORDER BY IsPrimary DESC,Id";query.Parameters.AddWithValue("$id",movieId);await using SqliteDataReader r=await query.ExecuteReaderAsync(token);while(await r.ReadAsync(token))files.Add((r.GetInt64(0),r.GetString(1),r.GetInt64(2)));}
-            string baseName=ApplyTemplate(template,code,title,release,actors);
+            string baseName=ApplyTemplate(template,values,informationSeparator,listSeparator,trimTitle);
             for(int index=0;index<files.Count;index++){var file=files[index];string suffix=files.Count>1?$"-part{index+1}":"";string target=Path.Combine(destination??Path.GetDirectoryName(file.Path)!,baseName+suffix+Path.GetExtension(file.Path));string? conflict=ValidateCurrent(file.Path,target);long duplicate=await ScalarLongAsync(c,"SELECT COUNT(*) FROM MediaFiles WHERE Id<>$id AND NormalizedPath=$path",token,("$id",file.Id),("$path",NormalizePath(target)));if(duplicate>0)conflict="数据库中已有相同目标路径，禁止覆盖。";items.Add(new(movieId,file.Id,file.Path,target,destination is null?"Rename":"MoveAndRename",conflict is null,conflict,file.Size));}
         }
         return items;
     }
-    private static string ApplyTemplate(string template,string code,string title,string release,string actors){string year=release.Length>=4?release[..4]:"";string value=template.Replace("{Code}",code,StringComparison.OrdinalIgnoreCase).Replace("{Title}",title,StringComparison.OrdinalIgnoreCase).Replace("{Year}",year,StringComparison.OrdinalIgnoreCase).Replace("{Actors}",actors,StringComparison.OrdinalIgnoreCase).Trim();foreach(char invalid in Path.GetInvalidFileNameChars())value=value.Replace(invalid,'_');while(value.EndsWith('.')||value.EndsWith(' '))value=value[..^1];if(string.IsNullOrWhiteSpace(value))throw new ArgumentException("整理后的文件名为空。");return value;}
-    private static void ValidateTemplate(string template){string cleaned=template;foreach(string token in new[]{"{Code}","{Title}","{Year}","{Actors}"})cleaned=cleaned.Replace(token,"",StringComparison.OrdinalIgnoreCase);if(cleaned.Contains('{')||cleaned.Contains('}'))throw new ArgumentException("模板只支持 {Code}、{Title}、{Year}、{Actors}。");}
+    internal static string ApplyTemplate(string template,RenameValues v,string informationSeparator=" - ",string listSeparator=" - ",bool trimTitle=true){string year=v.ReleaseDate.Length>=4?v.ReleaseDate[..4]:"";string runtime=v.DurationSeconds>0?$"{Math.Round(v.DurationSeconds/60d)}min":"";string rating=v.Rating>0?v.Rating.ToString("0.#",System.Globalization.CultureInfo.InvariantCulture):"";string Lists(string value)=>value.Replace(" - ",listSeparator,StringComparison.Ordinal);var fields=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase){{"{VID}",MovieNumberNormalizer.NormalizeMovieNumber(v.Code)},{"{Code}",MovieNumberNormalizer.NormalizeMovieNumber(v.Code)},{"{Label}",Lists(v.Labels)},{"{ActorNames}",Lists(v.Actors)},{"{Actors}",Lists(v.Actors)},{"{Title}",trimTitle?v.Title.Trim():v.Title},{"{VideoType}",""},{"{Year}",year},{"{Runtime}",runtime},{"{Country}",""},{"{Director}",Lists(v.Directors)},{"{Series}",Lists(v.Series)},{"{Category}",Lists(v.Categories)},{"{Publisher}",Lists(v.Publishers)},{"{Rating}",rating},{"{ReleaseDate}",v.ReleaseDate}};string value=template;foreach(var field in fields)value=value.Replace(field.Key,field.Value,StringComparison.OrdinalIgnoreCase);value=System.Text.RegularExpressions.Regex.Replace(value,@"\s*\+\s*",informationSeparator);string escaped=System.Text.RegularExpressions.Regex.Escape(informationSeparator);value=System.Text.RegularExpressions.Regex.Replace(value,$"(?:{escaped}){{2,}}",informationSeparator);value=System.Text.RegularExpressions.Regex.Replace(value,@"^(?:\s*[-_·,，+]\s*)+|(?:\s*[-_·,，+]\s*)+$","");foreach(char invalid in Path.GetInvalidFileNameChars())value=value.Replace(invalid,'_');value=System.Text.RegularExpressions.Regex.Replace(value,@"\s+"," ").Trim().TrimEnd('.');if(string.IsNullOrWhiteSpace(value))throw new ArgumentException("整理后的文件名为空。");return value;}
+    private static string NormalizeSeparator(string? value)=>value is "-" or "_" or " " or "·" or "," or "，"?value:" - ";
+    private static void ValidateTemplate(string template){string cleaned=template;foreach(string token in new[]{"{VID}","{Code}","{Label}","{ActorNames}","{Actors}","{Title}","{VideoType}","{Year}","{Runtime}","{Country}","{Director}","{Series}","{Category}","{Publisher}","{Rating}","{ReleaseDate}"})cleaned=cleaned.Replace(token,"",StringComparison.OrdinalIgnoreCase);if(cleaned.Contains('{')||cleaned.Contains('}'))throw new ArgumentException("重命名模板包含不支持的字段。");}
     private static string? ValidateCurrent(string source,string destination){if(!File.Exists(source))return "源文件不存在或磁盘不可用。";if(string.Equals(Path.GetFullPath(source),Path.GetFullPath(destination),StringComparison.OrdinalIgnoreCase))return "源路径与目标路径相同。";if(File.Exists(destination)||Directory.Exists(destination))return "目标已存在，禁止覆盖。";string? root=Path.GetPathRoot(destination);if(string.IsNullOrWhiteSpace(root)||!Directory.Exists(root))return "目标磁盘或共享路径不可用。";return null;}
     private static string Fingerprint(string path){if(!File.Exists(path))return "missing";var file=new FileInfo(path);return $"{file.Length}:{file.LastWriteTimeUtc.Ticks}";}
     private static string PreviewToken(long taskId,IEnumerable<OrganizerItem> items){string state=string.Join('|',items.Select(item=>$"{item.MediaFileId}:{Path.GetFullPath(item.SourcePath)}:{Path.GetFullPath(item.DestinationPath)}:{Fingerprint(item.SourcePath)}:{item.Conflict}"));return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"organizer|{taskId}|{state}"))).ToLowerInvariant();}
@@ -201,4 +219,5 @@ public sealed class FileOrganizerService(
     private static string NormalizePath(string path)=>Path.GetFullPath(path).Replace(Path.AltDirectorySeparatorChar,Path.DirectorySeparatorChar).TrimEnd(Path.DirectorySeparatorChar).ToUpperInvariant();
     private static string Now()=>DateTimeOffset.UtcNow.ToString("O");
     private sealed record JournalRow(long Id,long MovieId,long MediaFileId,string SourcePath,string DestinationPath,string SourceFingerprint);
+    internal sealed record RenameValues(string Code,string Title,string ReleaseDate,long DurationSeconds,double Rating,string Actors,string Labels,string Directors,string Series,string Categories,string Publishers);
 }

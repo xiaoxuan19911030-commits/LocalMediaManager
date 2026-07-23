@@ -17,7 +17,7 @@ public sealed class FileOrganizerWorkflowTests : IAsyncLifetime
         Directory.CreateDirectory(Destination);
         await File.WriteAllBytesAsync(Source, [1, 2, 3, 4, 5]);
         await using var connection = new SqliteConnection($"Data Source={Database}"); await connection.OpenAsync();
-        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql" }) {
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0013_DirectorMetadata.sql" }) {
             await using var command=connection.CreateCommand();command.CommandText=await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory,"migrations",file));await command.ExecuteNonQueryAsync();
         }
         string at=DateTimeOffset.UtcNow.ToString("O");
@@ -92,6 +92,28 @@ public sealed class FileOrganizerWorkflowTests : IAsyncLifetime
         Assert.Equal("RolledBack",await Text(verify,"SELECT Status FROM FileOperationJournal WHERE TaskId=20"));
         Assert.Equal("Failed",await Text(verify,"SELECT Status FROM Tasks WHERE Id=20"));
         Assert.Equal(Source,await Text(verify,"SELECT FilePath FROM MediaFiles WHERE Id=1"));
+    }
+
+    [Fact]
+    public async Task LocalMovieWithEmptyVidRemovesExtraSeparators()
+    {
+        await using (SqliteConnection connection = await Open())
+            await Execute(connection, "UPDATE Movies SET Code='',Title='  Local title  ' WHERE Id=1");
+        var service = new FileOrganizerService(Database, new TaskLogService(Database));
+
+        OrganizerPreview preview = await service.DryRunAsync(new([1], "{VID}+{Title}", Destination));
+
+        Assert.EndsWith(Path.Combine("organized", "Local title.mp4"), preview.Items.Single().DestinationPath);
+    }
+
+    [Fact]
+    public async Task CustomInformationSeparatorIsAppliedWithoutChangingExtension()
+    {
+        var service = new FileOrganizerService(Database, new TaskLogService(Database));
+
+        OrganizerPreview preview = await service.DryRunAsync(new([1], "{VID}+{Title}", Destination, "_", "·", true));
+
+        Assert.EndsWith(Path.Combine("organized", "ORG-001_Organizer title.mp4"), preview.Items.Single().DestinationPath);
     }
 
     public Task DisposeAsync(){try{Directory.Delete(root,true);}catch{}return Task.CompletedTask;}

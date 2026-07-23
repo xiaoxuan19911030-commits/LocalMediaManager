@@ -30,6 +30,14 @@ public sealed record LibraryDeletePreview(
     long LinkedFiles,
     string ConfirmationToken,
     IReadOnlyList<string> Warnings);
+public sealed record LibraryMissingCleanupPreview(
+    long LibraryId,
+    string Name,
+    long MissingFileCount,
+    long AffectedMovies,
+    string ConfirmationToken,
+    IReadOnlyList<string> Warnings);
+public sealed record LibraryMissingCleanupResult(long LibraryId, long RemovedFiles, long AffectedMovies, long AuditId, string Message);
 public sealed record ScanLibraryCommand(bool FullScan = false, bool AutoSync = true);
 public sealed record ScanLaunchResult(long TaskId, string Status, string Message);
 public sealed record TaskMutationResult(long TaskId, string Status, string Message);
@@ -125,6 +133,41 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
         long auditId = await AuditAsync(connection, transaction, "LibraryDelete", "Library", libraryId, before, new { BackupPath = backupPath });
         await transaction.CommitAsync();
         return new(libraryId, true, auditId, "媒体库定义已删除；影片记录和媒体文件未删除。");
+    }
+
+    public async Task<LibraryMissingCleanupPreview> PreviewMissingCleanupAsync(long libraryId)
+    {
+        await using var connection = await OpenAsync();
+        string? name = await ScalarTextAsync(connection, null, "SELECT Name FROM Libraries WHERE Id=$id", ("$id", libraryId));
+        if (name is null) throw new KeyNotFoundException("媒体库不存在。");
+        long missingFiles = await ScalarLongAsync(connection, null,
+            "SELECT COUNT(*) FROM MediaFiles WHERE LibraryId=$id AND ExistsState='Missing'", ("$id", libraryId));
+        long affectedMovies = await ScalarLongAsync(connection, null,
+            "SELECT COUNT(DISTINCT MovieId) FROM MediaFiles WHERE LibraryId=$id AND ExistsState='Missing'", ("$id", libraryId));
+        string token = Grant("LibraryMissingCleanup", libraryId);
+        return new(libraryId, name, missingFiles, affectedMovies, token, [
+            $"将从数据库移除 {missingFiles} 条已确认缺失的文件关联，涉及 {affectedMovies} 部影片。",
+            "不会删除磁盘上的任何文件，也不会删除影片元数据、评分、收藏或标签。",
+            "执行前会创建完整数据库备份。重新出现的文件可通过扫描再次关联。"
+        ]);
+    }
+
+    public async Task<LibraryMissingCleanupResult> CleanupMissingAsync(long libraryId, ConfirmCommand input)
+    {
+        Consume(input.ConfirmationToken, "LibraryMissingCleanup", libraryId);
+        string backupPath = await BackupDatabaseAsync("library-missing-cleanup");
+        await using var connection = await OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        long affectedMovies = await ScalarLongAsync(connection, transaction,
+            "SELECT COUNT(DISTINCT MovieId) FROM MediaFiles WHERE LibraryId=$id AND ExistsState='Missing'", ("$id", libraryId));
+        long missingFiles = await ScalarLongAsync(connection, transaction,
+            "SELECT COUNT(*) FROM MediaFiles WHERE LibraryId=$id AND ExistsState='Missing'", ("$id", libraryId));
+        await ExecuteAsync(connection, transaction,
+            "DELETE FROM MediaFiles WHERE LibraryId=$id AND ExistsState='Missing'", ("$id", libraryId));
+        long auditId = await AuditAsync(connection, transaction, "LibraryMissingCleanup", "Library", libraryId,
+            new { MissingFiles = missingFiles, AffectedMovies = affectedMovies }, new { RemovedFiles = missingFiles, BackupPath = backupPath });
+        await transaction.CommitAsync();
+        return new(libraryId, missingFiles, affectedMovies, auditId, $"已清理 {missingFiles} 条缺失文件记录，涉及 {affectedMovies} 部影片。");
     }
 
     public async Task<ScanLaunchResult> StartScanAsync(long libraryId, ScanLibraryCommand input)

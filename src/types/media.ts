@@ -197,6 +197,21 @@ export interface LibraryDeletePreview {
   confirmationToken: string
   warnings: string[]
 }
+export interface LibraryMissingCleanupPreview {
+  libraryId: number
+  name: string
+  missingFileCount: number
+  affectedMovies: number
+  confirmationToken: string
+  warnings: string[]
+}
+export interface LibraryMissingCleanupResult {
+  libraryId: number
+  removedFiles: number
+  affectedMovies: number
+  auditId: number
+  message: string
+}
 export interface ScanLaunchResult { taskId: number; status: string; message: string }
 
 export interface NamedItem { id: number; name: string }

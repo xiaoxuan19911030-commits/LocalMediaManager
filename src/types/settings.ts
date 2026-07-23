@@ -145,6 +145,32 @@ export interface FfmpegToolStatus {
   pluginDirectory: string
   message: string
 }
+export interface FfmpegPluginSettings {
+  executablePath: string
+  threadCount: number
+  autoScreenshotAfterLocalImport: boolean
+  skipWhenScreenshotsExist: boolean
+  candidateCount: number
+  retainedCount: number
+  maximumAttempts: number
+  skipStartValue: number
+  skipStartUnit: 'Percent' | 'Minutes'
+  skipEndValue: number
+  skipEndUnit: 'Percent' | 'Minutes'
+  filterNoPerson: boolean
+  filterBlackFrames: boolean
+  filterDarkFrames: boolean
+  filterBlurredFrames: boolean
+  filterDuplicateFrames: boolean
+}
+export interface PersonDetectionStatus { available: boolean; unavailableReason?: string }
+export interface RenameSettings {
+  trimTitle: boolean
+  renameAfterFavorite: boolean
+  informationSeparator: string
+  listSeparator: string
+  template: string
+}
 
 export interface MdcNgToolStatus {
   serviceUrl: string

@@ -1,8 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActorDetail, ActorProfileCandidate, ActorProfileCompleteLaunchResult, ActorProfilePreview, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateDeleteGroupCommand, DuplicateDeletePreview, DuplicateResults, EntityPageResult, FilteredMovieSyncPreview, FilteredMovieSyncResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageCropCommand, ImageDeletePreview, ImageMutationResult, ImageTaskLaunchResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, PlatformOpenResult, RandomMovieResult, SafeDeleteLaunchResult, SafeDeletePreview, SafeDeletePreviewCommand, ScanLaunchResult, TaskCleanupResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
+import type { ActorDetail, ActorProfileCandidate, ActorProfileCompleteLaunchResult, ActorProfilePreview, ActorRepairPreview, AdvancedSearchFilters, BridgeHealth, DashboardSummary, DiagnosticsResult, DuplicateDeleteGroupCommand, DuplicateDeletePreview, DuplicateResults, EntityPageResult, FilteredMovieSyncPreview, FilteredMovieSyncResult, GlobalSearchResult, ImageAsset, ImageCacheCleanupResult, ImageCachePreview, ImageCacheRebuildLaunchResult, ImageCenterStatus, ImageCropCommand, ImageDeletePreview, ImageMutationResult, ImageTaskLaunchResult, ImpactPreview, LibraryDeletePreview, LibraryInput, LibraryMissingCleanupPreview, LibraryMissingCleanupResult, LibraryMutationResult, LibrarySummary, MaintenanceReport, MediaLibrary, MediaPageResult, MetadataOverview, MovieDeletePreview, MovieDetail, MutationResult, NeighborResult, NfoMutationResult, NfoPreview, OrganizerLaunchResult, OrganizerPreview, PlatformOpenResult, RandomMovieResult, SafeDeleteLaunchResult, SafeDeletePreview, SafeDeletePreviewCommand, ScanLaunchResult, TaskCleanupResult, TaskItem, TaskLogItem, TaskMutationResult } from '@/types/media'
 import type { JavBusSettings } from '@/types/settings'
 import type { MediaStorageAvailability, MetadataHealthAnalysisState, MetadataHealthSummary } from '@/types/media'
-import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, FfmpegToolStatus, LogCleanupPreview, LogCleanupResult, MdcNgSettings, MdcNgToolStatus, MetaTubeSettings, ProviderConnectionResult, ProviderDiagnosticResult, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings, UnifiedSettingsSaveResult, UpdateCheckResult } from '@/types/settings'
+import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, FfmpegPluginSettings, FfmpegToolStatus, LogCleanupPreview, LogCleanupResult, MdcNgSettings, MdcNgToolStatus, MetaTubeSettings, PersonDetectionStatus, ProviderConnectionResult, ProviderDiagnosticResult, RenameSettings, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings, UnifiedSettingsSaveResult, UpdateCheckResult } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
 
@@ -105,6 +105,11 @@ export const bridge = {
   testJavBus: (value: JavBusSettings) => request<ProviderConnectionResult>('/api/settings/providers/javbus/test', { method: 'POST', body: JSON.stringify(value) }, true, 60_000),
   providerDiagnostics: () => request<ProviderDiagnosticResult[]>('/api/settings/providers/diagnostics', { method: 'POST' }, true, 60_000),
   ffmpegStatus: () => request<FfmpegToolStatus>('/api/plugins/ffmpeg/status'),
+  ffmpegSettings: () => request<FfmpegPluginSettings>('/api/plugins/ffmpeg/settings'),
+  saveFfmpegSettings: (value: FfmpegPluginSettings) => request<FfmpegPluginSettings>('/api/plugins/ffmpeg/settings', { method: 'PUT', body: JSON.stringify(value) }),
+  personDetectionStatus: () => request<PersonDetectionStatus>('/api/plugins/ffmpeg/person-detection'),
+  renameSettings: () => request<RenameSettings>('/api/settings/rename'),
+  saveRenameSettings: (value: RenameSettings) => request<RenameSettings>('/api/settings/rename', { method: 'PUT', body: JSON.stringify(value) }),
   mdcNgStatus: () => request<MdcNgToolStatus>('/api/plugins/mdc-ng/status'),
   movie: (id: number) => request<MovieDetail>(`/api/videos/${id}`),
   movieImages: (id: number) => request<ImageAsset[]>(`/api/videos/${id}/images`),
@@ -124,7 +129,7 @@ export const bridge = {
   exportNfo: (movieId: number, confirmationToken: string, separateWhenLocked = false) => request<NfoMutationResult>(`/api/videos/${movieId}/nfo/export?separateWhenLocked=${separateWhenLocked}`, { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
   previewNfoImport: (movieId: number) => request<NfoPreview>(`/api/videos/${movieId}/nfo/import-preview`),
   importNfo: (movieId: number, confirmationToken: string) => request<NfoMutationResult>(`/api/videos/${movieId}/nfo/import`, { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
-  organizerDryRun: (movieIds: number[], fileNameTemplate: string, destinationDirectory?: string) => request<OrganizerPreview>('/api/organizer/dry-run', { method: 'POST', body: JSON.stringify({ movieIds, fileNameTemplate, destinationDirectory: destinationDirectory || null }) }),
+  organizerDryRun: (movieIds: number[], fileNameTemplate: string, destinationDirectory?: string, rename?: RenameSettings) => request<OrganizerPreview>('/api/organizer/dry-run', { method: 'POST', body: JSON.stringify({ movieIds, fileNameTemplate, destinationDirectory: destinationDirectory || null, informationSeparator: rename?.informationSeparator, listSeparator: rename?.listSeparator, trimTitle: rename?.trimTitle }) }),
   organizerPreview: (taskId: number) => request<OrganizerPreview>(`/api/organizer/${taskId}/preview`),
   executeOrganizer: (taskId: number, confirmationToken: string) => request<OrganizerLaunchResult>(`/api/organizer/${taskId}/execute`, { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
   previewDuplicateDelete: (groups: DuplicateDeleteGroupCommand[], mode: 'metadata' | 'media' = 'media', deleteDatabaseInfo = true) =>
@@ -142,6 +147,8 @@ export const bridge = {
   updateLibrary: (libraryId: number, value: LibraryInput) => request<LibraryMutationResult>(`/api/libraries/${libraryId}`, { method: 'PUT', body: JSON.stringify(value) }),
   previewDeleteLibrary: (libraryId: number) => request<LibraryDeletePreview>(`/api/libraries/${libraryId}/delete-preview`),
   deleteLibrary: (libraryId: number, confirmationToken: string) => request<LibraryMutationResult>(`/api/libraries/${libraryId}/delete`, { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
+  previewLibraryMissingCleanup: (libraryId: number) => request<LibraryMissingCleanupPreview>(`/api/libraries/${libraryId}/missing-cleanup-preview`),
+  cleanupLibraryMissing: (libraryId: number, confirmationToken: string) => request<LibraryMissingCleanupResult>(`/api/libraries/${libraryId}/missing-cleanup`, { method: 'POST', body: JSON.stringify({ confirmationToken }) }),
   scanLibrary: (libraryId: number, fullScan = false, autoSync = true) => request<ScanLaunchResult>(`/api/libraries/${libraryId}/scan`, { method: 'POST', body: JSON.stringify({ fullScan, autoSync }) }),
   tasks: (limit?: number) => request<TaskItem[]>(limit && limit > 0 ? `/api/tasks?limit=${limit}` : '/api/tasks'),
   taskLogs: (taskId: number, limit = 200) => request<TaskLogItem[]>(`/api/tasks/${taskId}/logs?limit=${limit}`),

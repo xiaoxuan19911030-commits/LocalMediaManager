@@ -41,6 +41,10 @@ builder.Services.AddSingleton(sp => new MovieImageImporter(
     sp.GetRequiredService<IHttpClientFactory>()));
 builder.Services.AddSingleton(new TaskLogService(databasePath));
 builder.Services.AddSingleton(new FfmpegLocator(databasePath, AppContext.BaseDirectory));
+builder.Services.AddSingleton(new FfmpegPluginSettingsService(databasePath));
+builder.Services.AddSingleton(new RenameSettingsService(databasePath));
+builder.Services.AddSingleton<IPersonDetectionService>(_ => new OnnxPersonDetectionService(
+    Path.Combine(AppContext.BaseDirectory, "models", "ssd_mobilenet_v1_12-int8.onnx")));
 builder.Services.AddSingleton(new ImageAssetService(databasePath, imageRoot));
 builder.Services.AddSingleton(serviceProvider => new ImageWorkflowService(
     databasePath,
@@ -111,7 +115,9 @@ builder.Services.AddSingleton(serviceProvider => new ImageGenerationTaskService(
     serviceProvider.GetRequiredService<MediaStoragePathResolver>(),
     serviceProvider.GetRequiredService<ImageWorkflowService>(),
     serviceProvider.GetRequiredService<TaskLogService>(),
-    serviceProvider.GetRequiredService<FfmpegLocator>()));
+    serviceProvider.GetRequiredService<FfmpegLocator>(),
+    serviceProvider.GetRequiredService<FfmpegPluginSettingsService>(),
+    serviceProvider.GetRequiredService<IPersonDetectionService>()));
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<ImageGenerationTaskService>());
 builder.Services.AddSingleton(serviceProvider => new FileOrganizerService(
     databasePath, serviceProvider.GetRequiredService<TaskLogService>()));
@@ -221,6 +227,16 @@ app.MapPost("/api/actors/profile-complete", async (ActorProfileCompleteCommand c
     Results.Ok(await service.EnqueueAsync(command, token)));
 app.MapGet("/api/plugins/ffmpeg/status", (FfmpegLocator ffmpeg) =>
     Results.Ok(ffmpeg.Status()));
+app.MapGet("/api/plugins/ffmpeg/settings", async (FfmpegPluginSettingsService settings, CancellationToken token) =>
+    Results.Ok(await settings.ReadAsync(token)));
+app.MapPut("/api/plugins/ffmpeg/settings", async (FfmpegPluginSettingsDto command, FfmpegPluginSettingsService settings, CancellationToken token) =>
+    Results.Ok(await settings.SaveAsync(command, token)));
+app.MapGet("/api/plugins/ffmpeg/person-detection", (IPersonDetectionService detector) =>
+    Results.Ok(new { available = detector.IsAvailable, unavailableReason = detector.UnavailableReason }));
+app.MapGet("/api/settings/rename", async (RenameSettingsService settings, CancellationToken token) =>
+    Results.Ok(await settings.ReadAsync(token)));
+app.MapPut("/api/settings/rename", async (RenameSettingsDto command, RenameSettingsService settings, CancellationToken token) =>
+    Results.Ok(await settings.SaveAsync(command, token)));
 app.MapGet("/api/plugins/mdc-ng/status", async (MdcNgProvider provider, MetadataProviderSettingsService settings, CancellationToken token) =>
     Results.Ok(await provider.StatusAsync(await settings.ReadMdcNgAsync(), token)));
 app.MapGet("/api/settings/data-safety/overview", async (DataSafetyService safety) =>
@@ -264,6 +280,10 @@ app.MapGet("/api/libraries/{libraryId:long}/delete-preview", async (long library
     Results.Ok(await service.PreviewDeleteLibraryAsync(libraryId)));
 app.MapPost("/api/libraries/{libraryId:long}/delete", async (long libraryId, ConfirmCommand command, LibraryWorkflowService service) =>
     Results.Ok(await service.DeleteLibraryAsync(libraryId, command)));
+app.MapGet("/api/libraries/{libraryId:long}/missing-cleanup-preview", async (long libraryId, LibraryWorkflowService service) =>
+    Results.Ok(await service.PreviewMissingCleanupAsync(libraryId)));
+app.MapPost("/api/libraries/{libraryId:long}/missing-cleanup", async (long libraryId, ConfirmCommand command, LibraryWorkflowService service) =>
+    Results.Ok(await service.CleanupMissingAsync(libraryId, command)));
 app.MapPost("/api/libraries/{libraryId:long}/scan", async (long libraryId, ScanLibraryCommand command, LibraryWorkflowService service) =>
     Results.Ok(await service.StartScanAsync(libraryId, command)));
 

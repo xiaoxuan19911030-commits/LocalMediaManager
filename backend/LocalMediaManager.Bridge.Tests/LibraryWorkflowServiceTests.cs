@@ -112,6 +112,27 @@ public sealed class LibraryWorkflowServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task MissingCleanupRemovesOnlyMissingFileLinksAndKeepsMovieData()
+    {
+        LibraryMutationResult library = await service.CreateLibraryAsync(new("Missing cleanup", null, true, [new(MediaRoot)]));
+        await using (var seed = await Open()) {
+            await Execute(seed, "INSERT INTO Movies(Code,Title,DurationSeconds,IsScraped,ScrapeStatus,CreatedAt,UpdatedAt) VALUES('MISS-001','Missing',0,0,'pending',$at,$at)", ("$at", DateTimeOffset.UtcNow.ToString("O")));
+            await Execute(seed, "INSERT INTO MediaFiles(MovieId,LibraryId,FilePath,NormalizedPath,FileName,MediaType,ExistsState,CreatedAt,UpdatedAt) VALUES((SELECT Id FROM Movies WHERE Code='MISS-001'),$library,'M:\\gone.mp4','m:\\gone.mp4','gone.mp4','Video','Missing',$at,$at)", ("$library", library.Id), ("$at", DateTimeOffset.UtcNow.ToString("O")));
+        }
+
+        LibraryMissingCleanupPreview preview = await service.PreviewMissingCleanupAsync(library.Id);
+        Assert.Equal(1, preview.MissingFileCount);
+        Assert.Equal(1, preview.AffectedMovies);
+        LibraryMissingCleanupResult result = await service.CleanupMissingAsync(library.Id, new(preview.ConfirmationToken));
+        Assert.Equal(1, result.RemovedFiles);
+
+        await using var verify = await Open();
+        Assert.Equal(0, await Scalar(verify, "SELECT COUNT(*) FROM MediaFiles WHERE ExistsState='Missing'"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Movies WHERE Code='MISS-001'"));
+        Assert.Single(Directory.GetFiles(Path.Combine(root, "backups", "operations"), "library-missing-cleanup-*.db", SearchOption.AllDirectories));
+    }
+
+    [Fact]
     public async Task LibraryCrudPersistsMultipleSourcesAndScanRulesForExistingRunner()
     {
         string secondRoot = Path.Combine(root, "second-media");

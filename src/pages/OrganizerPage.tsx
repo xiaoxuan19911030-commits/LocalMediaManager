@@ -19,6 +19,7 @@ import { StatusBadge } from '@/components/workspace/StatusBadges'
 import { WorkspacePage, refreshAction } from '@/components/workspace/Workspace'
 import { BRIDGE_ORIGIN, bridge } from '@/services/bridge'
 import type { DuplicateDeleteGroupCommand, DuplicateDeletePreview, DuplicateGroup, DuplicateMovie, DuplicateResults, MediaItem, NamedItem, OrganizerPreview } from '@/types/media'
+import type { RenameSettings } from '@/types/settings'
 
 type OrganizerMode = 'duplicates' | 'batch'
 type DuplicateRule = 'all' | 'code' | 'path' | 'hash'
@@ -291,6 +292,7 @@ function BatchOrganizerView() {
   const [tagDialog, setTagDialog] = useState(false)
   const [organizerDialog, setOrganizerDialog] = useState<BatchOrganizerKind>()
   const [organizerTemplate, setOrganizerTemplate] = useState('{Code}')
+  const [renameSettings, setRenameSettings] = useState<RenameSettings>()
   const [organizerDestination, setOrganizerDestination] = useState('')
   const [organizerPreview, setOrganizerPreview] = useState<OrganizerPreview>()
   const [tags, setTags] = useState<NamedItem[]>([])
@@ -305,12 +307,13 @@ function BatchOrganizerView() {
   const applyRating = () => { if (!selected.length || busy) return; setBusy('rating'); bridge.setBatchRating(selected, rating === '' ? undefined : Number(rating), rating === '').then((result) => { setRatingDialog(false); completeMutation(result.message) }).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy('')) }
   const applyTags = () => { if (!selected.length || busy) return; setBusy('tags'); bridge.updateBatchTags(selected, addTags.map((item) => item.id), removeTags.map((item) => item.id)).then((result) => { setTagDialog(false); completeMutation(result.message) }).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy('')) }
   const createBatchSync = () => { if (!selected.length || busy) return; setBusy('sync'); bridge.createBatchSync(selected).then((result) => { setNotice(result.message); clearSelection() }).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy('')) }
-  const openOrganizer = (kind: BatchOrganizerKind) => { setOrganizerDialog(kind); setOrganizerPreview(undefined); setOrganizerTemplate('{Code}'); setOrganizerDestination('') }
+  useEffect(() => { bridge.renameSettings().then(settings => { setRenameSettings(settings); setOrganizerTemplate(settings.template) }).catch(() => undefined) }, [])
+  const openOrganizer = (kind: BatchOrganizerKind) => { setOrganizerDialog(kind); setOrganizerPreview(undefined); setOrganizerTemplate(renameSettings?.template || '{VID}+{Label}+{ActorNames}'); setOrganizerDestination('') }
   const dryRunOrganizer = () => {
     if (!selected.length || busy || !organizerDialog) return
     if (organizerDialog === 'move' && !organizerDestination.trim()) { setNotice('请选择目标目录'); return }
     setBusy('organizer-preview')
-    bridge.organizerDryRun(selected, organizerTemplate, organizerDialog === 'move' ? organizerDestination : undefined).then(setOrganizerPreview).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(''))
+    bridge.organizerDryRun(selected, organizerTemplate, organizerDialog === 'move' ? organizerDestination : undefined, renameSettings).then(setOrganizerPreview).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(''))
   }
   const executeOrganizer = () => {
     if (!organizerPreview || busy) return

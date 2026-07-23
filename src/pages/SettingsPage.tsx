@@ -24,12 +24,12 @@ import { bridge } from '@/services/bridge'
 import { testMdcPathMapping } from '@/features/mdcPathMapping'
 import { useColorMode } from '@/themes/ThemeContext'
 import type { BridgeHealth, TaskItem } from '@/types/media'
-import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegToolStatus, JavBusSettings, LogCleanupPreview, LogCleanupResult, MdcNgSettings, MdcNgToolStatus, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, PlaybackSettings, ProviderDiagnosticResult, ProviderNetworkSettings, RatingRetentionSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult, WebMetadataSettings } from '@/types/settings'
+import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegPluginSettings, FfmpegToolStatus, JavBusSettings, LogCleanupPreview, LogCleanupResult, MdcNgSettings, MdcNgToolStatus, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, PersonDetectionStatus, PlaybackSettings, ProviderDiagnosticResult, ProviderNetworkSettings, RatingRetentionSettings, RenameSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult, WebMetadataSettings } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 
 const categories = [
   ['general', '常规'], ['appearance', '外观'], ['search', '搜索与筛选'], ['metadata', '元数据'],
-  ['plugins', '插件中心'], ['mediaStorage', '媒体资源'], ['shortcuts', '快捷键'], ['data', '数据与备份'], ['about', '关于'],
+  ['plugins', '插件中心'], ['rename', '重命名'], ['mediaStorage', '媒体资源'], ['shortcuts', '快捷键'], ['data', '数据与备份'], ['about', '关于'],
 ] as const
 
 type Category = (typeof categories)[number][0]
@@ -282,6 +282,7 @@ export default function SettingsPage() {
         {category === 'general' && <GeneralSection snapshot={snapshot} system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
         {category === 'metadata' && <MetadataSection/>}
         {category === 'plugins' && <><MdcPathMappingsSection value={draft.mdcNg} onChange={(value) => updateDraft('mdcNg', value)}/><PluginsSection snapshot={snapshot} mdcNg={draft.mdcNg} setMdcNg={(value) => updateDraft('mdcNg', value)} metaTube={draft.metaTube} setMetaTube={(value) => updateDraft('metaTube', value)} providerNetwork={draft.providerNetwork} setProviderNetwork={(value) => updateDraft('providerNetwork', value)} javBus={draft.javBus} setJavBus={(value) => updateDraft('javBus', value)} dmm={draft.dmm} setDmm={(value) => updateDraft('dmm', value)} javDb={draft.javDb} setJavDb={(value) => updateDraft('javDb', value)} minnano={draft.minnano} setMinnano={(value) => updateDraft('minnano', value)} wikipediaJp={draft.wikipediaJp} setWikipediaJp={(value) => updateDraft('wikipediaJp', value)} setNotice={setNotice}/></>}
+        {category === 'rename' && <RenameSettingsSection setNotice={setNotice}/>}
         {category === 'mediaStorage' && <MediaStorageSection mediaStorage={draft.mediaStorage} defaults={defaults.mediaStorage} setMediaStorage={(value) => updateDraft('mediaStorage', value)} setNotice={setNotice}/>}
         {category === 'search' && <SearchSection search={draft.search} setSearch={(value) => updateDraft('search', value)}/>}
         {category === 'shortcuts' && <ShortcutSection system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
@@ -401,6 +402,9 @@ function PluginsSection({ snapshot, mdcNg, setMdcNg, metaTube, setMetaTube, prov
 }) {
   const [ffmpeg, setFfmpeg] = useState<FfmpegToolStatus>()
   const [ffmpegError, setFfmpegError] = useState('')
+  const [ffmpegSettingsOpen, setFfmpegSettingsOpen] = useState(false)
+  const [ffmpegSettings, setFfmpegSettings] = useState<FfmpegPluginSettings>()
+  const [personDetection, setPersonDetection] = useState<PersonDetectionStatus>()
   const [mdcNgStatus, setMdcNgStatus] = useState<MdcNgToolStatus>()
   const [mdcNgError, setMdcNgError] = useState('')
   const [diagnostics, setDiagnostics] = useState<ProviderDiagnosticResult[]>([])
@@ -408,6 +412,12 @@ function PluginsSection({ snapshot, mdcNg, setMdcNg, metaTube, setMetaTube, prov
   const [diagnosticsError, setDiagnosticsError] = useState('')
   const network = providerNetwork ?? { proxyMode: 'System', proxyUrl: '', username: '', password: '' }
   const refreshFfmpeg = () => bridge.ffmpegStatus().then(setFfmpeg).catch((reason: Error) => setFfmpegError(reason.message))
+  const openFfmpegSettings = () => Promise.all([bridge.ffmpegSettings(), bridge.personDetectionStatus()])
+    .then(([settings, detection]) => { setFfmpegSettings(settings); setPersonDetection(detection); setFfmpegSettingsOpen(true) })
+    .catch((reason: Error) => setNotice(reason.message))
+  const saveFfmpegSettings = () => ffmpegSettings && bridge.saveFfmpegSettings(ffmpegSettings)
+    .then(value => { setFfmpegSettings(value); setFfmpegSettingsOpen(false); setNotice('FFmpeg 插件设置已保存') })
+    .catch((reason: Error) => setNotice(reason.message))
   const refreshMdcNg = () => bridge.mdcNgStatus().then(status => { setMdcNgStatus(status); setMdcNgError('') }).catch((reason: Error) => setMdcNgError(reason.message))
   const refreshDiagnostics = useCallback(() => {
     setDiagnosticsBusy(true)
@@ -523,10 +533,13 @@ function PluginsSection({ snapshot, mdcNg, setMdcNg, metaTube, setMetaTube, prov
             bridge.openDirectory(directory).then(result => setNotice(result.message)).catch((reason: Error) => setNotice(reason.message))
           }}>打开插件目录</Button>
           <Button variant="outlined" startIcon={<CloudDownloadRoundedIcon/>} onClick={() => window.open('https://www.gyan.dev/ffmpeg/builds/', '_blank')}>下载</Button>
-          <Button variant="outlined" startIcon={<RefreshRoundedIcon/>} onClick={refreshFfmpeg}>刷新检测</Button>
+          <Button variant="outlined" startIcon={<RefreshRoundedIcon/>} onClick={refreshFfmpeg}>重新检测</Button>
+          <Button variant="outlined" onClick={openFfmpegSettings}>设置</Button>
         </Stack>
       </Stack>
     </SurfaceSection>
+    <FfmpegSettingsDialog open={ffmpegSettingsOpen} value={ffmpegSettings} detection={personDetection}
+      onChange={setFfmpegSettings} onClose={() => setFfmpegSettingsOpen(false)} onSave={() => void saveFfmpegSettings()}/>
   </Stack>
   const groups = [...new Set(snapshot.servers.map(item => item.pluginId || 'legacy'))]
     .map(id => ({ id, servers: snapshot.servers.filter(item => (item.pluginId || 'legacy') === id) }))
@@ -1116,4 +1129,92 @@ function renderMediaTemplate(template: string) {
     .replaceAll('{MovieCode}', 'ABC-123')
     .replaceAll('{MovieTitle}', 'Example Movie')
     .trim() || '<empty>'
+}
+
+function FfmpegSettingsDialog({ open, value, detection, onChange, onClose, onSave }: {
+  open: boolean
+  value?: FfmpegPluginSettings
+  detection?: PersonDetectionStatus
+  onChange: (value: FfmpegPluginSettings) => void
+  onClose: () => void
+  onSave: () => void
+}) {
+  const set = <K extends keyof FfmpegPluginSettings>(key: K, next: FfmpegPluginSettings[K]) => value && onChange({ ...value, [key]: next })
+  return <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+    <DialogTitle>FFmpeg 插件设置</DialogTitle>
+    <DialogContent dividers>
+      {!value ? <Typography color="text.secondary">正在加载...</Typography> : <Stack spacing={2}>
+        <TextField label="FFmpeg.exe 路径" value={value.executablePath} onChange={event => set('executablePath', event.target.value)} helperText="留空时自动检测插件目录和系统 PATH。"/>
+        <TextField type="number" label="线程数" value={value.threadCount} onChange={event => set('threadCount', Number(event.target.value))} slotProps={{ htmlInput: { min: 1, max: 64 } }}/>
+        <Divider/><Typography variant="subtitle2">截图</Typography>
+        <FormControlLabel control={<Switch checked={value.autoScreenshotAfterLocalImport} onChange={event => set('autoScreenshotAfterLocalImport', event.target.checked)}/>} label="导入普通媒体后自动生成截图（当前仅保存配置，尚未接入导入流程）"/>
+        <FormControlLabel control={<Switch checked={value.skipWhenScreenshotsExist} onChange={event => set('skipWhenScreenshotsExist', event.target.checked)}/>} label="已有截图时跳过"/>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(3,minmax(0,1fr))' }, gap: 1.5 }}>
+          <TextField type="number" label="候选截图数量" value={value.candidateCount} onChange={event => set('candidateCount', Number(event.target.value))} slotProps={{ htmlInput: { min: 6, max: 30 } }}/>
+          <TextField type="number" label="最终保留数量" value={value.retainedCount} onChange={event => set('retainedCount', Number(event.target.value))} slotProps={{ htmlInput: { min: 1, max: 30 } }}/>
+          <TextField type="number" label="最大截图尝试次数" value={value.maximumAttempts} onChange={event => set('maximumAttempts', Number(event.target.value))} slotProps={{ htmlInput: { min: 6, max: 100 } }}/>
+        </Box>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 140px 1fr 140px' }, gap: 1.5 }}>
+          <TextField type="number" label="跳过开头" value={value.skipStartValue} onChange={event => set('skipStartValue', Number(event.target.value))}/>
+          <TextField select label="单位" value={value.skipStartUnit} onChange={event => set('skipStartUnit', event.target.value as 'Percent' | 'Minutes')}><MenuItem value="Percent">百分比</MenuItem><MenuItem value="Minutes">分钟</MenuItem></TextField>
+          <TextField type="number" label="跳过结尾" value={value.skipEndValue} onChange={event => set('skipEndValue', Number(event.target.value))}/>
+          <TextField select label="单位" value={value.skipEndUnit} onChange={event => set('skipEndUnit', event.target.value as 'Percent' | 'Minutes')}><MenuItem value="Percent">百分比</MenuItem><MenuItem value="Minutes">分钟</MenuItem></TextField>
+        </Box>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+          <FormControlLabel control={<Switch checked={value.filterBlackFrames} onChange={event => set('filterBlackFrames', event.target.checked)}/>} label="过滤黑屏"/>
+          <FormControlLabel control={<Switch checked={value.filterDarkFrames} onChange={event => set('filterDarkFrames', event.target.checked)}/>} label="过滤过暗"/>
+          <FormControlLabel control={<Switch checked={value.filterBlurredFrames} onChange={event => set('filterBlurredFrames', event.target.checked)}/>} label="过滤模糊"/>
+          <FormControlLabel control={<Switch checked={value.filterDuplicateFrames} onChange={event => set('filterDuplicateFrames', event.target.checked)}/>} label="过滤重复截图"/>
+          <FormControlLabel control={<Switch checked={value.filterNoPerson} onChange={event => set('filterNoPerson', event.target.checked)}/>} label="过滤无人场景"/>
+        </Stack>
+        <Alert severity={detection?.available ? 'success' : 'warning'}>{detection?.available ? '人物检测可用，检测完全在本机执行。' : detection?.unavailableReason || '人物检测不可用，将自动降级为基础画质过滤。'}</Alert>
+      </Stack>}
+    </DialogContent>
+    <DialogActions><Button onClick={onClose}>取消</Button><Button variant="contained" disabled={!value} onClick={onSave}>保存插件设置</Button></DialogActions>
+  </Dialog>
+}
+
+const renameTokens = ['{VID}', '{Label}', '{ActorNames}', '{Title}', '{VideoType}', '{Year}', '{Runtime}', '{Country}', '{Director}', '{Series}', '{Category}', '{Publisher}', '{Rating}', '{ReleaseDate}']
+const renameSeparators = [' - ', '-', '_', ' ', '·', ',', '，']
+
+function RenameSettingsSection({ setNotice }: { setNotice: (value: string) => void }) {
+  const [value, setValue] = useState<RenameSettings>()
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { bridge.renameSettings().then(setValue).catch((reason: Error) => setNotice(reason.message)) }, [setNotice])
+  if (!value) return <SurfaceSection title="重命名" description="正在读取重命名设置。"><Typography color="text.secondary">正在加载...</Typography></SurfaceSection>
+  const insert = (token: string) => {
+    const input = inputRef.current
+    const start = input?.selectionStart ?? value.template.length
+    const end = input?.selectionEnd ?? start
+    const template = value.template.slice(0, start) + token + value.template.slice(end)
+    setValue({ ...value, template })
+    requestAnimationFrame(() => { input?.focus(); input?.setSelectionRange(start + token.length, start + token.length) })
+  }
+  const preview = value.template
+    .replaceAll('{VID}', 'SONE-454').replaceAll('{Label}', '收藏').replaceAll('{ActorNames}', '演员甲 - 演员乙')
+    .replaceAll('{Title}', '示例标题').replaceAll('{VideoType}', 'MP4').replaceAll('{Year}', '2026')
+    .replaceAll('{Runtime}', '120min').replaceAll('{Country}', '日本').replaceAll('{Director}', '导演甲')
+    .replaceAll('{Series}', '系列甲').replaceAll('{Category}', '类别甲').replaceAll('{Publisher}', '发行商甲')
+    .replaceAll('{Rating}', '8.5').replaceAll('{ReleaseDate}', '2026-07-23')
+    .replace(/\s*\+\s*/g, value.informationSeparator).replace(/(?:\s+-\s+){2,}/g, value.informationSeparator).trim()
+  return <Stack spacing={2}>
+    <SurfaceSection title="基础" description="重命名继续使用 Dry Run、冲突预检和确认执行。">
+      <Stack spacing={1}>
+        <FormControlLabel control={<Switch checked={value.trimTitle} onChange={event => setValue({ ...value, trimTitle: event.target.checked })}/>} label="去除标题两边空格"/>
+        <FormControlLabel control={<Switch checked={value.renameAfterFavorite} onChange={event => setValue({ ...value, renameAfterFavorite: event.target.checked })}/>} label="添加已收藏标签后自动重命名"/>
+      </Stack>
+    </SurfaceSection>
+    <SurfaceSection title="规则" description="Standard 的 VID 使用标准大写番号；Local 的 VID 为空并自动清理多余分隔符。">
+      <Stack spacing={1.5}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,minmax(0,1fr))' }, gap: 1.5 }}>
+          <TextField select label="信息分隔符" value={value.informationSeparator} onChange={event => setValue({ ...value, informationSeparator: event.target.value })}>{renameSeparators.map(item => <MenuItem key={`info-${item}`} value={item}>{item === ' ' ? '空格' : item}</MenuItem>)}</TextField>
+          <TextField select label="标签 / 演员 / 类别分隔符" value={value.listSeparator} onChange={event => setValue({ ...value, listSeparator: event.target.value })}>{renameSeparators.map(item => <MenuItem key={`list-${item}`} value={item}>{item === ' ' ? '空格' : item}</MenuItem>)}</TextField>
+        </Box>
+        <TextField label="重命名规则" value={value.template} inputRef={inputRef} onChange={event => setValue({ ...value, template: event.target.value })}/>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>{renameTokens.map(token => <Button size="small" variant="outlined" key={token} onClick={() => insert(token)}>{token}</Button>)}</Stack>
+        <TextField label="改名预览" value={`${preview}.mp4`} slotProps={{ input: { readOnly: true } }}/>
+        <Box><Button variant="contained" onClick={() => bridge.saveRenameSettings(value).then(saved => { setValue(saved); setNotice('重命名设置已保存') }).catch((reason: Error) => setNotice(reason.message))}>保存重命名设置</Button></Box>
+      </Stack>
+    </SurfaceSection>
+  </Stack>
 }

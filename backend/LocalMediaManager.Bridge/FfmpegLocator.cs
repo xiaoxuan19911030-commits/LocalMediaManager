@@ -27,11 +27,15 @@ public sealed class FfmpegLocator
         return new(false, null, "Missing", "FFmpeg 不存在。请下载 ffmpeg.exe 和 ffprobe.exe，并放入 plugins\\ffmpeg。");
     }
 
+    public string? LocateProbe() => Candidates("ffprobe.exe")
+        .Select(item => item.Path)
+        .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path));
+
     public FfmpegToolStatusDto Status()
     {
         Directory.CreateDirectory(PluginDirectory);
         FfmpegLookupResult ffmpeg = Locate();
-        string? probe = Candidates("ffprobe.exe").Select(item => item.Path).FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path));
+        string? probe = LocateProbe();
         return new(
             ffmpeg.Found,
             ffmpeg.Path,

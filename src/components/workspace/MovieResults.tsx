@@ -6,7 +6,7 @@ import type { MouseEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { MediaCard, MediaCardGrid } from '@/components/MediaCard'
 import { EmptyState, SectionTitle } from '@/components/ProductComponents'
-import { MetadataStatusBadge, StatusBadge } from '@/components/workspace/StatusBadges'
+import { StatusBadge } from '@/components/workspace/StatusBadges'
 import type { MovieWallDisplaySettings } from '@/components/workspace/movieWallDisplay'
 import type { MediaItem } from '@/types/media'
 import type { WorkspaceViewMode } from '@/components/workspace/Workspace'
@@ -93,7 +93,6 @@ export function MovieList({ items, onPlay, onOpen, onContextMenu, onRatingClick 
           </Box>
           <Stack direction="row" spacing={.5} useFlexGap sx={{ flexWrap: 'wrap' }}>
             {item.favorite && <StatusBadge tone="error" label="收藏"/>}
-            {item.metadataStatus && <MetadataStatusBadge status={item.metadataStatus}/>}
           </Stack>
           <Stack direction="row" spacing={.5} sx={{ justifyContent: 'flex-end' }}>
             <Button size="small" startIcon={<PlayArrowRoundedIcon/>} onClick={(event) => { event.stopPropagation(); onPlay(item) }}>播放</Button>

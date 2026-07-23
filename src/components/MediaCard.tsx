@@ -33,8 +33,6 @@ export function MediaCard({ item, display = defaultMovieWallDisplay, onPlay, onO
   const recent = isRecent(item.importedAt)
   const displayTitle = item.title && !item.title.includes('\uFFFD') ? item.title : ''
   const primaryText = item.code || displayTitle || `影片 ${item.dataId}`
-  const metadataTone = item.metadataStatus?.state === 'complete' ? 'success.main' : item.metadataStatus?.state === 'unscraped' ? 'error.main' : 'warning.main'
-  const metadataTip = item.metadataStatus?.missingItems?.length ? `缺少：${item.metadataStatus.missingItems.join('、')}` : item.metadataStatus?.label
   return (
     <Card role={onOpen ? 'button' : undefined} tabIndex={onOpen ? 0 : undefined} onContextMenu={(event) => onContextMenu?.(event, item)} onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); if (clickTimer.current) window.clearTimeout(clickTimer.current); onPlay(item) }} onKeyDown={(event) => { if (onOpen && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(item) } }}
       onClick={() => { if (!onOpen) return; if (clickTimer.current) window.clearTimeout(clickTimer.current); clickTimer.current = window.setTimeout(() => onOpen(item), 180) }} sx={{ overflow: 'hidden', minWidth: 0, cursor: onOpen ? 'pointer' : 'default', position: 'relative', borderColor: selected ? 'primary.main' : undefined,
@@ -70,11 +68,6 @@ export function MediaCard({ item, display = defaultMovieWallDisplay, onPlay, onO
             <PlayArrowRoundedIcon />
           </IconButton>
         </Tooltip>
-        {item.metadataStatus && <Tooltip title={metadataTip}>
-          <Box sx={{ position: 'absolute', right: 8, bottom: 8, width: 28, height: 28, borderRadius: 1.25, display: 'grid', placeItems: 'center', bgcolor: 'rgba(10,13,20,.82)', color: metadataTone, fontWeight: 900, border: 1, borderColor: 'rgba(255,255,255,.18)' }}>
-            {item.metadataStatus.icon}
-          </Box>
-        </Tooltip>}
       </Box>
       <CardContent sx={{ p: 1.1, '&:last-child': { pb: 1.1 } }}>
         <Typography noWrap align="center" sx={{ fontWeight: 800 }}>{item.code || `#${item.dataId}`}</Typography>

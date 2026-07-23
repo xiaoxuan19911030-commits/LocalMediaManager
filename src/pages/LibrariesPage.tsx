@@ -1,5 +1,6 @@
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded'
+import DeleteSweepRoundedIcon from '@mui/icons-material/DeleteSweepRounded'
 import EditRoundedIcon from '@mui/icons-material/EditRounded'
 import FolderRoundedIcon from '@mui/icons-material/FolderRounded'
 import PlaylistAddRoundedIcon from '@mui/icons-material/PlaylistAddRounded'
@@ -14,7 +15,7 @@ import { EmptyState, HealthMeter, StatCard } from '@/components/ProductComponent
 import { StatusBadge } from '@/components/workspace/StatusBadges'
 import { WorkspacePage, refreshAction } from '@/components/workspace/Workspace'
 import { bridge } from '@/services/bridge'
-import type { LibraryDeletePreview, LibraryFolderInput, LibraryInput, MediaLibrary } from '@/types/media'
+import type { LibraryDeletePreview, LibraryFolderInput, LibraryInput, LibraryMissingCleanupPreview, MediaLibrary } from '@/types/media'
 
 const blankFolder = (): LibraryFolderInput => ({ path: '', includeSubfolders: true, enabled: true, scanMode: 'normal', excludePatterns: [] })
 const blankLibrary = (): LibraryInput => ({ name: '', description: '', enabled: true, folders: [blankFolder()], libraryType: 'Standard' })
@@ -27,6 +28,7 @@ export default function LibrariesPage() {
   const [notice, setNotice] = useState('')
   const [editor, setEditor] = useState<{ id?: number; value: LibraryInput }>()
   const [deleting, setDeleting] = useState<LibraryDeletePreview>()
+  const [cleaningMissing, setCleaningMissing] = useState<LibraryMissingCleanupPreview>()
   const [busy, setBusy] = useState(false)
   const [scanning, setScanning] = useState<number>()
 
@@ -73,6 +75,21 @@ export default function LibrariesPage() {
     catch (reason) { setError((reason as Error).message) }
     finally { setBusy(false) }
   }
+  const previewMissingCleanup = async (libraryId: number) => {
+    setError('')
+    try { setCleaningMissing(await bridge.previewLibraryMissingCleanup(libraryId)) }
+    catch (reason) { setError((reason as Error).message) }
+  }
+  const confirmMissingCleanup = async () => {
+    if (!cleaningMissing) return
+    setBusy(true); setError(''); setNotice('')
+    try {
+      const result = await bridge.cleanupLibraryMissing(cleaningMissing.libraryId, cleaningMissing.confirmationToken)
+      setNotice(result.message); setCleaningMissing(undefined); await load()
+    }
+    catch (reason) { setError((reason as Error).message) }
+    finally { setBusy(false) }
+  }
 
   const stats = libraries && <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 1.5 }}>
     <StatCard label="媒体库" value={libraries.length} icon={<StorageRoundedIcon/>}/>
@@ -92,6 +109,7 @@ export default function LibrariesPage() {
             <StatusBadge tone={library.enabled ? 'success' : 'neutral'} label={library.enabled ? '已启用' : '已停用'}/>
             <Button size="small" variant="outlined" onClick={() => navigate(`/media?libraryId=${library.id}&libraryName=${encodeURIComponent(library.name)}`)}>查看影片</Button>
             <Button size="small" variant="outlined" startIcon={<RefreshRoundedIcon/>} disabled={!library.enabled || scanning !== undefined} onClick={() => void scan(library.id, true)}>扫描影片</Button>
+            <Button size="small" variant="outlined" color="warning" startIcon={<DeleteSweepRoundedIcon/>} disabled={library.missingCount === 0 || busy} onClick={() => void previewMissingCleanup(library.id)}>清理缺失记录</Button>
             <Tooltip title="编辑媒体库"><IconButton aria-label="编辑媒体库" onClick={() => openEdit(library)}><EditRoundedIcon/></IconButton></Tooltip>
             <Tooltip title="删除媒体库定义"><IconButton aria-label="删除媒体库定义" color="error" onClick={() => void previewDelete(library.id)}><DeleteOutlineRoundedIcon/></IconButton></Tooltip>
           </Stack>
@@ -104,6 +122,17 @@ export default function LibrariesPage() {
       <DialogTitle>删除媒体库定义</DialogTitle>
       {deleting && <DialogContent dividers><Alert severity="warning" sx={{ mb: 2 }}>将删除“{deleting.name}”及其 {deleting.folderCount} 个来源定义。</Alert><Stack spacing={1}>{deleting.warnings.map(warning => <Typography key={warning} variant="body2">• {warning}</Typography>)}</Stack></DialogContent>}
       <DialogActions><Button onClick={() => setDeleting(undefined)} disabled={busy}>取消</Button><Button color="error" variant="contained" onClick={() => void confirmDelete()} disabled={busy}>{busy ? '删除中…' : '删除媒体库定义'}</Button></DialogActions>
+    </Dialog>
+    <Dialog open={Boolean(cleaningMissing)} onClose={busy ? undefined : () => setCleaningMissing(undefined)} fullWidth maxWidth="sm">
+      <DialogTitle>清理缺失文件记录</DialogTitle>
+      {cleaningMissing && <DialogContent dividers>
+        <Alert severity="warning" sx={{ mb: 2 }}>“{cleaningMissing.name}”中有 {cleaningMissing.missingFileCount} 条缺失文件记录，涉及 {cleaningMissing.affectedMovies} 部影片。</Alert>
+        <Stack spacing={1}>{cleaningMissing.warnings.map(warning => <Typography key={warning} variant="body2">• {warning}</Typography>)}</Stack>
+      </DialogContent>}
+      <DialogActions>
+        <Button onClick={() => setCleaningMissing(undefined)} disabled={busy}>取消</Button>
+        <Button color="error" variant="contained" onClick={() => void confirmMissingCleanup()} disabled={busy || !cleaningMissing?.missingFileCount}>{busy ? '清理中…' : '确认清理记录'}</Button>
+      </DialogActions>
     </Dialog>
   </WorkspacePage>
 }
