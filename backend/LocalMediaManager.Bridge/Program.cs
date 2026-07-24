@@ -23,10 +23,15 @@ builder.WebHost.UseUrls(bridgeUrl);
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddSingleton(new RatingHistoryService(databasePath));
+builder.Services.AddSingleton<IMovieNumberExtractor>(_ => new MovieNumberExtractor(
+    Path.Combine(AppContext.BaseDirectory, "movie-number-rules.json")));
+builder.Services.AddSingleton(serviceProvider => new MovieNumberManagementService(
+    databasePath, serviceProvider.GetRequiredService<IMovieNumberExtractor>()));
 builder.Services.AddSingleton(serviceProvider => new ProductWriter(databasePath, serviceProvider.GetRequiredService<RatingHistoryService>()));
 builder.Services.AddSingleton(new PlaybackSettingsService(databasePath, configDatabasePath));
 builder.Services.AddHttpClient();
-builder.Services.AddSingleton(new LibraryWorkflowService(databasePath));
+builder.Services.AddSingleton(serviceProvider => new LibraryWorkflowService(
+    databasePath, serviceProvider.GetRequiredService<IMovieNumberExtractor>()));
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<LibraryWorkflowService>());
 builder.Services.AddSingleton(new MediaStoragePathResolver(databasePath, installRoot));
 builder.Services.AddSingleton(new MetadataProviderSettingsService(databasePath));
@@ -103,7 +108,8 @@ builder.Services.AddSingleton(serviceProvider => new MetadataSyncExecutor(
     serviceProvider.GetRequiredService<NfoService>(),
     serviceProvider.GetRequiredService<TaskLogService>(),
     serviceProvider.GetRequiredService<MovieImageImporter>(),
-    serviceProvider.GetRequiredService<MetadataHealthAnalysisService>()));
+    serviceProvider.GetRequiredService<MetadataHealthAnalysisService>(),
+    serviceProvider.GetRequiredService<IMovieNumberExtractor>()));
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<MetadataSyncExecutor>());
 builder.Services.AddSingleton(serviceProvider => new ImageCacheTaskService(
     databasePath,
@@ -179,7 +185,7 @@ app.Use(async (context, next) => {
 app.MapGet("/health", () => Results.Ok(new {
     product = "Local Media Manager",
     abbreviation = "LMM",
-    version = "0.7.1",
+    version = "0.7.2",
     status = "ok",
     databaseAvailable = File.Exists(databasePath),
     databasePath,
@@ -412,9 +418,9 @@ app.MapGet("/api/videos", async (int? limit, int? offset, string? search, string
     return Results.Ok(await ProductReader.ReadVideosPageAsync(databasePath, bridgeUrl, search ?? "", sort ?? "newest", take, skip));
 });
 
-app.MapGet("/api/videos/{movieId:long}", async (long movieId) => {
+app.MapGet("/api/videos/{movieId:long}", async (long movieId, IMovieNumberExtractor extractor) => {
     if (!File.Exists(databasePath)) return Results.NotFound();
-    MovieDetailDto? detail = await ProductReader.ReadMovieAsync(databasePath, bridgeUrl, movieId);
+    MovieDetailDto? detail = await ProductReader.ReadMovieAsync(databasePath, bridgeUrl, movieId, extractor);
     return detail is null ? Results.NotFound() : Results.Ok(detail);
 });
 
@@ -422,6 +428,11 @@ app.MapGet("/api/videos/{movieId:long}/neighbors", async (long movieId, string? 
     File.Exists(databasePath)
         ? Results.Ok(await ProductReader.ReadNeighborsAsync(databasePath, movieId, search ?? "", sort ?? "newest"))
         : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
+
+app.MapPost("/api/videos/{movieId:long}/number/reidentify", async (long movieId, MovieNumberManagementService service) =>
+    Results.Ok(await service.ReidentifyAsync(movieId)));
+app.MapPut("/api/videos/{movieId:long}/number", async (long movieId, MovieNumberUpdateCommand command, MovieNumberManagementService service) =>
+    Results.Ok(await service.ReidentifyAsync(movieId, command.Number)));
 
 app.MapPatch("/api/videos/{movieId:long}/state", async (long movieId, UserStateCommand command, ProductWriter writer) =>
     Results.Ok(await writer.SetUserStateAsync(movieId, command)));

@@ -2,10 +2,24 @@
 
 ## Current Release
 
-- **Version:** 0.6.2
-- **Release:** MovieWall Polish
-- **Branch policy:** Trunk-based development. `main` is the only long-lived development branch after this release.
+- **Version:** 0.7.2
+- **Release:** Movie Number Extractor
+- **Branch policy:** Development is isolated on `sprint/0.7.2-movie-number-extractor` until verification is complete.
 - **Restore policy:** Official version recovery uses immutable release tags, starting with `v0.6.0`; rollback branches are no longer long-term restore points.
+
+## 0.7.2 - Movie Number Extractor
+
+**Status:** Release candidate / verification
+**Date:** 2026-07-24
+
+Scope:
+
+- Add a JSON-configured rule engine for movie number extraction without changing Movie or MediaFile schema.
+- Preserve original file names and paths while Standard scans, Provider requests, database display, and MovieWall use normalized numbers.
+- Support standard, compact, FC2, 1PONDO, CARIB, HEYDOUGA, and LUXU patterns, suffix modifiers, multipart markers, and filename noise.
+- Prevent automatic metadata sync below the confidence threshold.
+- Expose recognition details, re-identification, and manual number correction on the existing detail page.
+- Fix transient Bridge and Dashboard errors during desktop startup.
 
 ## Unreleased - Media Library Types
 

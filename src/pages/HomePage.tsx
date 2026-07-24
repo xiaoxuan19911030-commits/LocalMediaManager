@@ -127,7 +127,34 @@ export default function HomePage() {
   const [notice, setNotice] = useState('')
   const navigate = useNavigate()
 
-  useEffect(() => { bridge.dashboard().then(setDashboard).catch((reason: Error) => setError(reason.message)) }, [])
+  useEffect(() => {
+    let active = true
+    let retryTimer: number | undefined
+    const retryDelays = [0, 500, 1000, 2000, 4000]
+
+    const load = async (attempt: number) => {
+      try {
+        const value = await bridge.dashboard()
+        if (!active) return
+        setDashboard(value)
+        setError('')
+      } catch (reason) {
+        if (!active) return
+        const nextAttempt = attempt + 1
+        if (nextAttempt < retryDelays.length) {
+          retryTimer = window.setTimeout(() => void load(nextAttempt), retryDelays[nextAttempt])
+          return
+        }
+        setError(reason instanceof Error ? reason.message : String(reason))
+      }
+    }
+
+    void load(0)
+    return () => {
+      active = false
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer)
+    }
+  }, [])
 
   const play = (item: MediaItem) => bridge.play(item.dataId).then(() => setNotice(`已交给系统播放器：${item.code}`)).catch((reason: Error) => setNotice(reason.message))
   const openMovie = (id?: number) => { if (id) navigate(`/movies/${id}`) }

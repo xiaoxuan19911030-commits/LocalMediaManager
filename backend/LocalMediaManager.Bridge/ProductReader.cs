@@ -40,7 +40,8 @@ public sealed record MovieDetailDto(long Id, string? Code, string? Title, string
     string? NfoPath, string? ImportedAt, string UpdatedAt, bool Favorite, double UserRating, bool UserRatingSet, long PlayCount,
     string? LastPlayedAt, long LastPositionSeconds, string? Notes, string? CoverUrl, string? SourceUrl,
     MetadataStatusDto MetadataStatus, IReadOnlyList<MediaFileDto> MediaFiles, IReadOnlyList<NamedDto> Actors, IReadOnlyList<NamedDto> Directors, IReadOnlyList<NamedDto> Tags,
-    IReadOnlyList<NamedDto> Genres, IReadOnlyList<NamedDto> Studios, IReadOnlyList<NamedDto> Series);
+    IReadOnlyList<NamedDto> Genres, IReadOnlyList<NamedDto> Studios, IReadOnlyList<NamedDto> Series,
+    MovieNumberExtractionResult? NumberRecognition);
 public sealed record EntityCardDto(long Id, string Name, long MovieCount, string? ImageUrl);
 public sealed record ActorDetailDto(long Id, string Name, string? Alias, int? Gender, string? BirthDate, string? Description,
     int? HeightCm, string? Cup, string? BirthPlace, string? ActivityPeriod);
@@ -718,7 +719,7 @@ public static class ProductReader
         return reasons.Count == 0 ? new[] { "排序优先" } : reasons;
     }
 
-    public static async Task<MovieDetailDto?> ReadMovieAsync(string databasePath, string bridgeUrl, long movieId)
+    public static async Task<MovieDetailDto?> ReadMovieAsync(string databasePath, string bridgeUrl, long movieId, IMovieNumberExtractor? extractor = null)
     {
         await using var connection = await OpenAsync(databasePath);
         string detailImageSource = await ReadImageSourceSettingAsync(connection, "movieWall.detailImageSource", "fanart");
@@ -743,9 +744,16 @@ public static class ProductReader
             command.CommandText="SELECT Id,FilePath,FileName,Extension,FileSize,SourceType,ExistsState,IsPrimary FROM MediaFiles WHERE MovieId=$id ORDER BY IsPrimary DESC,Id"; command.Parameters.AddWithValue("$id",movieId);
             await using var reader=await command.ExecuteReaderAsync(); while(await reader.ReadAsync()) files.Add(new(reader.GetInt64(0),reader.GetString(1),reader.GetString(2),Text(reader,3),reader.GetInt64(4),reader.GetString(5),reader.GetString(6),reader.GetInt64(7)==1));
         }
+        bool standardLibrary = true;
+        if (await ColumnExistsAsync(connection, "Libraries", "LibraryType")) await using (var command = connection.CreateCommand()) {
+            command.CommandText = "SELECT COALESCE((SELECT l.LibraryType FROM MediaFiles f LEFT JOIN Libraries l ON l.Id=f.LibraryId WHERE f.MovieId=$id AND f.IsPrimary=1 LIMIT 1),'Standard')";
+            command.Parameters.AddWithValue("$id", movieId);
+            standardLibrary = string.Equals((await command.ExecuteScalarAsync())?.ToString(), "Standard", StringComparison.OrdinalIgnoreCase);
+        }
+        MovieNumberExtractionResult? recognition = extractor is null || files.Count == 0 || !standardLibrary ? null : extractor.Extract(files[0].FileName);
         return new(value.Id,value.Code,value.Title,value.Original,value.Release,value.Duration,value.Description,value.Provider,value.Scraped,value.Status,value.Nfo,value.Imported,value.Updated,value.Favorite,value.Rating,value.RatingSet,value.Plays,value.LastPlayed,value.Position,value.Notes,value.HasCover?$"{bridgeUrl}/api/images/{movieId}/primary?source={detailImageSource}":null,
             sourceUrl,metadataStatus,files,await ReadNamesAsync(connection,"Actors","MovieActors","ActorId",movieId),await ReadNamesIfExistsAsync(connection,"Directors","MovieDirectors","DirectorId",movieId),await ReadNamesAsync(connection,"Tags","MovieTags","TagId",movieId),
-            await ReadNamesAsync(connection,"Genres","MovieGenres","GenreId",movieId),await ReadNamesAsync(connection,"Studios","MovieStudios","StudioId",movieId),await ReadNamesAsync(connection,"Series","MovieSeries","SeriesId",movieId));
+            await ReadNamesAsync(connection,"Genres","MovieGenres","GenreId",movieId),await ReadNamesAsync(connection,"Studios","MovieStudios","StudioId",movieId),await ReadNamesAsync(connection,"Series","MovieSeries","SeriesId",movieId),recognition);
     }
 
     private static async Task<string?> ReadSourceUrlAsync(SqliteConnection connection, long movieId)
@@ -1005,6 +1013,16 @@ public static class ProductReader
         command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$table";
         command.Parameters.AddWithValue("$table", table);
         return Convert.ToInt64(await command.ExecuteScalarAsync() ?? 0L) > 0;
+    }
+    private static async Task<bool> ColumnExistsAsync(SqliteConnection connection, string table, string column)
+    {
+        if (!await TableExistsAsync(connection, table)) return false;
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info([{table.Replace("]", "]]", StringComparison.Ordinal)}])";
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
     }
     private static async Task<bool> TableExistsAsync(string databasePath, string table)
     {

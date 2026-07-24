@@ -56,7 +56,7 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
         using HttpClient client = clients.CreateClient("MetadataImages");
         client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.Clear();
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.7.1"));
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.7.2"));
         client.DefaultRequestHeaders.Accept.ParseAdd("image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
         int previewIndex = 0;
         string temporaryRoot = await pathResolver.TemporaryRootAsync(cancellationToken);
@@ -322,7 +322,8 @@ public sealed class MetadataSyncExecutor(
     NfoService nfo,
     TaskLogService logs,
     MovieImageImporter? actorImageImporter = null,
-    MetadataHealthAnalysisService? health = null) : BackgroundService
+    MetadataHealthAnalysisService? health = null,
+    IMovieNumberExtractor? movieNumberExtractor = null) : BackgroundService
 {
     private const int MaxConcurrentSyncTasks = 6;
     private static readonly string[] ActiveStates = ["Preparing", "FetchingMetadata", "DownloadingImages", "WritingMetadata", "WritingNfo", "Running"];
@@ -481,9 +482,14 @@ public sealed class MetadataSyncExecutor(
             SyncMovie movie = await ReadMovieAsync(taskId, cancellationToken);
             bool overwrite = await ReadOverwriteAsync(taskId, cancellationToken);
             HashSet<string>? targets = await ReadTargetFieldsAsync(taskId, cancellationToken);
-            string? normalizedCode = NormalizeSyncCode(movie.Code);
+            MovieNumberExtractionResult? extraction = movieNumberExtractor?.Extract(movie.Code);
+            string? normalizedCode = extraction?.NormalizedNumber ?? NormalizeSyncCode(movie.Code);
+            if (extraction is not null && extraction.Confidence < movieNumberExtractor!.MinimumAutoSyncConfidence)
+                throw new InvalidOperationException($"番号识别置信度 {extraction.Confidence:0.00} 低于自动同步阈值 {movieNumberExtractor.MinimumAutoSyncConfidence:0.00}。");
             if (string.IsNullOrWhiteSpace(normalizedCode)) throw new InvalidOperationException("影片没有可用于同步的番号。");
             movie = movie with { Code = normalizedCode };
+            if (extraction is not null)
+                await logs.WriteAsync(taskId, "Info", $"[Movie Number] Original={extraction.OriginalFileName}; Matched={extraction.MatchedRule}; Detected={extraction.DetectedNumber}; Normalized={extraction.NormalizedNumber}; Confidence={extraction.Confidence:0.00}; PartIndex={extraction.PartIndex?.ToString() ?? "None"}", cancellationToken);
             await StageAsync(taskId, "Preparing", 8, $"准备影片 {movie.Code}", cancellationToken);
             await EnsureRunnableAsync(taskId, cancellationToken);
 

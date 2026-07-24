@@ -42,7 +42,7 @@ public sealed record ScanLibraryCommand(bool FullScan = false, bool AutoSync = t
 public sealed record ScanLaunchResult(long TaskId, string Status, string Message);
 public sealed record TaskMutationResult(long TaskId, string Status, string Message);
 
-public sealed class LibraryWorkflowService(string databasePath) : BackgroundService
+public sealed class LibraryWorkflowService(string databasePath, IMovieNumberExtractor? movieNumberExtractor = null) : BackgroundService
 {
     private static readonly HashSet<string> VideoExtensions = new(StringComparer.OrdinalIgnoreCase) {
         ".mp4", ".mkv", ".avi", ".wmv", ".mov", ".ts", ".m2ts", ".flv", ".webm",
@@ -431,7 +431,7 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
                 await WaitIfPausedAsync(taskId, control);
                 control.Cancellation.Token.ThrowIfCancellationRequested();
                 try {
-                    ImportOutcome outcome = await ImportFileAsync(connection, libraryId, path, autoSync, libraryType);
+                    ImportOutcome outcome = await ImportFileAsync(connection, taskId, libraryId, path, autoSync, libraryType);
                     imported += outcome.Imported ? 1 : 0;
                     skipped += outcome.Imported ? 0 : 1;
                     restored += outcome.RatingRestored ? 1 : 0;
@@ -498,7 +498,7 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
         }
     }
 
-    private static async Task<ImportOutcome> ImportFileAsync(SqliteConnection connection, long libraryId, string path, bool autoSync, LibraryType libraryType)
+    private async Task<ImportOutcome> ImportFileAsync(SqliteConnection connection, long scanTaskId, long libraryId, string path, bool autoSync, LibraryType libraryType)
     {
         string normalized = NormalizePath(path);
         await using var transaction = await connection.BeginTransactionAsync();
@@ -515,7 +515,12 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
         var file = new FileInfo(path);
         string baseName = Path.GetFileNameWithoutExtension(path).Trim();
         string title = string.IsNullOrWhiteSpace(baseName) ? file.Name : baseName;
-        string code = libraryType == LibraryType.Standard ? title : string.Empty;
+        MovieNumberExtractionResult? extraction = libraryType == LibraryType.Standard
+            ? movieNumberExtractor?.Extract(file.Name)
+            : null;
+        string code = extraction?.NormalizedNumber ?? (movieNumberExtractor is null && libraryType == LibraryType.Standard ? title : string.Empty);
+        bool numberAllowsSync = extraction is null || (extraction.Confidence >= (movieNumberExtractor?.MinimumAutoSyncConfidence ?? 1)
+            && !string.IsNullOrWhiteSpace(extraction.NormalizedNumber));
         string at = Now();
         long movieId = await InsertIdAsync(connection, transaction, """
             INSERT INTO Movies(Code,Title,SortTitle,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt,ImportedAt)
@@ -530,8 +535,14 @@ public sealed class LibraryWorkflowService(string databasePath) : BackgroundServ
             ("$name", file.Name), ("$extension", file.Extension.ToLowerInvariant()), ("$size", Math.Max(0, file.Length)),
             ("$source", sourceType), ("$at", at));
 
+        if (extraction is not null) {
+            string warnings = extraction.Warnings.Count == 0 ? "None" : string.Join(',', extraction.Warnings);
+            await LogAsync(connection, transaction, scanTaskId, numberAllowsSync ? "Info" : "Warning",
+                $"[Movie Number] Original={extraction.OriginalFileName}; Matched={extraction.MatchedRule ?? "None"}; Detected={extraction.DetectedNumber ?? "None"}; Normalized={extraction.NormalizedNumber ?? "None"}; Confidence={extraction.Confidence:0.00}; PartIndex={extraction.PartIndex?.ToString() ?? "None"}; Warnings={warnings}");
+        }
+
         bool restored = libraryType == LibraryType.Standard && await RatingHistoryService.RestoreForImportedMovieAsync(connection, transaction, movieId, code, at);
-        if (autoSync) {
+        if (autoSync && numberAllowsSync) {
             long syncTaskId = await InsertIdAsync(connection, transaction, """
                 INSERT INTO Tasks(TaskType,Status,Stage,Provider,Progress,TotalItems,CompletedItems,PayloadJson,CreatedAt,UpdatedAt,CurrentMovieId)
                 VALUES('Sync','Pending','Pending','MetaTube',0,1,0,$payload,$at,$at,$movie); SELECT last_insert_rowid();

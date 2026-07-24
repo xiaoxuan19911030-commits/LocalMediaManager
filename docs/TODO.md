@@ -4,6 +4,11 @@
 
 ## High
 
+### 0.7.2 Release Verification
+
+- [ ] 在三个 Provider 均启用的真实配置下复核 MDC-NG、MetaTube、JavBus 都收到 Movie Number Extractor 的标准番号；当前 Desktop Smoke 仅确认 JavBus 收到 `WAAA-448`。
+- [ ] 由 Human 决定 Freeze、Release Tag 与推送流程。
+
 ### 0.5.0 Feature Parity Finalization
 
 - [ ] 统一扫描、同步、图片、NFO 与整理任务的生命周期、DTO、日志、暂停/继续/取消/重试和异常恢复。

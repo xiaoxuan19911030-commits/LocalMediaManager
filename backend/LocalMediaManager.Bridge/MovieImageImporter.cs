@@ -78,7 +78,7 @@ public sealed class MovieImageImporter(
         using HttpClient client = clients.CreateClient("MetadataImages");
         client.Timeout = TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 10, 180));
         client.DefaultRequestHeaders.UserAgent.Clear();
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.7.1"));
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.7.2"));
         if (Uri.TryCreate(actor.ImageUrl, UriKind.Absolute, out Uri? actorUri))
             client.DefaultRequestHeaders.Referrer = new Uri(actorUri.GetLeftPart(UriPartial.Authority) + "/");
         using HttpResponseMessage response = await client.GetAsync(actor.ImageUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);

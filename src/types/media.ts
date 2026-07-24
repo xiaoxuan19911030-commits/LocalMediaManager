@@ -257,7 +257,19 @@ export interface MovieDetail {
   genres: NamedItem[]
   studios: NamedItem[]
   series: NamedItem[]
+  numberRecognition?: MovieNumberRecognition
 }
+
+export interface MovieNumberRecognition {
+  originalFileName: string
+  detectedNumber?: string
+  normalizedNumber?: string
+  matchedRule?: string
+  confidence: number
+  partIndex?: number
+  warnings: string[]
+}
+export interface MovieNumberUpdateResult { changed: boolean; message: string; recognition: MovieNumberRecognition }
 
 export interface EntityCard { id: number; name: string; movieCount: number; imageUrl?: string }
 export interface ActorDetail { id: number; name: string; alias?: string; gender?: number; birthDate?: string; description?: string; heightCm?: number; cup?: string; birthPlace?: string; activityPeriod?: string }

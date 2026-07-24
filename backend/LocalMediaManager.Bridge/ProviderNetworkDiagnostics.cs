@@ -106,7 +106,7 @@ public static class ProviderNetworkDiagnostics
 
     public static void JsonHeaders(HttpRequestMessage request)
     {
-        request.Headers.UserAgent.ParseAdd("LocalMediaManager/0.7.1");
+        request.Headers.UserAgent.ParseAdd("LocalMediaManager/0.7.2");
         request.Headers.Accept.ParseAdd("application/json,*/*;q=0.8");
     }
 

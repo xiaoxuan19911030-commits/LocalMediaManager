@@ -165,6 +165,8 @@ export default function MovieDetailPage() {
   const [descriptionExpanded, setDescriptionExpanded] = useState(false)
   const [imageTab, setImageTab] = useState<'stills' | 'screenshots'>('stills')
   const [heroOverrideUrl, setHeroOverrideUrl] = useState<string>()
+  const [numberDialog, setNumberDialog] = useState(false)
+  const [manualNumber, setManualNumber] = useState('')
 
   const [tagDialog, setTagDialog] = useState(false)
   const [tagOptions, setTagOptions] = useState<NamedItem[]>([])
@@ -284,6 +286,16 @@ export default function MovieDetailPage() {
     action.then(() => loadMovie(movie.id)).then(() => setNotice('已保存')).catch((reason: Error) => setNotice(reason.message)).finally(() => setBusy(false))
   }
   const syncMetadata = () => movie && bridge.syncMovie(movie.id).then(result => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message))
+  const reidentifyNumber = () => movie && mutate(bridge.reidentifyMovieNumber(movie.id))
+  const saveManualNumber = () => {
+    if (!movie || !manualNumber.trim()) return
+    setBusy(true)
+    bridge.updateMovieNumber(movie.id, manualNumber.trim())
+      .then(result => loadMovie(movie.id).then(() => setNotice(result.message)))
+      .then(() => setNumberDialog(false))
+      .catch((reason: Error) => setNotice(reason.message))
+      .finally(() => setBusy(false))
+  }
   const refreshStatus = () => movie && loadMovie(movie.id).then(() => setNotice('状态已刷新')).catch((reason: Error) => setNotice(reason.message))
   const refreshImages = () => {
     clearImageMemoryCache()
@@ -423,6 +435,13 @@ export default function MovieDetailPage() {
           <DetailField label="发行日期"><Typography variant="body2">{date(movie.releaseDate)}</Typography></DetailField>
           <DetailField label="时长"><Typography variant="body2">{formatDuration(movie.durationSeconds)}</Typography></DetailField>
           <DetailField label="文件大小"><Typography variant="body2">{formatSize(primaryFile?.fileSize ?? 0)}</Typography></DetailField>
+          {movie.numberRecognition && <>
+            <DetailField label="原始文件名"><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{movie.numberRecognition.originalFileName}</Typography></DetailField>
+            <DetailField label="识别番号"><Typography variant="body2">{movie.numberRecognition.detectedNumber || '未识别'}</Typography></DetailField>
+            <DetailField label="标准番号"><Typography variant="body2">{movie.numberRecognition.normalizedNumber || '未识别'}</Typography></DetailField>
+            <DetailField label="识别规则"><Typography variant="body2">{movie.numberRecognition.matchedRule || '无匹配规则'}</Typography></DetailField>
+            <DetailField label="识别置信度"><Typography variant="body2">{Math.round(movie.numberRecognition.confidence * 100)}%</Typography></DetailField>
+          </>}
           <DetailField label="厂商"><InlineEntityList items={movie.studios} onOpen={(item) => openFilteredWall('studioId', 'studioName', item)}/></DetailField>
           <DetailField label="导演"><InlineEntityList items={movie.directors} onOpen={(item) => openFilteredWall('directorId', 'directorName', item)}/></DetailField>
           <DetailField label="简介">
@@ -468,6 +487,8 @@ export default function MovieDetailPage() {
               <Button variant="outlined" color={movie.favorite ? 'error' : 'primary'} startIcon={movie.favorite ? <FavoriteRoundedIcon/> : <FavoriteBorderRoundedIcon/>} disabled={busy} onClick={() => mutate(bridge.setUserState(movie.id, { favorite: !movie.favorite }))}>{movie.favorite ? '已收藏' : '收藏'}</Button>
               <Button variant="contained" startIcon={<PlayArrowRoundedIcon/>} onClick={play}>播放影片</Button>
               <Button variant="outlined" startIcon={<SyncRoundedIcon/>} onClick={syncMetadata}>重新同步</Button>
+              {movie.numberRecognition && <Button variant="outlined" startIcon={<RefreshRoundedIcon/>} disabled={busy} onClick={reidentifyNumber}>重新识别</Button>}
+              {movie.numberRecognition && <Button variant="outlined" disabled={busy} onClick={() => { setManualNumber(movie.code || ''); setNumberDialog(true) }}>手动修改番号</Button>}
             </Stack>
           </Box>
         </Stack>
@@ -549,6 +570,12 @@ export default function MovieDetailPage() {
         <Button endIcon={<NavigateNextRoundedIcon/>} disabled={!neighbors.nextId} onClick={() => go(neighbors.nextId)}>下一部</Button>
       </Stack>
     </Stack>}
+
+    <Dialog open={numberDialog} onClose={() => !busy && setNumberDialog(false)} fullWidth maxWidth="xs">
+      <DialogTitle>手动修改番号</DialogTitle>
+      <DialogContent><TextField autoFocus fullWidth margin="normal" label="番号" value={manualNumber} onChange={event => setManualNumber(event.target.value)} helperText="只更新数据库标准番号，不修改原始文件名或路径。"/></DialogContent>
+      <DialogActions><Button onClick={() => setNumberDialog(false)}>取消</Button><Button variant="contained" disabled={busy || !manualNumber.trim()} onClick={saveManualNumber}>保存番号</Button></DialogActions>
+    </Dialog>
 
     <Dialog open={tagDialog} onClose={() => setTagDialog(false)} fullWidth maxWidth="sm">
       <DialogTitle>选择我的标签</DialogTitle>

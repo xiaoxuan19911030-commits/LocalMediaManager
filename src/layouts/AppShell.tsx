@@ -28,7 +28,28 @@ const visibleUtility:NavItem[]=[['数据中心','/data-center',<BuildRoundedIcon
 export default function AppShell(){
   const navigate=useNavigate();const{pathname}=useLocation();const[search,setSearch]=useState('');const[bridgeOnline,setBridgeOnline]=useState<boolean>();const[health,setHealth]=useState<BridgeHealth>()
   const searchRef=useRef<HTMLInputElement|null>(null);const shortcutsEnabled=useRef(true);const minimizedAtStartup=useRef(false);const closeBehavior=useRef<'exit'|'minimizeToTray'>('exit');const pathRef=useRef(pathname)
-  useEffect(()=>{let active=true;const check=()=>bridge.health().then((value)=>{if(active){setHealth(value);setBridgeOnline(true)}}).catch(()=>{if(active)setBridgeOnline(false)});void check();const timer=window.setInterval(check,5000);return()=>{active=false;window.clearInterval(timer)}},[])
+  useEffect(()=>{
+    let active=true
+    let consecutiveFailures=0
+    let timer:number|undefined
+    const check=async()=>{
+      try {
+        const value=await bridge.health()
+        if(!active)return
+        consecutiveFailures=0
+        setHealth(value)
+        setBridgeOnline(true)
+      } catch {
+        if(!active)return
+        consecutiveFailures+=1
+        if(consecutiveFailures>=3)setBridgeOnline(false)
+      } finally {
+        if(active)timer=window.setTimeout(check,consecutiveFailures>0?1000:5000)
+      }
+    }
+    void check()
+    return()=>{active=false;if(timer!==undefined)window.clearTimeout(timer)}
+  },[])
   useEffect(()=>{pathRef.current=pathname},[pathname])
   useEffect(()=>{bridge.allSettings().then(settings=>{shortcutsEnabled.current=settings.system?.globalShortcutsEnabled??true;closeBehavior.current=settings.system?.closeBehavior??'exit';if(settings.system?.startMinimizedToTray&&!minimizedAtStartup.current){minimizedAtStartup.current=true;void invoke('hide_main_window')}}).catch(()=>undefined)},[])
   useEffect(()=>{let unlistenClose:(()=>void)|undefined;let unlistenTray:(()=>void)|undefined;const quit=async()=>{if(await confirmExitIfTasksRunning()){await runAutoBackupIfDue();void invoke('close_local_media_manager')}};getCurrentWindow().onCloseRequested(async event=>{if(pathRef.current.startsWith('/settings'))return;event.preventDefault();if(closeBehavior.current==='minimizeToTray'){void invoke('hide_main_window');return}await quit()}).then(value=>{unlistenClose=value}).catch(()=>undefined);listen('lmm-tray-quit',()=>{void quit()}).then(value=>{unlistenTray=value}).catch(()=>undefined);return()=>{unlistenClose?.();unlistenTray?.()}},[])

@@ -46,6 +46,28 @@ public sealed class LibraryWorkflowServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task StandardLibraryUsesRuleEngineAndQueuesOnlyConfidentNumbers()
+    {
+        await File.WriteAllBytesAsync(Path.Combine(MediaRoot, "WAAA-448+五星+娇小可爱清纯+小坂七香.mp4"), [1, 2, 3]);
+        await File.WriteAllBytesAsync(Path.Combine(MediaRoot, "SONE454-4K.mp4"), [1, 2, 3]);
+        await File.WriteAllBytesAsync(Path.Combine(MediaRoot, "SONE-454 ABW-001.mp4"), [1, 2, 3]);
+        var extractor = new MovieNumberExtractor(FindMovieNumberRules());
+        var extractingService = new LibraryWorkflowService(Database, extractor);
+        LibraryMutationResult library = await extractingService.CreateLibraryAsync(new(
+            "Number rules", null, true, [new(MediaRoot)], nameof(LibraryType.Standard)));
+
+        ScanLaunchResult scan = await extractingService.StartScanAsync(library.Id, new(FullScan: true, AutoSync: true));
+        Assert.True(await extractingService.RunQueuedScanForTestsAsync(scan.TaskId));
+
+        await using var connection = await Open();
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM Movies WHERE Code='WAAA-448'"));
+        Assert.Equal(2, await Scalar(connection, "SELECT COUNT(*) FROM Movies WHERE Code='SONE-454'"));
+        Assert.Equal(2, await Scalar(connection, "SELECT COUNT(*) FROM Tasks WHERE TaskType='Sync'"));
+        Assert.Equal(3, await Scalar(connection, "SELECT COUNT(*) FROM TaskLogs WHERE TaskId=$id AND Message LIKE '[Movie Number]%'", ("$id", scan.TaskId)));
+        Assert.True(File.Exists(Path.Combine(MediaRoot, "WAAA-448+五星+娇小可爱清纯+小坂七香.mp4")));
+    }
+
+    [Fact]
     public async Task LibraryTypeValidationRejectsUnknownValues()
     {
         await Assert.ThrowsAsync<ArgumentException>(() => service.CreateLibraryAsync(new(
@@ -371,6 +393,15 @@ public sealed class LibraryWorkflowServiceTests : IAsyncLifetime
         command.CommandText = sql;
         foreach ((string name, object? value) in parameters) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
         await command.ExecuteNonQueryAsync();
+    }
+
+    private static string FindMovieNumberRules()
+    {
+        for (DirectoryInfo? current = new(AppContext.BaseDirectory); current is not null; current = current.Parent) {
+            string file = Path.Combine(current.FullName, "backend", "LocalMediaManager.Bridge", "movie-number-rules.json");
+            if (File.Exists(file)) return file;
+        }
+        throw new FileNotFoundException("movie-number-rules.json");
     }
 
     public Task DisposeAsync()

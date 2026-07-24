@@ -1,0 +1,27 @@
+{
+  "minimumAutoSyncConfidence": 0.8,
+  "noiseRules": [
+    { "id": "BracketNoise", "pattern": "[\\[【（(][^\\]】）)]{0,80}[\\]】）)]", "replacement": " " },
+    { "id": "DomainPrefix", "pattern": "(?i)(?:https?://)?(?:www\\.)?[a-z0-9-]+(?:\\.[a-z0-9-]+)+(?:[/@_-]+)", "replacement": " " },
+    { "id": "CodecNoise", "pattern": "(?i)(?<![A-Z0-9])(?:H\\.?26[45]|HEVC|AV1|XVID|BLURAY|WEB[-_. ]?DL)(?![A-Z0-9])", "replacement": " " }
+  ],
+  "candidateRules": [
+    { "id": "Fc2Ppv", "priority": 100, "pattern": "(?i)(?<![A-Z0-9])FC2[\\s._-]*PPV[\\s._-]*(?<number>\\d{5,9})(?!\\d)", "replacement": "FC2-PPV-${number}", "confidence": 0.99 },
+    { "id": "OnePondo", "priority": 98, "pattern": "(?i)(?<![A-Z0-9])1PONDO[\\s._-]*(?<date>\\d{6})[_-](?<sequence>\\d{3})(?!\\d)", "replacement": "1PONDO-${date}_${sequence}", "confidence": 0.99 },
+    { "id": "Caribbean", "priority": 97, "pattern": "(?i)(?<![A-Z0-9])CARIB[\\s._-]*(?<date>\\d{6})[-_](?<sequence>\\d{3})(?!\\d)", "replacement": "CARIB-${date}-${sequence}", "confidence": 0.99 },
+    { "id": "Heydouga", "priority": 96, "pattern": "(?i)(?<![A-Z0-9])HEYDOUGA[\\s._-]*(?<site>\\d{3,5})[-_](?<number>\\d{3,5})(?!\\d)", "replacement": "HEYDOUGA-${site}-${number}", "confidence": 0.99 },
+    { "id": "Luxu", "priority": 94, "pattern": "(?i)(?<![A-Z0-9])(?<studio>\\d{3})LUXU[\\s._-]*(?<number>\\d{3,6})(?!\\d)", "replacement": "${studio}LUXU-${number}", "confidence": 0.98 },
+    { "id": "StandardSeparated", "priority": 80, "pattern": "(?i)(?<![A-Z0-9])(?<prefix>[A-Z]{2,12})[-_. ]+(?<number>\\d{2,7})(?=$|[^A-Z0-9]|{{TAIL}})", "replacement": "${prefix}-${number}", "confidence": 0.97 },
+    { "id": "StandardCompact", "priority": 70, "pattern": "(?i)(?<![A-Z0-9])(?<prefix>[A-Z]{2,12})(?<number>\\d{2,7})(?=$|[^A-Z0-9]|{{TAIL}})", "replacement": "${prefix}-${number}", "confidence": 0.9 }
+  ],
+  "suffixRules": [
+    { "id": "UncensoredSuffix", "pattern": "(?i)^[\\s._-]*(?:UN|U|UC|UNCUT|LEAK)(?=$|[^A-Z0-9])" },
+    { "id": "SubtitleSuffix", "pattern": "(?i)^[\\s._-]*(?:CHS|CHT|CH|SUB)(?=$|[^A-Z0-9])" },
+    { "id": "QualitySuffix", "pattern": "(?i)^[\\s._-]*(?:AI4K|AI|UPSCALE|2160P|1080P|HDR|REMASTER|FINAL|FIX|8K|4K|2K|VR)(?=$|[^A-Z0-9])" },
+    { "id": "EditionSuffix", "pattern": "(?i)^[\\s._-]*(?:J|A|B|C)(?=$|[^A-Z0-9])" }
+  ],
+  "partRules": [
+    { "id": "NumericPart", "pattern": "(?i)^[\\s._-]+(?<part>[1-8])(?=$|[^A-Z0-9])" },
+    { "id": "CdPart", "pattern": "(?i)^[\\s._-]*(?:CD|DISC|PART)[\\s._-]*(?<part>[1-8])(?=$|[^0-9])" }
+  ]
+}
