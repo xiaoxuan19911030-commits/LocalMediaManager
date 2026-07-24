@@ -6,6 +6,10 @@
 
 ### Features
 
+- v0.7.4-C adds Standard-only targeted metadata completion with an offline Dry Run, explicit confirmation, per-field Provider capability routing, and fill-empty-only Merge.
+- Completion sessions support bounded concurrency, Provider throttling, exponential retry, per-item failure classification, persisted pause/resume checkpoints, report export, health refresh, and database rollback through existing task/audit infrastructure.
+- Local, unassigned, missing-media, low-confidence, multiple-number, Code-conflict, locked, and user-owned data are excluded or protected; normal Standard synchronization order is unchanged.
+
 - v0.7.4-B adds offline Standard metadata repair for existing Poster, Fanart, Preview, Screenshot, and NFO files.
 - Repair requires an asynchronous Dry Run, explicit plan confirmation, one SQLite transaction, per-item Before/After audit records, and Repair Session rollback.
 - The repair scanner reuses the v0.7.4-A Metadata Health inventory and excludes Local, unassigned, missing-media, low-confidence number, and code-mismatch movies.

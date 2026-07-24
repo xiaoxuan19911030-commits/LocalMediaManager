@@ -53,6 +53,7 @@ docs/               → 证据、Release 验收、字段映射、矩阵
 | [DEC-021](#dec-021-extensible-media-library-types) | 可扩展媒体库类型与普通库隔离 | Libraries / Metadata | Library Types | `feat(libraries)` |
 | [DEC-022](#dec-022-standard-metadata-health-statistics) | Standard 元数据健康统一口径 | Dashboard / Metadata Health | 0.7.4-A | `fix(metadata)` |
 | [DEC-023](#dec-023-offline-metadata-repair-safety-boundary) | 离线元数据修复安全边界 | Metadata Repair / Audit | 0.7.4-B | `feat(metadata)` |
+| [DEC-024](#dec-024-targeted-metadata-completion) | 按字段定向元数据补全 | Metadata Completion / Providers | 0.7.4-C | `feat(metadata)` |
 
 ---
 
@@ -1584,3 +1585,32 @@ The workflow reuses `Tasks`, `TaskLogs`, `OperationAudit`, `Images`, `NfoDocumen
 - Do not overwrite valid Poster, Fanart, NFO, locked data, or later user changes.
 - Do not treat an available drive root as proof that a specific NAS directory is accessible.
 - Do not execute production repair before the Human accepts the exported plan and a database backup exists.
+
+---
+
+### DEC-024: Targeted Metadata Completion
+
+| Field | Value |
+|------|-----|
+| **Decision ID** | DEC-024 |
+| **Module** | Metadata Completion / Providers / Tasks |
+| **Sprint** | 0.7.4-C |
+| **Date** | 2026-07-25 |
+| **Status** | Accepted |
+
+#### Decision
+
+Metadata Completion is separate from the normal Standard synchronization pipeline. It starts from the shared v0.7.4-A health definition and a persisted Dry Run plan, then routes only missing fields to Providers whose declared capabilities can contribute those fields. The item plan keeps field-specific fallback order, while request estimates count the first enabled Provider. Execution stops the fallback chain when all target fields are satisfied.
+
+Provider APIs may return full metadata documents because current remote APIs do not support field-selective JSON responses. LMM enforces field-level behavior locally: non-target fields are removed before `MetadataWriteService`, and Merge remains fill-empty-only. Movie Code, existing metadata, user state, user tags, ratings, images, and NFO are protected.
+
+The workflow reuses `Tasks`, `TaskLogs`, `OperationAudit`, `MetadataSyncSnapshots`, Provider implementations, `MediaStoragePathResolver`, and Metadata Health. It records per-item state and checkpoints for pause/resume, classifies failures, applies retry and Provider throttling, invalidates health after execution, and supports session rollback of database changes. No completion-specific schema is introduced.
+
+#### Prohibited
+
+- Do not run this workflow as full-library synchronization.
+- Do not call any Provider during Dry Run.
+- Do not send Local, unassigned, missing-media, low-confidence, multiple-number, or Code-conflict movies to Providers.
+- Do not overwrite existing fields, locked/user images, locked/user NFO, user tags, user ratings, favorites, or playback history.
+- Do not claim that remote Providers fetch individual JSON fields when their APIs return full metadata documents.
+- Do not execute production completion before the Human accepts the Dry Run and a production database backup exists.

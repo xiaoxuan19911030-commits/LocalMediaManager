@@ -5,6 +5,7 @@ import DescriptionRoundedIcon from '@mui/icons-material/DescriptionRounded'
 import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded'
 import ImageRoundedIcon from '@mui/icons-material/ImageRounded'
 import PersonRoundedIcon from '@mui/icons-material/PersonRounded'
+import PublishedWithChangesRoundedIcon from '@mui/icons-material/PublishedWithChangesRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import SellRoundedIcon from '@mui/icons-material/SellRounded'
 import TaskAltRoundedIcon from '@mui/icons-material/TaskAltRounded'
@@ -85,7 +86,10 @@ export default function DataCenterPage() {
   }, [query])
 
   return <WorkspacePage title="数据中心" description="统一查看完整性、诊断资源问题、处理重复影片和维护数据任务。"
-    primaryActions={[{ key: 'metadata-repair', label: '元数据修复', icon: <AutoFixHighRoundedIcon/>, variant: 'outlined', onClick: () => navigate('/metadata-repair') }]}>
+    primaryActions={[
+      { key: 'metadata-repair', label: '离线元数据修复', icon: <AutoFixHighRoundedIcon/>, variant: 'outlined', onClick: () => navigate('/metadata-repair') },
+      { key: 'metadata-completion', label: '定向元数据补全', icon: <PublishedWithChangesRoundedIcon/>, variant: 'outlined', onClick: () => navigate('/metadata-completion') },
+    ]}>
     <Paper variant="outlined" sx={{ borderRadius: 2.5, mb: 1.5, overflow: 'hidden' }}>
       <Box sx={{ p: 1.25, display: 'flex', gap: 1.25, alignItems: 'center', flexWrap: 'wrap' }}>
         <Tabs value={tab} onChange={(_, value) => setTab(value)} variant="scrollable" scrollButtons="auto" sx={{ minHeight: 40, flex: '1 1 auto' }}>

@@ -326,6 +326,37 @@ export interface MetadataRepairPreview {
   createdAt: string; completedAt?: string; canExecute: boolean; canRollback: boolean; dryRun: boolean
 }
 export interface MetadataRepairExportResult { markdownPath: string; csvPath: string; items: number; message: string }
+export interface MetadataCompletionScanCommand {
+  actors: boolean; genres: boolean; poster: boolean; fanart: boolean; nfo: boolean; description: boolean
+  series: boolean; director: boolean; studio: boolean; releaseDate: boolean; concurrency: number
+  providerPriorities?: Record<string, string[]>
+}
+export interface MetadataCompletionLaunchResult { taskId: number; status: string; message: string }
+export interface MetadataCompletionProviderCapability { provider: string; fields: string[]; minimumDelayMilliseconds: number }
+export interface MetadataCompletionCounts {
+  scannedStandardMovies: number; incompleteMovies: number; eligibleMovies: number; plannedNetworkMovies: number
+  excludedMissingMedia: number; excludedLowConfidence: number; excludedMultipleNumbers: number
+  excludedCodeConflict: number; excludedLocked: number; missingByField: Record<string, number>
+  providerRequests: Record<string, number>; completed: number; partial: number; skipped: number
+  failed: number; noResult: number; conflict: number
+}
+export interface MetadataCompletionProjection {
+  standardMovies: number; completeBefore: number; completeProjected: number; completeAfter?: number; estimatedSeconds: number
+}
+export interface MetadataCompletionItem {
+  itemId: string; movieId: number; number: string; videoPath: string; missingFields: string[]
+  requiredMissingFields: string[]; protectedFields: string[]; providerPlan: string[]; status: string
+  reason: string; failureCategory?: string; attempts: number; elapsedMilliseconds: number; addedFields: string[]
+  providerContributions: Record<string, string[]>
+}
+export interface MetadataCompletionPreview {
+  taskId: number; status: string; stage: string; progress: number; confirmationToken: string
+  options: MetadataCompletionScanCommand; capabilities: MetadataCompletionProviderCapability[]
+  counts: MetadataCompletionCounts; projection: MetadataCompletionProjection; items: MetadataCompletionItem[]
+  warnings: string[]; createdAt: string; completedAt?: string; canExecute: boolean; canResume: boolean
+  canRollback: boolean; dryRun: boolean
+}
+export interface MetadataCompletionExportResult { markdownPath: string; csvPath: string; items: number; message: string }
 export interface FilteredMovieSyncResult { count: number; message: string }
 export interface DiagnosticItem { severity: 'error' | 'warning' | 'info'; code: string; title: string; detail: string; count: number }
 export interface DiagnosticsResult { integrity: string; foreignKeyErrors: number; items: DiagnosticItem[] }

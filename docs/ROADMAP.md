@@ -7,6 +7,18 @@
 - **Branch policy:** Development is isolated on `sprint/0.7.2-movie-number-extractor` until verification is complete.
 - **Restore policy:** Official version recovery uses immutable release tags, starting with `v0.6.0`; rollback branches are no longer long-term restore points.
 
+## Unreleased - 0.7.4-C Metadata Target Sync
+
+**Status:** Self Test / production-copy Dry Run; production execution awaiting Human confirmation
+**Date:** 2026-07-25
+
+Scope:
+
+- Add a Standard-only Metadata Completion workflow driven by v0.7.4-A health and v0.7.4-B offline repair results.
+- Require persisted Dry Run, explicit confirmation, field-level Provider capability routing, fill-empty-only Merge, retry, throttling, checkpoint resume, and session rollback.
+- Exclude Local, unassigned, missing-media, low-confidence, multiple-number, Code-conflict, and user-protected data.
+- Do not execute production completion, deploy, or modify the production database before Human acceptance of the exported plan.
+
 ## Unreleased - 0.7.4-B Metadata Repair
 
 **Status:** Self Test / Dry Run; production execution awaiting Human confirmation

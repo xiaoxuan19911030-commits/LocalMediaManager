@@ -1458,6 +1458,12 @@ Metadata Repair is an offline-only Standard workflow. It reuses the shared Metad
 
 The write path is fixed: asynchronous scan -> persisted Dry Run -> explicit confirmation token -> execution-time revalidation -> one SQLite transaction -> Metadata Health refresh. Applied items store Before/After snapshots in `OperationAudit` under one Repair Session rollback token. Existing valid resources are never replaced; low-confidence, shared, ambiguous, or inaccessible NAS candidates remain review-only. See DEC-023.
 
+### 13.10 Targeted metadata completion
+
+Metadata Completion is a separate Standard-only task workflow built after Metadata Health and offline repair. It analyzes only missing completion fields, produces a persisted Dry Run, requires the exact confirmation token, and routes each field through a configurable Provider priority backed by an explicit capability catalog. Local, unassigned, missing-media, low-confidence, multiple-number, Code-conflict, and protected data are excluded.
+
+Current Provider APIs return complete metadata documents rather than field-selective payloads. LMM therefore skips Providers that cannot contribute a requested field and removes non-target fields before `MetadataWriteService`. Merge remains fill-empty-only. The workflow checkpoints per-item status for pause/resume, uses bounded concurrency, exponential retry, Provider throttling, `OperationAudit` rollback, and refreshes the shared Metadata Health summary after execution. See DEC-024.
+
 ---
 
 ## 14. UI Design System

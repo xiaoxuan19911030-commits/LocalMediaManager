@@ -4,6 +4,14 @@
 
 ## High
 
+### 0.7.4-C Metadata Completion Acceptance
+
+- [ ] Review `docs/releases/0.7.4-C-METADATA-COMPLETION.md` and the 523-row CSV plan.
+- [ ] Resolve or explicitly defer 88 inaccessible media records, 134 low-confidence numbers, and 82 Code conflicts before expanding the completion scope.
+- [ ] After explicit Human confirmation, create a fresh production database backup and execute one small completion session before the remaining 219 eligible movies.
+- [ ] Verify Provider request counts, field-level AddedFields, pause/resume, rollback, and Metadata Health changes on the real session.
+- [ ] Keep production execution and deployment disabled until the Dry Run is accepted.
+
 ### 0.7.4-B Metadata Repair Acceptance
 
 - [ ] Human smoke the Data Center -> Metadata Repair scan, plan filters, cancel, export, confirmation dialog, and rollback controls in an isolated installation.
