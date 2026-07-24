@@ -52,6 +52,7 @@ docs/               → 证据、Release 验收、字段映射、矩阵
 | [DEC-017](#dec-017-legacy-settings-migration-completion) | 旧设置迁移收口与兼容字段隐藏 | Settings / Feature Freeze | Feature Freeze | `fix(settings)` |
 | [DEC-021](#dec-021-extensible-media-library-types) | 可扩展媒体库类型与普通库隔离 | Libraries / Metadata | Library Types | `feat(libraries)` |
 | [DEC-022](#dec-022-standard-metadata-health-statistics) | Standard 元数据健康统一口径 | Dashboard / Metadata Health | 0.7.4-A | `fix(metadata)` |
+| [DEC-023](#dec-023-offline-metadata-repair-safety-boundary) | 离线元数据修复安全边界 | Metadata Repair / Audit | 0.7.4-B | `feat(metadata)` |
 
 ---
 
@@ -1554,3 +1555,32 @@ Database records with missing files are reported as invalid resources and do not
 - Do not treat a non-empty image/NFO path or database status as proof that the file exists.
 - Do not maintain separate Dashboard and Analyzer completeness formulas.
 - Do not auto-register, move, delete, download, regenerate, or otherwise repair resources while calculating health.
+
+---
+
+### DEC-023: Offline Metadata Repair Safety Boundary
+
+| Field | Value |
+|------|-----|
+| **Decision ID** | DEC-023 |
+| **Module** | Metadata Repair / Tasks / OperationAudit |
+| **Sprint** | 0.7.4-B |
+| **Date** | 2026-07-24 |
+| **Status** | Accepted |
+
+#### Decision
+
+Offline metadata repair is a separate, explicit workflow built on the shared v0.7.4-A `MetadataHealthSummary`. It scans existing files, produces a persisted Dry Run plan, and requires the exact confirmation token before any association can change. Execution revalidates eligibility and file identity, commits all selected items in one SQLite transaction, records per-item Before/After snapshots in `OperationAudit`, invalidates Metadata Health, and supports rollback by Repair Session.
+
+Only active Standard movies with an existing primary video, an auto-sync-confidence normalized number, and no code re-identification mismatch are eligible. Existing valid resources always win. Low-confidence or ambiguous candidates are manual review only. An unavailable NAS root or containing directory preserves historical database state.
+
+The workflow reuses `Tasks`, `TaskLogs`, `OperationAudit`, `Images`, `NfoDocuments`, `Movies.NfoPath`, `MediaStoragePathResolver`, and the shared Metadata Health directory inventory. No new repair-specific database schema is introduced.
+
+#### Prohibited
+
+- Do not scan and immediately write; Dry Run and explicit confirmation are mandatory.
+- Do not call metadata Providers, download or generate images, or create/rewrite NFO content.
+- Do not change movie numbers, descriptive metadata, media paths, or media file names.
+- Do not overwrite valid Poster, Fanart, NFO, locked data, or later user changes.
+- Do not treat an available drive root as proof that a specific NAS directory is accessible.
+- Do not execute production repair before the Human accepts the exported plan and a database backup exists.

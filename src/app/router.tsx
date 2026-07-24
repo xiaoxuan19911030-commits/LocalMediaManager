@@ -13,6 +13,7 @@ import TagCategoriesPage from '@/pages/TagCategoriesPage'
 import CollectionPage from '@/pages/CollectionPage'
 import DataCenterPage from '@/pages/DataCenterPage'
 import AiProvidersPage from '@/pages/AiProvidersPage'
+import MetadataRepairPage from '@/pages/MetadataRepairPage'
 
 export const router = createHashRouter([{ path: '/', Component: AppShell, children: [
   { index: true, Component: HomePage },
@@ -32,6 +33,7 @@ export const router = createHashRouter([{ path: '/', Component: AppShell, childr
   { path: 'favorites', element: <CollectionPage kind="favorites" /> },
   { path: 'history', element: <CollectionPage kind="history" /> },
   { path: 'data-center', Component: DataCenterPage },
+  { path: 'metadata-repair', Component: MetadataRepairPage },
   { path: 'metadata', element: <Navigate to="/data-center?tab=overview" replace /> },
   { path: 'diagnostics', element: <Navigate to="/data-center?tab=diagnostics" replace /> },
   { path: 'organizer', element: <Navigate to="/data-center?tab=duplicates" replace /> },

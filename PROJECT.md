@@ -1452,6 +1452,12 @@ A complete Standard movie requires an uppercase normalized number, title, releas
 
 `MetadataHealthAnalysisService` invalidates on database timestamp changes, explicit sync completion, explicit refresh, and maximum cache age. Home refreshes on entry, user refresh, visible-window data changes, and periodic polling. Full network-storage inventory runs in the background after current physical coverage is available; pending inventory is explicit in the DTO and UI.
 
+### 13.9 Offline metadata repair
+
+Metadata Repair is an offline-only Standard workflow. It reuses the shared Metadata Health directory inventory to identify existing Poster, Fanart, Preview, Screenshot, and NFO files without downloading, generating, moving, renaming, or deleting resources. Local, unassigned, missing-media, low-confidence number, and code re-identification mismatch movies are excluded.
+
+The write path is fixed: asynchronous scan -> persisted Dry Run -> explicit confirmation token -> execution-time revalidation -> one SQLite transaction -> Metadata Health refresh. Applied items store Before/After snapshots in `OperationAudit` under one Repair Session rollback token. Existing valid resources are never replaced; low-confidence, shared, ambiguous, or inaccessible NAS candidates remain review-only. See DEC-023.
+
 ---
 
 ## 14. UI Design System

@@ -4,6 +4,13 @@
 
 ## High
 
+### 0.7.4-B Metadata Repair Acceptance
+
+- [ ] Human smoke the Data Center -> Metadata Repair scan, plan filters, cancel, export, confirmation dialog, and rollback controls in an isolated installation.
+- [ ] Review `docs/releases/0.7.4-B-METADATA-REPAIR.csv`, especially 4 Poster conflicts, 1537 low-confidence candidates, and the inaccessible `FC2-3537141` Fanart directory.
+- [ ] After explicit confirmation, create a production database backup and execute one Repair Session; verify before/after health and rollback before wider use.
+- [ ] Keep production deployment and all Provider resync disabled until the Dry Run plan is accepted.
+
 ### 0.7.2 Release Verification
 
 - [ ] 在三个 Provider 均启用的真实配置下复核 MDC-NG、MetaTube、JavBus 都收到 Movie Number Extractor 的标准番号；当前 Desktop Smoke 仅确认 JavBus 收到 `WAAA-448`。

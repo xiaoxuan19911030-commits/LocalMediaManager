@@ -6,6 +6,11 @@
 
 ### Features
 
+- v0.7.4-B adds offline Standard metadata repair for existing Poster, Fanart, Preview, Screenshot, and NFO files.
+- Repair requires an asynchronous Dry Run, explicit plan confirmation, one SQLite transaction, per-item Before/After audit records, and Repair Session rollback.
+- The repair scanner reuses the v0.7.4-A Metadata Health inventory and excludes Local, unassigned, missing-media, low-confidence number, and code-mismatch movies.
+- NAS directory failures, low-confidence candidates, multi-candidate conflicts, and valid existing resources are safely skipped; the workflow never invokes Providers or modifies media files.
+
 - v0.7.2 新增 JSON 规则驱动的 Movie Number Extractor，统一识别标准、紧凑、FC2、一本道、Carib、Heydouga 与 LUXU 番号。
 - 番号识别返回原文件名、检测番号、标准番号、命中规则、置信度、分段序号和警告；低置信度结果不自动创建同步任务。
 - Standard 扫描和元数据同步统一使用标准化番号，保留用户原始文件名与路径不变。

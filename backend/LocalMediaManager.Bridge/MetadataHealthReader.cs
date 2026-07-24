@@ -143,12 +143,21 @@ public static class MetadataHealthReader
 {
     private const int AnalysisSteps = 7;
 
-    public static async Task<MetadataHealthSummary> ReadAsync(
+    public static Task<MetadataHealthSummary> ReadAsync(
         string databasePath,
         MediaStorageSettingsDto storage,
         IProgress<(string Stage, int Completed, int Total)>? progress = null,
         CancellationToken cancellationToken = default,
-        bool includeStorageInventory = true)
+        bool includeStorageInventory = true) =>
+        ReadWithInventoryAsync(databasePath, storage, progress, cancellationToken, includeStorageInventory, null);
+
+    internal static async Task<MetadataHealthSummary> ReadWithInventoryAsync(
+        string databasePath,
+        MediaStorageSettingsDto storage,
+        IProgress<(string Stage, int Completed, int Total)>? progress,
+        CancellationToken cancellationToken,
+        bool includeStorageInventory,
+        MetadataStorageInventory? storageInventory)
     {
         Stopwatch timer = Stopwatch.StartNew();
         await using var db = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly }.ToString());
@@ -181,7 +190,7 @@ public static class MetadataHealthReader
         Dictionary<string, long> missingImageRecords;
         Dictionary<string, long> unregistered;
         if (includeStorageInventory) {
-            StorageFileIndex storageFiles = await Task.Run(
+            MetadataStorageInventory storageFiles = storageInventory ?? await Task.Run(
                 () => EnumerateStorageFiles(storage, cancellationToken), cancellationToken);
             Report("扫描媒体存储");
             foreach (ImageRecord image in imageRecords) {
@@ -334,7 +343,7 @@ public static class MetadataHealthReader
         return result;
     }
 
-    private static StorageFileIndex EnumerateStorageFiles(MediaStorageSettingsDto storage, CancellationToken token)
+    private static MetadataStorageInventory EnumerateStorageFiles(MediaStorageSettingsDto storage, CancellationToken token)
     {
         Dictionary<string, HashSet<string>> result = ResourceDictionary();
         string storageRoot;
@@ -457,19 +466,26 @@ public static class MetadataHealthReader
 
     }
 
-    private sealed record StorageFileIndex(string RootPath, IReadOnlyDictionary<string, HashSet<string>> Files)
-    {
-        private HashSet<string> AllFiles { get; } = Files.Values.SelectMany(paths => paths).ToHashSet(StringComparer.OrdinalIgnoreCase);
+}
 
-        public bool Exists(string? value)
-        {
-            if (!TryNormalizePath(value, out string path)) return false;
-            if (!string.IsNullOrWhiteSpace(RootPath)
-                && (path.Equals(RootPath, StringComparison.OrdinalIgnoreCase)
-                    || path.StartsWith(RootPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
-                return AllFiles.Contains(path);
-            return MetadataHealthDefinition.FileExists(path);
-        }
+internal sealed record MetadataStorageInventory(string RootPath, IReadOnlyDictionary<string, HashSet<string>> Files)
+{
+    private HashSet<string> AllFiles { get; } = Files.Values.SelectMany(paths => paths).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    public bool Exists(string? value)
+    {
+        if (!TryNormalizePath(value, out string path)) return false;
+        if (!string.IsNullOrWhiteSpace(RootPath)
+            && (path.Equals(RootPath, StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith(RootPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
+            return AllFiles.Contains(path);
+        return MetadataHealthDefinition.FileExists(path);
+    }
+
+    private static bool TryNormalizePath(string? value, out string path)
+    {
+        try { path = string.IsNullOrWhiteSpace(value) ? string.Empty : Path.GetFullPath(value); return path.Length > 0; }
+        catch (Exception) { path = string.Empty; return false; }
     }
 }
 

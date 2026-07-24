@@ -300,6 +300,32 @@ export interface MetadataHealthSummary {
 }
 export interface MetadataHealthAnalysisState { running: boolean; invalidated: boolean; stage: string; completedSteps: number; totalSteps: number; percent: number; elapsedMilliseconds: number; result?: MetadataHealthSummary; error?: string }
 export interface MediaStorageAvailability { rootPath: string; available: boolean; error?: string }
+export interface MetadataRepairScanCommand {
+  poster: boolean; fanart: boolean; preview: boolean; screenshot: boolean; nfo: boolean
+  repairInvalidPaths: boolean; registerUnregistered: boolean
+}
+export interface MetadataRepairLaunchResult { taskId: number; status: string; message: string }
+export interface MetadataRepairCounts {
+  scannedStandardMovies: number; eligibleMovies: number; excludedMissingMedia: number; excludedLowConfidence: number; excludedCodeMismatch: number
+  unregisteredPoster: number; unregisteredFanart: number; unregisteredPreview: number; unregisteredScreenshot: number; unregisteredNfo: number
+  safeRepairs: number; conflicts: number; lowConfidence: number; existingValidSkipped: number; invalidDatabaseRecords: number
+  missingPhysicalFiles: number; unmatchedResources: number; applied: number; skipped: number; failed: number
+}
+export interface MetadataRepairProjection {
+  completeMovies: number; posterMovies: number; fanartMovies: number; previewMovies: number; screenshotMovies: number
+  nfoMovies: number; invalidResourceRecords: number; unregisteredResources: number
+}
+export interface MetadataRepairCandidate {
+  itemId: string; movieId: number; number: string; videoPath: string; resourceType: string; existingRecordId?: number
+  currentDatabasePath?: string; candidatePath?: string; evidence: string; confidence: number; action: string; status: string
+  reason: string; safeToApply: boolean; willOverwrite: boolean; fileFingerprint?: string
+}
+export interface MetadataRepairPreview {
+  taskId: number; status: string; stage: string; progress: number; confirmationToken: string; counts: MetadataRepairCounts
+  before: MetadataRepairProjection; projected: MetadataRepairProjection; after?: MetadataRepairProjection; items: MetadataRepairCandidate[]; warnings: string[]
+  createdAt: string; completedAt?: string; canExecute: boolean; canRollback: boolean; dryRun: boolean
+}
+export interface MetadataRepairExportResult { markdownPath: string; csvPath: string; items: number; message: string }
 export interface FilteredMovieSyncResult { count: number; message: string }
 export interface DiagnosticItem { severity: 'error' | 'warning' | 'info'; code: string; title: string; detail: string; count: number }
 export interface DiagnosticsResult { integrity: string; foreignKeyErrors: number; items: DiagnosticItem[] }

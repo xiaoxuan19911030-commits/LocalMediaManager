@@ -55,6 +55,7 @@ const problemStatusLabels: Record<ProblemStatus, string> = {
 }
 
 export default function DataCenterPage() {
+  const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const tab = normalizeTab(params.get('tab'))
   const [query, setQuery] = useState(params.get('q') ?? '')
@@ -84,7 +85,7 @@ export default function DataCenterPage() {
   }, [query])
 
   return <WorkspacePage title="数据中心" description="统一查看完整性、诊断资源问题、处理重复影片和维护数据任务。"
-    primaryActions={[{ key: 'smart-repair', label: '智能修复 即将推出', icon: <AutoFixHighRoundedIcon/>, variant: 'outlined', disabled: true, onClick: () => undefined }]}>
+    primaryActions={[{ key: 'metadata-repair', label: '元数据修复', icon: <AutoFixHighRoundedIcon/>, variant: 'outlined', onClick: () => navigate('/metadata-repair') }]}>
     <Paper variant="outlined" sx={{ borderRadius: 2.5, mb: 1.5, overflow: 'hidden' }}>
       <Box sx={{ p: 1.25, display: 'flex', gap: 1.25, alignItems: 'center', flexWrap: 'wrap' }}>
         <Tabs value={tab} onChange={(_, value) => setTab(value)} variant="scrollable" scrollButtons="auto" sx={{ minHeight: 40, flex: '1 1 auto' }}>

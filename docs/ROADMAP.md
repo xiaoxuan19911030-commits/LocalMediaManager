@@ -7,6 +7,19 @@
 - **Branch policy:** Development is isolated on `sprint/0.7.2-movie-number-extractor` until verification is complete.
 - **Restore policy:** Official version recovery uses immutable release tags, starting with `v0.6.0`; rollback branches are no longer long-term restore points.
 
+## Unreleased - 0.7.4-B Metadata Repair
+
+**Status:** Self Test / Dry Run; production execution awaiting Human confirmation
+**Date:** 2026-07-24
+
+Scope:
+
+- Add an offline-only Standard metadata repair workflow for existing Poster, Fanart, Preview, Screenshot, and NFO files.
+- Require asynchronous scan, Dry Run, explicit confirmation, a single database transaction, audit records, and session rollback.
+- Reuse the v0.7.4-A `MetadataHealthSummary` denominator, physical-file semantics, and directory inventory snapshot.
+- Exclude Local, unassigned, missing-media, low-confidence number, and code-mismatch movies.
+- Do not invoke Providers, download/generate resources, write NFO content, or change media files.
+
 ## 0.7.2 - Movie Number Extractor
 
 **Status:** Release candidate / verification

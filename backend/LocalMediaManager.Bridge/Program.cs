@@ -130,6 +130,13 @@ builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequired
 builder.Services.AddSingleton(serviceProvider => new FileOrganizerService(
     databasePath, serviceProvider.GetRequiredService<TaskLogService>()));
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<FileOrganizerService>());
+builder.Services.AddSingleton(serviceProvider => new MetadataRepairWorkflow(
+    databasePath,
+    serviceProvider.GetRequiredService<MediaStoragePathResolver>(),
+    serviceProvider.GetRequiredService<MetadataHealthAnalysisService>(),
+    serviceProvider.GetRequiredService<IMovieNumberExtractor>(),
+    serviceProvider.GetRequiredService<TaskLogService>()));
+builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<MetadataRepairWorkflow>());
 builder.Services.AddSingleton(serviceProvider => new SafeDeleteWorkflowService(
     databasePath,
     serviceProvider.GetRequiredService<ProductWriter>(),
@@ -543,6 +550,18 @@ app.MapGet("/api/organizer/{taskId:long}/preview", async (long taskId, FileOrgan
     Results.Ok(await organizer.PreviewAsync(taskId, token)));
 app.MapPost("/api/organizer/{taskId:long}/execute", async (long taskId, OrganizerExecuteCommand command, FileOrganizerService organizer, CancellationToken token) =>
     Results.Ok(await organizer.ExecuteConfirmedAsync(taskId, command.ConfirmationToken, token)));
+app.MapPost("/api/metadata/repair/dry-run", async (MetadataRepairScanCommand command, MetadataRepairWorkflow repair, CancellationToken token) =>
+    Results.Ok(await repair.StartDryRunAsync(command, token)));
+app.MapGet("/api/metadata/repair/{taskId:long}", async (long taskId, MetadataRepairWorkflow repair, CancellationToken token) =>
+    Results.Ok(await repair.GetAsync(taskId, token)));
+app.MapPost("/api/metadata/repair/{taskId:long}/execute", async (long taskId, MetadataRepairExecuteCommand command, MetadataRepairWorkflow repair, CancellationToken token) =>
+    Results.Ok(await repair.ExecuteConfirmedAsync(taskId, command.ConfirmationToken, token)));
+app.MapPost("/api/metadata/repair/{taskId:long}/cancel", async (long taskId, MetadataRepairWorkflow repair) =>
+    Results.Ok(await repair.CancelAsync(taskId)));
+app.MapPost("/api/metadata/repair/{taskId:long}/rollback", async (long taskId, MetadataRepairWorkflow repair, CancellationToken token) =>
+    Results.Ok(await repair.RollbackAsync(taskId, token)));
+app.MapPost("/api/metadata/repair/{taskId:long}/export", async (long taskId, MetadataRepairWorkflow repair, CancellationToken token) =>
+    Results.Ok(await repair.ExportAsync(taskId, token)));
 app.MapPost("/api/organizer/duplicates/preview-delete", async (DuplicateDeletePlanCommand command, DuplicateOrganizerWorkflowService organizer, CancellationToken token) =>
     Results.Ok(await organizer.PreviewAsync(command, token)));
 app.MapPost("/api/organizer/duplicates/execute-delete", async (DuplicateDeleteExecuteRequest command, DuplicateOrganizerWorkflowService organizer, CancellationToken token) =>
