@@ -98,7 +98,7 @@ const metadataOptions = [
   { value: 'unscraped', label: '未刮削' },
   { value: 'missing-nfo', label: '缺 NFO' },
   { value: 'missing-actors', label: '缺演员' },
-  { value: 'missing-tags', label: '缺标签' },
+  { value: 'missing-tags', label: '缺 Provider 标签' },
   { value: 'missing-description', label: '缺简介' },
 ]
 

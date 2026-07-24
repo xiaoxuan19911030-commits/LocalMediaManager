@@ -36,7 +36,9 @@ builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequired
 builder.Services.AddSingleton(new MediaStoragePathResolver(databasePath, installRoot));
 builder.Services.AddSingleton(new MetadataProviderSettingsService(databasePath));
 builder.Services.AddSingleton(new MetadataWriteService(databasePath));
-builder.Services.AddSingleton(new MetadataHealthAnalysisService(databasePath));
+builder.Services.AddSingleton(serviceProvider => new MetadataHealthAnalysisService(
+    databasePath,
+    serviceProvider.GetRequiredService<MediaStoragePathResolver>()));
 builder.Services.AddSingleton(sp => new MovieMetadataImporter(databasePath, sp.GetRequiredService<MetadataWriteService>()));
 builder.Services.AddSingleton(sp => new MovieImageImporter(
     databasePath,
@@ -266,9 +268,12 @@ app.MapPost("/api/system/logs/cleanup", (LogCleanupCommand command, LogMaintenan
 app.MapPost("/api/system/update/check", async (UpdateCheckService updates, CancellationToken token) =>
     Results.Ok(await updates.CheckAsync(token)));
 
-app.MapGet("/api/dashboard", async () => File.Exists(databasePath)
-    ? Results.Ok(await ProductReader.ReadDashboardAsync(databasePath, bridgeUrl))
-    : Results.Problem($"找不到数据库：{databasePath}", statusCode: 503));
+app.MapGet("/api/dashboard", async (bool? refresh, MetadataHealthAnalysisService healthService, CancellationToken token) => {
+    if (!File.Exists(databasePath)) return Results.Problem($"找不到数据库：{databasePath}", statusCode: 503);
+    if (refresh == true) healthService.Invalidate();
+    MetadataHealthSummary health = await healthService.GetAsync(token);
+    return Results.Ok(await ProductReader.ReadDashboardAsync(databasePath, bridgeUrl, health));
+});
 
 app.MapGet("/api/search", async (string? q, int? limit) => File.Exists(databasePath)
     ? Results.Ok(await ProductReader.SearchAsync(databasePath, bridgeUrl, q ?? string.Empty, Math.Clamp(limit ?? 12, 1, 48)))

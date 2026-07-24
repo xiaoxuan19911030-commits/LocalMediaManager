@@ -5,6 +5,7 @@ import type { MediaStorageAvailability, MetadataHealthAnalysisState, MetadataHea
 import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, FfmpegPluginSettings, FfmpegToolStatus, LogCleanupPreview, LogCleanupResult, MdcNgSettings, MdcNgToolStatus, MetaTubeSettings, PersonDetectionStatus, ProviderConnectionResult, ProviderDiagnosticResult, RenameSettings, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings, UnifiedSettingsSaveResult, UpdateCheckResult } from '@/types/settings'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
+export const LMM_DATA_CHANGED_EVENT = 'lmm:data-changed'
 
 const bridgeRequestTimeoutMs = 15_000
 
@@ -51,7 +52,11 @@ async function request<T>(path: string, init?: RequestInit, retrySession = true,
     }
     throw new Error(error.message)
     }
-    return response.json() as Promise<T>
+    const result = await response.json() as T
+    if (method !== 'GET' && !path.startsWith('/api/metadata/health/analysis')) {
+      window.dispatchEvent(new CustomEvent(LMM_DATA_CHANGED_EVENT, { detail: { path, method } }))
+    }
+    return result
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       throw new Error('Local Bridge request timed out. Restart Local Media Manager and try again.')
@@ -74,14 +79,14 @@ function searchParams(filters: AdvancedSearchFilters, includePaging = true) {
 
 export const bridge = {
   health: () => request<BridgeHealth>('/health'),
-  metadataHealth: () => request<MetadataHealthSummary>('/api/metadata/health'),
+  metadataHealth: () => request<MetadataHealthSummary>('/api/metadata/health', undefined, true, 30_000),
   metadataHealthAnalysis: () => request<MetadataHealthAnalysisState>('/api/metadata/health/analysis'),
   startMetadataHealthAnalysis: () => request<MetadataHealthAnalysisState>('/api/metadata/health/analysis', { method: 'POST' }),
   cancelMetadataHealthAnalysis: () => request<MetadataHealthAnalysisState>('/api/metadata/health/analysis/cancel', { method: 'POST' }),
   metadataHealthStorage: () => request<MediaStorageAvailability>('/api/metadata/health/storage'),
   pathExists: (path: string) => request<{ path: string; exists: boolean }>(`/api/platform/path-exists?${new URLSearchParams({ path })}`),
   summary: () => request<LibrarySummary>('/api/library/summary'),
-  dashboard: () => request<DashboardSummary>('/api/dashboard'),
+  dashboard: (refresh = false) => request<DashboardSummary>(`/api/dashboard${refresh ? '?refresh=true' : ''}`, undefined, true, 30_000),
   videos: (limit = 24, offset = 0, search = '', sort = 'newest') => {
     const query = new URLSearchParams({ limit: String(limit), offset: String(offset), search, sort })
     return request<MediaPageResult>(`/api/videos?${query}`)

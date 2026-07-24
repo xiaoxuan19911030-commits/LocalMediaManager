@@ -14,7 +14,7 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
         Directory.CreateDirectory(root);
         await using var connection = new SqliteConnection($"Data Source={Database}");
         await connection.OpenAsync();
-        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0015_LibraryTypesAndLocalMedia.sql" }) {
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0005_MetadataSyncWorkflow.sql", "0015_LibraryTypesAndLocalMedia.sql" }) {
             await using var command = connection.CreateCommand();
             command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
             await command.ExecuteNonQueryAsync();
@@ -124,7 +124,7 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
     [Fact]
     public async Task MetadataHealthAnalysisReturnsAndCachesCompleteResult()
     {
-        var service = new MetadataHealthAnalysisService(Database);
+        var service = new MetadataHealthAnalysisService(Database, new MediaStoragePathResolver(Database, root));
 
         MetadataHealthSummary result = await service.GetAsync();
         MetadataHealthAnalysisState state = service.GetState();
@@ -138,7 +138,7 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
     [Fact]
     public async Task MetadataHealthInvalidationKeepsPreviousCompleteResult()
     {
-        var service = new MetadataHealthAnalysisService(Database);
+        var service = new MetadataHealthAnalysisService(Database, new MediaStoragePathResolver(Database, root));
         MetadataHealthSummary result = await service.GetAsync();
 
         service.Invalidate();
@@ -151,7 +151,7 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
     [Fact]
     public async Task MetadataHealthCacheInvalidatesAfterDatabaseWrite()
     {
-        var service = new MetadataHealthAnalysisService(Database);
+        var service = new MetadataHealthAnalysisService(Database, new MediaStoragePathResolver(Database, root));
         await service.GetAsync();
         await Task.Delay(20);
         await using (var connection = new SqliteConnection($"Data Source={Database}")) {
@@ -168,7 +168,8 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
         using var cancellation = new CancellationTokenSource();
         var progress = new InlineProgress<(string Stage, int Completed, int Total)>(_ => cancellation.Cancel());
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => MetadataHealthReader.ReadAsync(Database, progress, cancellation.Token));
+        MediaStorageSettingsDto storage = await new MediaStoragePathResolver(Database, root).GetSettingsAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => MetadataHealthReader.ReadAsync(Database, storage, progress, cancellation.Token));
     }
 
     [Fact]

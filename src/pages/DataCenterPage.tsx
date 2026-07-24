@@ -577,7 +577,7 @@ function resourceStats(overview: MetadataOverview, maintenance: MaintenanceRepor
     { label: '演员', type: 'missing-actors' as const, missing: overview.missingActors, icon: <PersonRoundedIcon/> },
     { label: '导演', type: 'missing-directors' as const, missing: overview.missingDirectors ?? 0, icon: <PersonRoundedIcon/> },
     { label: '简介', type: 'missing-description' as const, missing: overview.missingDescription, icon: <DescriptionRoundedIcon/> },
-    { label: '标签', type: 'missing-tags' as const, missing: overview.missingTags, icon: <SellRoundedIcon/> },
+    { label: 'Provider 标签', type: 'missing-tags' as const, missing: overview.missingTags, icon: <SellRoundedIcon/> },
     { label: '系列', type: 'missing-series' as const, missing: overview.missingSeries ?? 0, icon: <SellRoundedIcon/> },
     { label: '厂商', type: 'missing-studios' as const, missing: overview.missingStudios ?? 0, icon: <SellRoundedIcon/> },
   ]

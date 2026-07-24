@@ -51,6 +51,7 @@ docs/               → 证据、Release 验收、字段映射、矩阵
 | [DEC-016](#dec-016-final-system-features-and-feature-freeze) | 最终系统功能迁移与 Feature Freeze | Settings / System / Feature Parity | Feature Parity | `feat(system)` |
 | [DEC-017](#dec-017-legacy-settings-migration-completion) | 旧设置迁移收口与兼容字段隐藏 | Settings / Feature Freeze | Feature Freeze | `fix(settings)` |
 | [DEC-021](#dec-021-extensible-media-library-types) | 可扩展媒体库类型与普通库隔离 | Libraries / Metadata | Library Types | `feat(libraries)` |
+| [DEC-022](#dec-022-standard-metadata-health-statistics) | Standard 元数据健康统一口径 | Dashboard / Metadata Health | 0.7.4-A | `fix(metadata)` |
 
 ---
 
@@ -1523,3 +1524,33 @@ Local generated resources use the stable MovieId rather than a filename or movie
 - Do not classify Local movies as missing a number or scrape-failed in Standard metadata health.
 - Do not key Local covers or screenshots by mutable filenames.
 - Do not change the Standard metadata workflow or the movie detail UI for this feature.
+
+---
+
+### DEC-022: Standard Metadata Health Statistics
+
+| Field | Value |
+|------|-----|
+| **Decision ID** | DEC-022 |
+| **Module** | Dashboard / Metadata Health / MediaStorage Read |
+| **Sprint** | 0.7.4-A |
+| **Date** | 2026-07-24 |
+| **Status** | Accepted |
+
+#### Decision
+
+Dashboard metadata coverage and Metadata Health use one shared `MetadataHealthDefinition` and one `MetadataHealthSummary`. Their denominator is active Standard movies: an enabled Standard library, a primary video, and a media state other than `Missing`. Local, unassigned, disabled, missing, and non-video-only records do not enter the Standard denominator.
+
+For metadata health only, `MovieGenres` is Provider metadata and `MovieTags` is user-maintained metadata. `MovieGenres` controls Provider tag coverage and completeness; `MovieTags` is reported separately and never controls completeness. This decision does not change DEC-011 Smart Search and historical tag-navigation behavior, and does not migrate or rewrite existing relations.
+
+A complete Standard movie requires all nine conditions: uppercase normalized number, title, release date, valid studio relation, valid actor relation, valid `MovieGenres` relation, physical Poster, physical Fanart, and physical NFO. Image coverage requires a registered `Images.FilePath` whose file exists. NFO coverage accepts registered paths from `Movies.NfoPath` or `NfoDocuments`, requires an absolute `.nfo` path, and requires the file to exist.
+
+Database records with missing files are reported as invalid resources and do not count as physical coverage. Files under configured MediaStorage that have no exact database path registration are reported as unregistered resources and are not repaired automatically. Network MediaStorage may return the current physical coverage first and finish the full unregistered-resource inventory in the background; the UI must identify the inventory as pending rather than present partial anomaly counts as final.
+
+#### Prohibited
+
+- Do not use all movies, Local movies, or unassigned movies as the Standard metadata denominator.
+- Do not use `MovieTags` as Provider tag coverage or a completeness requirement.
+- Do not treat a non-empty image/NFO path or database status as proof that the file exists.
+- Do not maintain separate Dashboard and Analyzer completeness formulas.
+- Do not auto-register, move, delete, download, regenerate, or otherwise repair resources while calculating health.

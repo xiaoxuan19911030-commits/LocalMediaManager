@@ -139,7 +139,8 @@ public sealed class LegacyCompletionPart2Tests : IAsyncLifetime
             await Execute(connection, "INSERT INTO MediaFiles(MovieId,FilePath,NormalizedPath,FileName,Extension,FileSize,MediaType,SourceType,IsPrimary,ExistsState,CreatedAt,UpdatedAt) VALUES($id,$path,$path,$file,'.mp4',1,'Video','Test',1,$state,$at,$at)", ("$id", id), ("$path", Path.Combine(root, $"file-{id}.mp4")), ("$file", $"file-{id}.mp4"), ("$state", id == 1 ? "Present" : "Missing"), ("$at", at));
         }
 
-        DashboardDto dashboard = await ProductReader.ReadDashboardAsync(Database, "http://127.0.0.1:47831");
+        var healthService = new MetadataHealthAnalysisService(Database, new MediaStoragePathResolver(Database, root));
+        DashboardDto dashboard = await ProductReader.ReadDashboardAsync(Database, "http://127.0.0.1:47831", await healthService.GetAsync());
         MediaPageDto defaultPage = await ProductReader.AdvancedSearchAsync(Database, "http://127.0.0.1:47831", "", null, null, null, null, null, null, null, null, 0, "all", "all", "all", "all", null, "newest", 24, 0);
         MediaPageDto missingPage = await ProductReader.AdvancedSearchAsync(Database, "http://127.0.0.1:47831", "", null, null, null, null, null, null, null, null, 0, "all", "all", "missing", "all", null, "newest", 24, 0);
 
@@ -155,13 +156,14 @@ public sealed class LegacyCompletionPart2Tests : IAsyncLifetime
     {
         await using var connection = await Open();
         string at = DateTimeOffset.UtcNow.ToString("O");
+        await Execute(connection, "INSERT INTO Libraries(Id,Name,IsEnabled,SortOrder,CreatedAt,UpdatedAt,LibraryType) VALUES(1,'Standard',1,0,$at,$at,'Standard')", ("$at", at));
         for (int id = 1; id <= 4; id++)
             await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt,ImportedAt) VALUES($id,$code,$code,0,0,'pending','Test',$at,$at,$at)", ("$id", id), ("$code", $"COUNT-{id:000}"), ("$at", at));
         await Execute(connection, """
-            INSERT INTO MediaFiles(MovieId,FilePath,NormalizedPath,FileName,Extension,FileSize,MediaType,SourceType,IsPrimary,ExistsState,CreatedAt,UpdatedAt)
-            VALUES(1,$path1,$path1,'COUNT-001.mp4','.mp4',1,'Video','Test',1,'Present',$at,$at),
-                  (2,$path2,$path2,'COUNT-002.mp4','.mp4',1,'Video','Test',1,'Present',$at,$at),
-                  (3,$path3,$path3,'COUNT-003.mp4','.mp4',1,'Video','Test',1,'Missing',$at,$at)
+            INSERT INTO MediaFiles(MovieId,LibraryId,FilePath,NormalizedPath,FileName,Extension,FileSize,MediaType,SourceType,IsPrimary,ExistsState,CreatedAt,UpdatedAt)
+            VALUES(1,1,$path1,$path1,'COUNT-001.mp4','.mp4',1,'Video','Test',1,'Present',$at,$at),
+                  (2,1,$path2,$path2,'COUNT-002.mp4','.mp4',1,'Video','Test',1,'Present',$at,$at),
+                  (3,1,$path3,$path3,'COUNT-003.mp4','.mp4',1,'Video','Test',1,'Missing',$at,$at)
             """, ("$path1", Path.Combine(root, "COUNT-001.mp4")), ("$path2", Path.Combine(root, "COUNT-002.mp4")),
             ("$path3", Path.Combine(root, "COUNT-003.mp4")), ("$at", at));
 

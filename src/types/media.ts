@@ -45,6 +45,9 @@ export interface BridgeHealth {
 
 export interface DashboardSummary {
   movieCount: number
+  standardMovieCount: number
+  localMovieCount: number
+  unassignedMovieCount: number
   favoriteCount: number
   playedCount: number
   missingFileCount: number
@@ -59,7 +62,7 @@ export interface DashboardSummary {
   seriesCount: number
   studioCount: number
   maintenance: DashboardMaintenance
-  metadataHealth: DashboardMetadataHealth
+  metadataHealth: MetadataHealthSummary
   recentActivity: DashboardActivity[]
   libraries: DashboardLibrary[]
   topTags: DashboardEntity[]
@@ -79,14 +82,8 @@ export interface DashboardMaintenance {
   missingImages: number
   missingNfo: number
   cacheProblems: number
-}
-
-export interface DashboardMetadataHealth {
-  completeRate: number
-  imageRate: number
-  nfoRate: number
-  actorRate: number
-  tagRate: number
+  invalidResourceRecords: number
+  unregisteredResources: number
 }
 
 export interface DashboardActivity {
@@ -287,7 +284,20 @@ export interface MetadataOverview {
 }
 export interface FilteredMovieSyncPreview { count: number }
 export interface MetadataHealthField { key: string; missing: number; required: boolean }
-export interface MetadataHealthSummary { totalMovies: number; completeMovies: number; incompleteMovies: number; completeRate: number; fields: MetadataHealthField[]; analysisDurationMs: number; analyzedAt: string }
+export interface MetadataHealthScope { allMovies: number; standardMovies: number; localMovies: number; unassignedMovies: number }
+export interface MetadataResourceCoverage { databaseMovies: number; physicalMovies: number; missingFileRecords: number; unregisteredFiles: number }
+export interface MetadataNfoCoverage extends MetadataResourceCoverage { validPathMovies: number }
+export interface MetadataHealthCoverage {
+  standardNumberMovies: number; titleMovies: number; releaseDateMovies: number; studioMovies: number
+  actorMovies: number; providerTagMovies: number; userTagMovies: number
+  poster: MetadataResourceCoverage; fanart: MetadataResourceCoverage; preview: MetadataResourceCoverage; screenshot: MetadataResourceCoverage; nfo: MetadataNfoCoverage
+  missingCoreImageMovies: number; invalidResourceRecords: number; unregisteredResources: number; resourceInventoryComplete: boolean
+}
+export interface MetadataHealthSummary {
+  totalMovies: number; completeMovies: number; incompleteMovies: number; completeRate: number
+  fields: MetadataHealthField[]; analysisDurationMs: number; analyzedAt: string
+  scope: MetadataHealthScope; coverage: MetadataHealthCoverage; completeRule: string[]
+}
 export interface MetadataHealthAnalysisState { running: boolean; invalidated: boolean; stage: string; completedSteps: number; totalSteps: number; percent: number; elapsedMilliseconds: number; result?: MetadataHealthSummary; error?: string }
 export interface MediaStorageAvailability { rootPath: string; available: boolean; error?: string }
 export interface FilteredMovieSyncResult { count: number; message: string }

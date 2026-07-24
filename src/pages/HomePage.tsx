@@ -4,10 +4,8 @@ import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
 import DriveFileMoveRoundedIcon from '@mui/icons-material/DriveFileMoveRounded'
 import FavoriteRoundedIcon from '@mui/icons-material/FavoriteRounded'
 import FolderRoundedIcon from '@mui/icons-material/FolderRounded'
-import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded'
 import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded'
 import ImageRoundedIcon from '@mui/icons-material/ImageRounded'
-import LocalOfferRoundedIcon from '@mui/icons-material/LocalOfferRounded'
 import MovieRoundedIcon from '@mui/icons-material/MovieRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import PlayCircleRoundedIcon from '@mui/icons-material/PlayCircleRounded'
@@ -18,14 +16,15 @@ import StorageRoundedIcon from '@mui/icons-material/StorageRounded'
 import SyncRoundedIcon from '@mui/icons-material/SyncRounded'
 import TaskAltRoundedIcon from '@mui/icons-material/TaskAltRounded'
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded'
-import { Alert, Box, Button, Chip, Divider, Paper, Snackbar, Stack, Typography } from '@mui/material'
+import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
+import { Alert, Box, Button, Chip, CircularProgress, Divider, IconButton, Paper, Snackbar, Stack, Tooltip, Typography } from '@mui/material'
 import type { ReactNode } from 'react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { MediaCard, MediaCardGrid } from '@/components/MediaCard'
 import { EmptyState, HealthMeter, StatCard, SurfaceSection } from '@/components/ProductComponents'
 import { WorkspaceLoading } from '@/components/workspace/Workspace'
-import { bridge } from '@/services/bridge'
+import { bridge, LMM_DATA_CHANGED_EVENT } from '@/services/bridge'
 import type { DashboardActivity, DashboardEntity, DashboardLibrary, DashboardSummary, MediaItem } from '@/types/media'
 
 function formatBytes(value: number) {
@@ -41,6 +40,16 @@ function formatDate(value?: string) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString()
 }
 
+function formatDateTime(value?: string) {
+  if (!value) return '暂无记录'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+function percentage(value: number, total: number) {
+  return total > 0 ? value * 100 / total : 100
+}
+
 function meterTone(value: number): 'primary' | 'success' | 'warning' | 'error' {
   if (value >= 90) return 'success'
   if (value >= 70) return 'warning'
@@ -50,6 +59,9 @@ function meterTone(value: number): 'primary' | 'success' | 'warning' | 'error' {
 function normalizeDashboard(input: DashboardSummary): DashboardSummary {
   return {
     ...input,
+    standardMovieCount: input.standardMovieCount ?? input.metadataHealth.totalMovies,
+    localMovieCount: input.localMovieCount ?? 0,
+    unassignedMovieCount: input.unassignedMovieCount ?? 0,
     completeMetadataCount: input.completeMetadataCount ?? 0,
     pendingMetadataCount: input.pendingMetadataCount ?? 0,
     unscrapedCount: input.unscrapedCount ?? 0,
@@ -66,14 +78,10 @@ function normalizeDashboard(input: DashboardSummary): DashboardSummary {
       missingImages: 0,
       missingNfo: 0,
       cacheProblems: 0,
+      invalidResourceRecords: 0,
+      unregisteredResources: 0,
     },
-    metadataHealth: input.metadataHealth ?? {
-      completeRate: input.movieCount ? Math.round(((input.completeMetadataCount ?? 0) / input.movieCount) * 100) : 100,
-      imageRate: 100,
-      nfoRate: 100,
-      actorRate: 100,
-      tagRate: 100,
-    },
+    metadataHealth: input.metadataHealth,
     recentActivity: input.recentActivity ?? [],
     libraries: input.libraries ?? [],
     topTags: input.topTags ?? [],
@@ -125,36 +133,47 @@ export default function HomePage() {
   const [dashboard, setDashboard] = useState<DashboardSummary>()
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
   const navigate = useNavigate()
 
-  useEffect(() => {
-    let active = true
-    let retryTimer: number | undefined
+  const load = useCallback(async (showLoading = false, forceRefresh = false) => {
+    if (showLoading) setDashboard(undefined)
+    setRefreshing(true)
+    setError('')
     const retryDelays = [0, 500, 1000, 2000, 4000]
-
-    const load = async (attempt: number) => {
+    let failure: unknown
+    for (const delay of retryDelays) {
+      if (delay) await new Promise(resolve => window.setTimeout(resolve, delay))
       try {
-        const value = await bridge.dashboard()
-        if (!active) return
+        const value = await bridge.dashboard(forceRefresh)
         setDashboard(value)
         setError('')
+        setRefreshing(false)
+        return
       } catch (reason) {
-        if (!active) return
-        const nextAttempt = attempt + 1
-        if (nextAttempt < retryDelays.length) {
-          retryTimer = window.setTimeout(() => void load(nextAttempt), retryDelays[nextAttempt])
-          return
-        }
-        setError(reason instanceof Error ? reason.message : String(reason))
+        failure = reason
       }
     }
-
-    void load(0)
-    return () => {
-      active = false
-      if (retryTimer !== undefined) window.clearTimeout(retryTimer)
-    }
+    setRefreshing(false)
+    setError(failure instanceof Error ? failure.message : String(failure))
   }, [])
+
+  useEffect(() => {
+    void load(true, true)
+    const refreshWhenVisible = () => { if (document.visibilityState === 'visible') void load() }
+    const refreshAfterChange = () => { if (document.visibilityState === 'visible') void load(false, true) }
+    const visibility = () => { if (document.visibilityState === 'visible') void load() }
+    window.addEventListener('focus', refreshWhenVisible)
+    window.addEventListener(LMM_DATA_CHANGED_EVENT, refreshAfterChange)
+    document.addEventListener('visibilitychange', visibility)
+    const poll = window.setInterval(refreshWhenVisible, 30_000)
+    return () => {
+      window.removeEventListener('focus', refreshWhenVisible)
+      window.removeEventListener(LMM_DATA_CHANGED_EVENT, refreshAfterChange)
+      document.removeEventListener('visibilitychange', visibility)
+      window.clearInterval(poll)
+    }
+  }, [load])
 
   const play = (item: MediaItem) => bridge.play(item.dataId).then(() => setNotice(`已交给系统播放器：${item.code}`)).catch((reason: Error) => setNotice(reason.message))
   const openMovie = (id?: number) => { if (id) navigate(`/movies/${id}`) }
@@ -181,6 +200,10 @@ export default function HomePage() {
             <Typography color="text.secondary" sx={{ mt: .75 }}>从一个入口查看影片、元数据、任务、维护和最近活动。</Typography>
           </Box>
           <Stack direction="row" useFlexGap spacing={1} sx={{ flexWrap: 'wrap' }}>
+            <Stack direction="row" spacing={.5} sx={{ alignItems: 'center' }}>
+              <Typography variant="caption" color="text.secondary">最后统计 {formatDateTime(dashboardView.metadataHealth.analyzedAt)}</Typography>
+              <Tooltip title="刷新统计"><span><IconButton size="small" aria-label="刷新统计" disabled={refreshing} onClick={() => void load(false, true)}>{refreshing ? <CircularProgress size={18}/> : <RefreshRoundedIcon/>}</IconButton></span></Tooltip>
+            </Stack>
             <Button variant="contained" startIcon={<MovieRoundedIcon/>} onClick={() => navigate('/media')}>影片墙</Button>
             <Button variant="outlined" startIcon={<SearchRoundedIcon/>} onClick={() => navigate('/search')}>搜索</Button>
             <Button variant="outlined" startIcon={<ShuffleRoundedIcon/>} onClick={openRandom}>随机</Button>
@@ -190,23 +213,28 @@ export default function HomePage() {
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2,minmax(0,1fr))', md: 'repeat(4,minmax(0,1fr))', xl: 'repeat(8,minmax(0,1fr))' }, gap: 1.25 }}>
         <Box onClick={() => navigate('/media')} sx={{ cursor: 'pointer' }}><StatCard label="全部影片" value={dashboardView.movieCount} icon={<MovieRoundedIcon/>}/></Box>
+        <StatCard label="Standard" value={dashboardView.standardMovieCount} icon={<TaskAltRoundedIcon/>} tone="success.main"/>
+        <StatCard label="Local" value={dashboardView.localMovieCount} icon={<FolderRoundedIcon/>}/>
+        <StatCard label="未分配" value={dashboardView.unassignedMovieCount} icon={<WarningAmberRoundedIcon/>} tone="warning.main"/>
         <Box onClick={() => navigate('/favorites')} sx={{ cursor: 'pointer' }}><StatCard label="收藏" value={dashboardView.favoriteCount} icon={<FavoriteRoundedIcon/>} tone="error.main"/></Box>
         <Box onClick={() => navigate('/history')} sx={{ cursor: 'pointer' }}><StatCard label="播放过" value={dashboardView.playedCount} icon={<PlayCircleRoundedIcon/>} tone="success.main"/></Box>
-        <Box onClick={() => navigate('/libraries')} sx={{ cursor: 'pointer' }}><StatCard label="媒体库" value={dashboardView.libraryCount} icon={<StorageRoundedIcon/>}/></Box>
-        <Box onClick={() => navigate('/actors')} sx={{ cursor: 'pointer' }}><StatCard label="演员" value={dashboardView.actorCount} icon={<GroupsRoundedIcon/>}/></Box>
-        <Box onClick={() => navigate('/tags')} sx={{ cursor: 'pointer' }}><StatCard label="标签" value={dashboardView.tagCount} icon={<LocalOfferRoundedIcon/>}/></Box>
         <Box onClick={() => navigate('/tasks')} sx={{ cursor: 'pointer' }}><StatCard label="活动任务" value={dashboardView.activeTaskCount} icon={<SyncRoundedIcon/>} tone="warning.main"/></Box>
-        <Box onClick={() => navigate('/data-center?tab=diagnostics')} sx={{ cursor: 'pointer' }}><StatCard label="待维护" value={dashboardView.maintenance.pendingMovies} icon={<BuildRoundedIcon/>} tone="warning.main"/></Box>
+        <Box onClick={() => navigate('/libraries')} sx={{ cursor: 'pointer' }}><StatCard label="媒体库" value={dashboardView.libraryCount} icon={<StorageRoundedIcon/>}/></Box>
       </Box>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0,1.35fr) minmax(320px,.65fr)' }, gap: 2 }}>
-        <SurfaceSection title="元数据健康" description="完整度、图片、NFO、演员和标签覆盖率">
+        <SurfaceSection title="元数据健康" description={`覆盖率分母：Standard ${dashboardView.standardMovieCount} 部`}>
           <Stack spacing={2}>
-            <HealthMeter label="完整影片" value={dashboardView.metadataHealth.completeRate} detail={`${dashboardView.completeMetadataCount} / ${dashboardView.movieCount}`} tone={meterTone(dashboardView.metadataHealth.completeRate)}/>
-            <HealthMeter label="图片覆盖" value={dashboardView.metadataHealth.imageRate} detail={`${dashboardView.metadataHealth.imageRate}%`} tone={meterTone(dashboardView.metadataHealth.imageRate)}/>
-            <HealthMeter label="NFO 覆盖" value={dashboardView.metadataHealth.nfoRate} detail={`${dashboardView.metadataHealth.nfoRate}%`} tone={meterTone(dashboardView.metadataHealth.nfoRate)}/>
-            <HealthMeter label="演员覆盖" value={dashboardView.metadataHealth.actorRate} detail={`${dashboardView.metadataHealth.actorRate}%`} tone={meterTone(dashboardView.metadataHealth.actorRate)}/>
-            <HealthMeter label="标签覆盖" value={dashboardView.metadataHealth.tagRate} detail={`${dashboardView.metadataHealth.tagRate}%`} tone={meterTone(dashboardView.metadataHealth.tagRate)}/>
+            <HealthMeter label="完整影片" value={dashboardView.metadataHealth.completeRate} detail={`${dashboardView.metadataHealth.completeMovies} / ${dashboardView.standardMovieCount}`} tone={meterTone(dashboardView.metadataHealth.completeRate)}/>
+            <HealthMeter label="演员" value={percentage(dashboardView.metadataHealth.coverage.actorMovies, dashboardView.standardMovieCount)} detail={`${dashboardView.metadataHealth.coverage.actorMovies} / ${dashboardView.standardMovieCount}`} tone={meterTone(percentage(dashboardView.metadataHealth.coverage.actorMovies, dashboardView.standardMovieCount))}/>
+            <HealthMeter label="Provider 标签" value={percentage(dashboardView.metadataHealth.coverage.providerTagMovies, dashboardView.standardMovieCount)} detail={`${dashboardView.metadataHealth.coverage.providerTagMovies} / ${dashboardView.standardMovieCount}`} tone={meterTone(percentage(dashboardView.metadataHealth.coverage.providerTagMovies, dashboardView.standardMovieCount))}/>
+            <HealthMeter label="用户标签" value={percentage(dashboardView.metadataHealth.coverage.userTagMovies, dashboardView.standardMovieCount)} detail={`${dashboardView.metadataHealth.coverage.userTagMovies} / ${dashboardView.standardMovieCount} · 不参与完整度`} tone="primary"/>
+            <HealthMeter label="Poster 实体" value={percentage(dashboardView.metadataHealth.coverage.poster.physicalMovies, dashboardView.standardMovieCount)} detail={`${dashboardView.metadataHealth.coverage.poster.physicalMovies} / ${dashboardView.standardMovieCount} · 登记 ${dashboardView.metadataHealth.coverage.poster.databaseMovies}`} tone={meterTone(percentage(dashboardView.metadataHealth.coverage.poster.physicalMovies, dashboardView.standardMovieCount))}/>
+            <HealthMeter label="Fanart 实体" value={percentage(dashboardView.metadataHealth.coverage.fanart.physicalMovies, dashboardView.standardMovieCount)} detail={`${dashboardView.metadataHealth.coverage.fanart.physicalMovies} / ${dashboardView.standardMovieCount} · 登记 ${dashboardView.metadataHealth.coverage.fanart.databaseMovies}`} tone={meterTone(percentage(dashboardView.metadataHealth.coverage.fanart.physicalMovies, dashboardView.standardMovieCount))}/>
+            <HealthMeter label="Preview 实体" value={percentage(dashboardView.metadataHealth.coverage.preview.physicalMovies, dashboardView.standardMovieCount)} detail={`${dashboardView.metadataHealth.coverage.preview.physicalMovies} / ${dashboardView.standardMovieCount} · 登记 ${dashboardView.metadataHealth.coverage.preview.databaseMovies}`} tone={meterTone(percentage(dashboardView.metadataHealth.coverage.preview.physicalMovies, dashboardView.standardMovieCount))}/>
+            <HealthMeter label="Screenshot 实体" value={percentage(dashboardView.metadataHealth.coverage.screenshot.physicalMovies, dashboardView.standardMovieCount)} detail={`${dashboardView.metadataHealth.coverage.screenshot.physicalMovies} / ${dashboardView.standardMovieCount} · 登记 ${dashboardView.metadataHealth.coverage.screenshot.databaseMovies}`} tone={meterTone(percentage(dashboardView.metadataHealth.coverage.screenshot.physicalMovies, dashboardView.standardMovieCount))}/>
+            <HealthMeter label="NFO 实体" value={percentage(dashboardView.metadataHealth.coverage.nfo.physicalMovies, dashboardView.standardMovieCount)} detail={`${dashboardView.metadataHealth.coverage.nfo.physicalMovies} / ${dashboardView.standardMovieCount} · 状态 ${dashboardView.metadataHealth.coverage.nfo.databaseMovies}`} tone={meterTone(percentage(dashboardView.metadataHealth.coverage.nfo.physicalMovies, dashboardView.standardMovieCount))}/>
+            <Typography variant="caption" color="text.secondary">完整规则：{dashboardView.metadataHealth.completeRule.join('、')}</Typography>
           </Stack>
         </SurfaceSection>
         <SurfaceSection title="快捷入口" description="继续常用工作">
@@ -228,6 +256,8 @@ export default function HomePage() {
             <StatCard label="重复影片" value={dashboardView.maintenance.duplicateMovies} icon={<ContentCopyRoundedIcon/>} tone="warning.main"/>
             <StatCard label="缺图片" value={dashboardView.maintenance.missingImages} icon={<ImageRoundedIcon/>} tone="warning.main"/>
             <StatCard label="缺 NFO" value={dashboardView.maintenance.missingNfo} icon={<BrokenImageRoundedIcon/>} tone="warning.main"/>
+            <StatCard label="记录异常" value={dashboardView.metadataHealth.coverage.resourceInventoryComplete ? dashboardView.maintenance.invalidResourceRecords : '统计中'} icon={<WarningAmberRoundedIcon/>} tone="error.main"/>
+            <StatCard label="未登记资源" value={dashboardView.metadataHealth.coverage.resourceInventoryComplete ? dashboardView.maintenance.unregisteredResources : '统计中'} icon={<ImageRoundedIcon/>} tone="warning.main"/>
             <StatCard label="缓存异常" value={dashboardView.maintenance.cacheProblems} icon={<ImageRoundedIcon/>} tone="error.main"/>
           </Box>
         </SurfaceSection>

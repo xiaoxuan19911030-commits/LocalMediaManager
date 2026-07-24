@@ -1442,6 +1442,16 @@ Actor profile enrichment reuses the Bridge and existing actor repository. Databa
 
 Merge policy is fill-empty-only: user edits and existing non-empty values win; conflicting provider values are reported rather than overwritten. Minnano primarily supplies birth date, height, and cup; Wikipedia JP primarily supplies birthplace, activity period, description, and birth date. Provenance is used by merge decisions, diagnostics, and debug logging only, and is not displayed on actor detail pages. See DEC-020.
 
+### 13.8 Standard metadata health
+
+Dashboard and Metadata Health share `MetadataHealthDefinition` and the exact same `MetadataHealthSummary`. The default denominator is active Standard movies only: enabled Standard library, primary video, and media state other than `Missing`. Dashboard separately reports all active, Standard, Local, and unassigned movie counts.
+
+For health semantics, Provider tags are `Genres/MovieGenres`; user tags are `Tags/MovieTags`. Provider tags participate in Standard completeness, while user tags are reported separately and never make a movie incomplete. This health-specific distinction does not change DEC-011 Smart Search and historical tag-navigation compatibility.
+
+A complete Standard movie requires an uppercase normalized number, title, release date, a valid studio, a valid actor, a Provider tag, a physical Poster, a physical Fanart, and a physical NFO. Image coverage requires both an `Images` relation and a real file. NFO coverage checks absolute `.nfo` paths registered through `Movies.NfoPath` or `NfoDocuments` and requires a real file. Missing registered files are invalid resources; MediaStorage files without an exact database path relation are unregistered resources and are reported without automatic repair. See DEC-022.
+
+`MetadataHealthAnalysisService` invalidates on database timestamp changes, explicit sync completion, explicit refresh, and maximum cache age. Home refreshes on entry, user refresh, visible-window data changes, and periodic polling. Full network-storage inventory runs in the background after current physical coverage is available; pending inventory is explicit in the DTO and UI.
+
 ---
 
 ## 14. UI Design System

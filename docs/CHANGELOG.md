@@ -35,6 +35,10 @@
 
 ### Bug Fixes
 
+- v0.7.4-A unifies Dashboard and Metadata Health on an active Standard-only denominator and one shared completeness formula.
+- Provider tag coverage now uses `MovieGenres`; `MovieTags` is reported separately as user tags and does not affect completeness.
+- Poster, Fanart, Preview, Screenshot, and NFO coverage now validates physical files; missing registrations and unregistered MediaStorage files are reported without repair.
+- Dashboard statistics refresh on page entry, explicit refresh, data-change events, sync invalidation, and periodic cache checks.
 - 修正数据中心和维护统计的影片总数口径：只统计当前有主视频且文件可用的影片，不再把缺失文件记录、无视频记录和历史迁移残留计入“影片总数”。
 - 修复桌面启动时 Bridge 尚未就绪导致的瞬时离线告警，并为 Dashboard 首次读取增加有限重试。
 

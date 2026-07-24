@@ -31,7 +31,7 @@ public sealed class MediaStoragePathResolver(string databasePath, string install
         string normalizedType = NormalizeResourceType(resourceType);
         if (normalizedType is not ("Poster" or "Screenshot"))
             throw new ArgumentException("Local media resources currently support Poster and Screenshot only.", nameof(resourceType));
-        MediaStorageSettingsDto settings = await ReadSettingsAsync(cancellationToken);
+        MediaStorageSettingsDto settings = await GetSettingsAsync(cancellationToken);
         string resourceDirectory = ResourceDirectory(settings, normalizedType);
         string stableId = movieId.ToString(System.Globalization.CultureInfo.InvariantCulture);
         string normalizedExtension = NormalizeExtension(extension);
@@ -45,7 +45,7 @@ public sealed class MediaStoragePathResolver(string databasePath, string install
 
     public async Task<MediaStorageAvailability> AvailabilityAsync(CancellationToken token = default)
     {
-        MediaStorageSettingsDto settings = await ReadSettingsAsync(token);
+        MediaStorageSettingsDto settings = await GetSettingsAsync(token);
         try { string root = Path.GetFullPath(settings.RootPath); bool available = Directory.Exists(root); return new(root, available, available ? null : "Configured media storage directory is unavailable."); }
         catch (Exception error) { return new(settings.RootPath, false, error.Message); }
     }
@@ -69,7 +69,7 @@ public sealed class MediaStoragePathResolver(string databasePath, string install
         string? uniqueSuffix = null,
         CancellationToken cancellationToken = default)
     {
-        MediaStorageSettingsDto settings = await ReadSettingsAsync(cancellationToken);
+        MediaStorageSettingsDto settings = await GetSettingsAsync(cancellationToken);
         string normalizedType = NormalizeResourceType(resourceType);
         string resourceDirectory = ResourceDirectory(settings, normalizedType);
         string movieNumber = SafePathSegment(MetadataNamingPolicy.NormalizeMovieNumber(movie.Code, movie.Id));
@@ -95,7 +95,7 @@ public sealed class MediaStoragePathResolver(string databasePath, string install
 
     public async Task<string> TemporaryRootAsync(CancellationToken cancellationToken = default)
     {
-        MediaStorageSettingsDto settings = await ReadSettingsAsync(cancellationToken);
+        MediaStorageSettingsDto settings = await GetSettingsAsync(cancellationToken);
         string path = Path.Combine(settings.RootPath, ".lmm-temp", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
         return path;
@@ -103,7 +103,7 @@ public sealed class MediaStoragePathResolver(string databasePath, string install
 
     public async Task<bool> IsInsideMediaStorageAsync(string path, CancellationToken cancellationToken = default)
     {
-        MediaStorageSettingsDto settings = await ReadSettingsAsync(cancellationToken);
+        MediaStorageSettingsDto settings = await GetSettingsAsync(cancellationToken);
         string fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         string root = Path.GetFullPath(settings.RootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         return fullPath.Equals(root, StringComparison.OrdinalIgnoreCase)
@@ -121,7 +121,7 @@ public sealed class MediaStoragePathResolver(string databasePath, string install
         return new(reader.GetInt64(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2));
     }
 
-    private async Task<MediaStorageSettingsDto> ReadSettingsAsync(CancellationToken token)
+    public async Task<MediaStorageSettingsDto> GetSettingsAsync(CancellationToken token = default)
     {
         MediaStorageSettingsDto defaults = SettingsDefaults.MediaStorageForEnvironment(installRoot, databasePath);
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadOnly, token);
