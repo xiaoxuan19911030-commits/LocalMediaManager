@@ -54,6 +54,7 @@ docs/               → 证据、Release 验收、字段映射、矩阵
 | [DEC-022](#dec-022-standard-metadata-health-statistics) | Standard 元数据健康统一口径 | Dashboard / Metadata Health | 0.7.4-A | `fix(metadata)` |
 | [DEC-023](#dec-023-offline-metadata-repair-safety-boundary) | 离线元数据修复安全边界 | Metadata Repair / Audit | 0.7.4-B | `feat(metadata)` |
 | [DEC-024](#dec-024-targeted-metadata-completion) | 按字段定向元数据补全 | Metadata Completion / Providers | 0.7.4-C | `feat(metadata)` |
+| [DEC-025](#dec-025-production-metadata-completion-gates) | 生产补全分阶段门禁与部分错误状态 | Metadata Completion / Tasks | 0.7.5-P1 | `feat(metadata)` |
 
 ---
 
@@ -1393,6 +1394,7 @@ Feature Freeze 期间不得新增 UI 优化、新产品功能或旧版范围外�
 | Feature Parity | 查重与批量整理合并为整理工具统一入口，并完成重复 Safe Delete、批量移动、批量重命名执行流 | DEC-015 |
 | Feature Parity | 日志清理、语言、托盘/关闭、快捷键管理和检查更新完成保留范围迁移，进入 Feature Freeze | DEC-016 |
 | Feature Freeze | 旧设置迁移收口：兼容字段隐藏，最小扫描文件大小成为正式设置，危险旧开关取消 | DEC-017 |
+| 0.7.5-P1 | 生产补全固定 20 部上限、持久化抽样证据、逐片 Provider 审计与部分错误终态 | DEC-025 |
 
 ---
 
@@ -1614,3 +1616,32 @@ The workflow reuses `Tasks`, `TaskLogs`, `OperationAudit`, `MetadataSyncSnapshot
 - Do not overwrite existing fields, locked/user images, locked/user NFO, user tags, user ratings, favorites, or playback history.
 - Do not claim that remote Providers fetch individual JSON fields when their APIs return full metadata documents.
 - Do not execute production completion before the Human accepts the Dry Run and a production database backup exists.
+
+---
+
+### DEC-025: Production Metadata Completion Gates
+
+| Field | Value |
+|------|-----|
+| **Decision ID** | DEC-025 |
+| **Module** | Metadata Completion / Tasks / Dashboard |
+| **Sprint** | 0.7.5-P1 |
+| **Date** | 2026-07-25 |
+| **Status** | Accepted |
+
+#### Decision
+
+Production Metadata Completion advances through explicit P1, P2, and P3 gates. P1 selects at most 20 eligible Standard movies from the persisted v0.7.4-C pool using a persisted random seed. The selection must include distinct evidence for missing Actors, Provider Genres, Poster, Fanart, and NFO when the eligible pool permits it. The exact MovieIds are fixed before execution, and the workflow stops after all selected items reach terminal states.
+
+Every production item records Provider attempts, HTTP evidence when available, retry count, elapsed time, Provider contributions, AddedFields, and Before/After database snapshots. Existing metadata and user data remain fill-empty-only protected. A Provider response that contains no requested field must not invoke the database writer.
+
+A completion session is successful only when every selected item completes successfully. A session with any Partial, Skipped, Failed, NoResult, Conflict, or Cancelled item is presented as `CompletedWithErrors`, including historical completion results normalized at read time. P2 requires explicit Human approval after reviewing P1 Provider, Merge, Database, Metadata Health, Dashboard, and UI evidence.
+
+#### Prohibited
+
+- Do not raise the P1 batch above 20 movies.
+- Do not replace the persisted balanced selection after execution starts.
+- Do not report a session with unsuccessful items as a successful completed task.
+- Do not call the writer when no requested Provider field survived field filtering.
+- Do not continue to P2 or P3 without the preceding Human gate.
+- Do not treat Provider infrastructure failure or unchanged Metadata Health as production acceptance.

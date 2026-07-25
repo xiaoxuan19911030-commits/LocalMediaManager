@@ -12,11 +12,14 @@ public sealed record DashboardEntityDto(long Id, string Name, long MovieCount);
 public sealed record DashboardLibraryDto(long Id, string Name, long MovieCount, long FileBytes, string? LastUpdatedAt);
 public sealed record DashboardMaintenanceDto(long HealthyMovies, long PendingMovies, long UnscrapedMovies, long DuplicateMovies,
     long MissingImages, long MissingNfo, long CacheProblems, long InvalidResourceRecords, long UnregisteredResources);
+public sealed record DashboardMetadataCompletionDto(long? PendingCompletion, long? ProviderAllFailed,
+    long? NumberAnomalies, long? OfflineRepairable, long? EligiblePool, long? SelectedBatch, string? EvidenceAt);
 public sealed record DashboardDto(long MovieCount, long StandardMovieCount, long LocalMovieCount, long UnassignedMovieCount,
     long FavoriteCount, long PlayedCount, long MissingFileCount,
     long LibraryCount, long ActiveTaskCount, long CompleteMetadataCount, long PendingMetadataCount, long UnscrapedCount,
     long ActorCount, long DirectorCount, long TagCount, long SeriesCount, long StudioCount,
     DashboardMaintenanceDto Maintenance, MetadataHealthSummary MetadataHealth,
+    DashboardMetadataCompletionDto MetadataCompletion,
     IReadOnlyList<DashboardActivityDto> RecentActivity, IReadOnlyList<DashboardLibraryDto> Libraries,
     IReadOnlyList<DashboardEntityDto> TopTags, IReadOnlyList<DashboardEntityDto> TopActors,
     IReadOnlyList<DashboardEntityDto> TopDirectors, IReadOnlyList<DashboardEntityDto> TopStudios,
@@ -107,6 +110,7 @@ public static class ProductReader
             await CountInvalidCacheRowsAsync(connection),
             health.Coverage.InvalidResourceRecords,
             health.Coverage.UnregisteredResources);
+        DashboardMetadataCompletionDto metadataCompletion = await ReadMetadataCompletionDashboardAsync(connection);
         var recentActivity = await ReadDashboardActivityAsync(connection);
         var libraryStats = await ReadDashboardLibrariesAsync(connection);
         var topTags = await ReadTopEntitiesAsync(connection, "Tags", "MovieTags", "TagId");
@@ -118,8 +122,52 @@ public static class ProductReader
         var recentPlays = await ReadCardsAsync(connection, bridgeUrl, "s.LastPlayedAt DESC, m.Id DESC", 8, true);
         return new(movies, health.Scope.StandardMovies, health.Scope.LocalMovies, health.Scope.UnassignedMovies,
             favorites, played, missing, libraries, tasks, complete, pending, unscraped,
-            actors, directors, tags, series, studios, maintenance, health, recentActivity, libraryStats,
+            actors, directors, tags, series, studios, maintenance, health, metadataCompletion, recentActivity, libraryStats,
             topTags, topActors, topDirectors, topStudios, topSeries, recentImports, recentPlays);
+    }
+
+    private static async Task<DashboardMetadataCompletionDto> ReadMetadataCompletionDashboardAsync(SqliteConnection connection)
+    {
+        long? pending = null, providerAllFailed = null, anomalies = null, eligible = null, selected = null;
+        string? evidenceAt = null;
+        await using (SqliteCommand command = connection.CreateCommand()) {
+            command.CommandText = """
+                SELECT CAST(json_extract(ResultJson,'$.counts.eligibleMovies') AS INTEGER),
+                       CAST(json_extract(ResultJson,'$.counts.plannedNetworkMovies') AS INTEGER),
+                       CAST(json_extract(ResultJson,'$.counts.completed') AS INTEGER),
+                       CAST(json_extract(ResultJson,'$.counts.noResult') AS INTEGER),
+                       CAST(json_extract(ResultJson,'$.counts.excludedLowConfidence') AS INTEGER),
+                       CAST(json_extract(ResultJson,'$.counts.excludedMultipleNumbers') AS INTEGER),
+                       CAST(json_extract(ResultJson,'$.counts.excludedCodeConflict') AS INTEGER),
+                       COALESCE(CompletedAt,UpdatedAt,CreatedAt)
+                  FROM Tasks
+                 WHERE TaskType='MetadataCompletion' AND ResultJson IS NOT NULL AND json_valid(ResultJson)=1
+                 ORDER BY Id DESC LIMIT 1
+                """;
+            await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+            if (await reader.ReadAsync()) {
+                eligible = NullableLong(reader, 0);
+                selected = NullableLong(reader, 1);
+                long completed = NullableLong(reader, 2) ?? 0;
+                pending = eligible is null ? null : Math.Max(0, eligible.Value - completed);
+                providerAllFailed = NullableLong(reader, 3);
+                anomalies = (NullableLong(reader, 4) ?? 0) + (NullableLong(reader, 5) ?? 0) + (NullableLong(reader, 6) ?? 0);
+                evidenceAt = Text(reader, 7);
+            }
+        }
+
+        long? offlineRepairable = null;
+        await using (SqliteCommand command = connection.CreateCommand()) {
+            command.CommandText = """
+                SELECT CAST(json_extract(ResultJson,'$.counts.safeRepairs') AS INTEGER)
+                  FROM Tasks
+                 WHERE TaskType='MetadataRepair' AND ResultJson IS NOT NULL AND json_valid(ResultJson)=1
+                 ORDER BY Id DESC LIMIT 1
+                """;
+            object? value = await command.ExecuteScalarAsync();
+            if (value is not null and not DBNull) offlineRepairable = Convert.ToInt64(value);
+        }
+        return new(pending, providerAllFailed, anomalies, offlineRepairable, eligible, selected, evidenceAt);
     }
 
     public static async Task<GlobalSearchDto> SearchAsync(string databasePath, string bridgeUrl, string query, int limit)
@@ -198,9 +246,19 @@ public static class ProductReader
         var movieNames = new Dictionary<long, string>();
         await using (var movies = connection.CreateCommand()) {
             movies.CommandText = """
+                WITH TaskMovieIds(Id) AS (
+                    SELECT CurrentMovieId FROM Tasks WHERE CurrentMovieId IS NOT NULL
+                    UNION
+                    SELECT CASE WHEN json_valid(PayloadJson)
+                                THEN CAST(json_extract(PayloadJson,'$.MovieId') AS INTEGER)
+                           END
+                      FROM Tasks
+                     WHERE PayloadJson IS NOT NULL
+                )
                 SELECT m.Id,
                        COALESCE(NULLIF(trim(m.Code),''), NULLIF(trim(m.Title),''), NULLIF(trim(mf.FileName),''))
                   FROM Movies m
+                  JOIN TaskMovieIds taskMovie ON taskMovie.Id=m.Id
                   LEFT JOIN MediaFiles mf ON mf.MovieId=m.Id AND mf.IsPrimary=1 AND mf.MediaType='Video'
                 """;
             await using var movieReader = await movies.ExecuteReaderAsync();
@@ -230,9 +288,14 @@ public static class ProductReader
             string type = reader.GetString(1);
             string? payload = Text(reader, 10);
             long? currentMovieId = reader.IsDBNull(14)?null:reader.GetInt64(14);
-            tasks.Add(new(reader.GetInt64(0),type,reader.GetString(2),TaskName(type,payload,libraryNames,movieNames,currentMovieId),reader.GetDouble(3),
+            string? resultSummary = Text(reader, 15);
+            string status = MetadataCompletionTaskStatus.NormalizeSummary(
+                type, reader.GetString(2), resultSummary, reader.GetInt64(4));
+            string? stage = Text(reader, 11);
+            if (status == "CompletedWithErrors" && stage == "Completed") stage = status;
+            tasks.Add(new(reader.GetInt64(0),type,status,TaskName(type,payload,libraryNames,movieNames,currentMovieId),reader.GetDouble(3),
                 reader.GetInt64(4),reader.GetInt64(5),Text(reader,6),reader.GetString(7),Text(reader,8),Text(reader,9),
-                Text(reader,11),Text(reader,12),reader.GetInt64(13),currentMovieId,Text(reader,15)));
+                stage,Text(reader,12),reader.GetInt64(13),currentMovieId,resultSummary));
         }
         return tasks;
     }
@@ -1156,5 +1219,7 @@ public static class ProductReader
         return (complete, Math.Max(0, total - complete), unscraped);
     }
     private static string EscapeLike(string value)=>value.Replace("\\","\\\\").Replace("%","\\%").Replace("_","\\_");
+    private static long? NullableLong(SqliteDataReader reader, int index) =>
+        reader.IsDBNull(index) ? null : Convert.ToInt64(reader.GetValue(index));
     private static string? Text(SqliteDataReader reader,int index)=>reader.IsDBNull(index)?null:reader.GetString(index);
 }

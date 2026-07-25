@@ -1464,6 +1464,12 @@ Metadata Completion is a separate Standard-only task workflow built after Metada
 
 Current Provider APIs return complete metadata documents rather than field-selective payloads. LMM therefore skips Providers that cannot contribute a requested field and removes non-target fields before `MetadataWriteService`. Merge remains fill-empty-only. The workflow checkpoints per-item status for pause/resume, uses bounded concurrency, exponential retry, Provider throttling, `OperationAudit` rollback, and refreshes the shared Metadata Health summary after execution. See DEC-024.
 
+### 13.11 Production metadata completion gates
+
+Production completion uses explicit P1, P2, and P3 gates. P1 is fixed at no more than 20 persisted, balanced Standard movies selected from the eligible completion pool by a persisted random seed. The selection records distinct samples for missing Actors, Provider Genres, Poster, Fanart, and NFO when available. It cannot silently expand after execution starts.
+
+Each item persists Provider/HTTP/retry evidence, elapsed time, contributions, AddedFields, and Before/After values. Provider documents with no requested field do not reach the database writer. A session containing any unsuccessful item is exposed as `CompletedWithErrors`; P2 requires Human review of P1 Provider, Merge, Database, Metadata Health, Dashboard, and UI evidence. See DEC-025.
+
 ---
 
 ## 14. UI Design System
@@ -2037,6 +2043,7 @@ Web build · Bridge.Tests · cargo check · 文档与 Decision 同步
 | 0.5.0-17 | `sprint/0.5.0-17-media-resource-write` | 统一写入 Resolver；Legacy Read 保留；WallCrops 纳入 | DEC-008 ～ DEC-010 |
 | 0.5.0-20 | `sprint/0.5.0-20-moviewall-display` | MovieWall 显示偏好、响应式卡片尺寸和悬浮分页交互 | DEC-012 |
 | Repository Stabilization | `sprint/0.5.0-20-moviewall-display` | 元数据归属规则：取消完整影片编辑器，只维护用户个人数据 | DEC-013 |
+| 0.7.5-P1 | `codex/sprint-0.7.5-metadata-completion-production` | 生产补全 20 部硬上限、平衡抽样、逐片审计与部分错误终态 | DEC-025 |
 
 Sprint 0.5.0-02 ～ 0.5.0-14 待 backlog 考古后追加（DEC-011+，不阻塞开发）。
 

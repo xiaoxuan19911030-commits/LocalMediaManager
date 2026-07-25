@@ -1,4 +1,5 @@
 import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded'
+import ArticleRoundedIcon from '@mui/icons-material/ArticleRounded'
 import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded'
 import PauseRoundedIcon from '@mui/icons-material/PauseRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
@@ -7,7 +8,7 @@ import RestoreRoundedIcon from '@mui/icons-material/RestoreRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import {
   Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle,
-  FormControlLabel, LinearProgress, MenuItem, Paper, Snackbar, Stack, Table, TableBody, TableCell, TableContainer,
+  Divider, FormControlLabel, LinearProgress, MenuItem, Paper, Snackbar, Stack, Table, TableBody, TableCell, TableContainer,
   TableHead, TablePagination, TableRow, TextField, Typography,
 } from '@mui/material'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -26,7 +27,7 @@ const fields: { key: keyof MetadataCompletionScanCommand; label: string }[] = [
 ]
 const defaultOptions: MetadataCompletionScanCommand = {
   actors: true, genres: true, poster: true, fanart: true, nfo: true, description: true,
-  series: true, director: true, studio: true, releaseDate: true, concurrency: 4,
+  series: true, director: true, studio: true, releaseDate: true, concurrency: 4, maxMovies: 20,
 }
 
 export default function MetadataCompletionPage() {
@@ -41,6 +42,7 @@ export default function MetadataCompletionPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
+  const [selectedItem, setSelectedItem] = useState<MetadataCompletionItem>()
 
   const load = useCallback(async () => {
     if (!taskId) return
@@ -98,7 +100,7 @@ export default function MetadataCompletionPage() {
     ]}>
     <Stack spacing={1.5}>
       {error && <Alert severity="error">{error}</Alert>}
-      <Alert severity="info">Dry Run 不联网。只有确认计划后才会调用已启用 Provider；Merge 始终只填空字段。</Alert>
+      <Alert severity="info">P1 固定选择 20 部。Dry Run 不联网；确认后只执行这 20 部，Merge 始终只填空字段，完成后自动停止。</Alert>
 
       <SurfaceSection title="补全范围" description="只分析有效 Standard 影片。Local、未分配、番号冲突、低置信度和受保护字段自动排除。">
         <Stack spacing={1.25}>
@@ -110,6 +112,7 @@ export default function MetadataCompletionPage() {
             onChange={event => setOptions(value => ({ ...value, concurrency: Number(event.target.value) }))} sx={{ width: 160 }}>
             {[1, 2, 3, 4, 5, 6, 7, 8].map(value => <MenuItem key={value} value={value}>{value}</MenuItem>)}
           </TextField>
+          <Typography variant="caption" color="text.secondary">P1 批次上限：20 部（固定，不可在本阶段提高）</Typography>
         </Stack>
       </SurfaceSection>
 
@@ -135,11 +138,16 @@ export default function MetadataCompletionPage() {
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 1 }}>
             <Metric label="扫描 Standard" value={preview.counts.scannedStandardMovies}/>
             <Metric label="不完整" value={preview.counts.incompleteMovies}/>
-            <Metric label="预计联网影片" value={preview.counts.plannedNetworkMovies} tone="warning"/>
+            <Metric label="合格池" value={preview.counts.eligibleMovies}/>
+            <Metric label="P1 固定批次" value={preview.counts.plannedNetworkMovies} tone="warning"/>
             <Metric label="当前完整" value={preview.projection.completeBefore}/>
             <Metric label="乐观预计完整" value={preview.projection.completeProjected} tone="success"/>
             <Metric label="预计耗时" value={`${Math.ceil(preview.projection.estimatedSeconds / 60)} 分钟`}/>
+            <Metric label="随机种子" value={preview.selection.seed}/>
           </Box>
+          <Stack direction="row" useFlexGap spacing={.75} sx={{ flexWrap: 'wrap', mt: 1.25 }}>
+            {Object.entries(preview.selection.balancedCoverage).map(([field, movieId]) => <Chip key={field} size="small" variant="outlined" label={`${fieldLabel(field)} · MovieId ${movieId}`}/>) }
+          </Stack>
         </SurfaceSection>
 
         <SurfaceSection title="字段与 Provider 请求" description="显示首选 Provider 的预计请求；项目计划保留回退链，但字段已补齐后不会继续请求后续来源。">
@@ -149,7 +157,7 @@ export default function MetadataCompletionPage() {
             </Box>
             <Stack spacing={1}>{Object.entries(preview.counts.providerRequests).map(([provider, count]) =>
               <Box key={provider} sx={{ p: 1.15, border: 1, borderColor: 'divider', borderRadius: 1.5, display: 'flex', justifyContent: 'space-between' }}>
-                <Typography sx={{ fontWeight: 800 }}>{provider}</Typography><Typography>{count} 次</Typography>
+                <Typography sx={{ fontWeight: 800 }}>{provider}</Typography><Typography>计划 {count} · 实际 {preview.counts.actualProviderRequests[provider] ?? 0}</Typography>
               </Box>)}</Stack>
           </Box>
         </SurfaceSection>
@@ -165,8 +173,8 @@ export default function MetadataCompletionPage() {
             </Stack>
             <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 600 }}>
               <Table stickyHeader size="small">
-                <TableHead><TableRow><TableCell>影片</TableCell><TableCell>缺失字段</TableCell><TableCell>保护</TableCell><TableCell>Provider 路由</TableCell><TableCell>结果</TableCell><TableCell>AddedFields</TableCell><TableCell>状态</TableCell></TableRow></TableHead>
-                <TableBody>{visible.map(item => <CompletionRow key={item.itemId} item={item}/>)}</TableBody>
+                <TableHead><TableRow><TableCell>影片</TableCell><TableCell>缺失字段</TableCell><TableCell>保护</TableCell><TableCell>Provider 路由</TableCell><TableCell>结果</TableCell><TableCell>AddedFields</TableCell><TableCell>状态</TableCell><TableCell>日志</TableCell></TableRow></TableHead>
+                <TableBody>{visible.map(item => <CompletionRow key={item.itemId} item={item} onDetails={() => setSelectedItem(item)}/>)}</TableBody>
               </Table>
             </TableContainer>
             <TablePagination component="div" count={filtered.length} page={page} rowsPerPage={rowsPerPage}
@@ -193,11 +201,36 @@ export default function MetadataCompletionPage() {
       <DialogContent><DialogContentText>只回滚本会话写入的数据库字段和关联。执行期间下载或生成的实体文件按安全规则保留，不会删除。</DialogContentText></DialogContent>
       <DialogActions><Button onClick={() => setConfirm(undefined)}>取消</Button><Button color="error" variant="contained" disabled={busy || !preview} onClick={() => preview && void run(() => bridge.rollbackMetadataCompletion(preview.taskId))}>确认回滚</Button></DialogActions>
     </Dialog>
+    <Dialog open={Boolean(selectedItem)} onClose={() => setSelectedItem(undefined)} maxWidth="lg" fullWidth>
+      <DialogTitle>{selectedItem?.number} · 补全详情</DialogTitle>
+      <DialogContent dividers>
+        {selectedItem && <Stack spacing={2}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3,minmax(0,1fr))' }, gap: 1 }}>
+            <Metric label="MovieId" value={selectedItem.movieId}/><Metric label="Provider 尝试" value={selectedItem.attempts}/><Metric label="耗时" value={`${selectedItem.elapsedMilliseconds} ms`}/>
+          </Box>
+          <SurfaceSection title="Provider 贡献" description="按 Provider 记录真实返回并进入目标字段集合的内容。">
+            <Stack spacing={.75}>{Object.entries(selectedItem.providerContributions).map(([provider, values]) => <Box key={provider} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}><Typography sx={{ minWidth: 90, fontWeight: 800 }}>{provider}</Typography><TokenList values={values.map(fieldLabel)} empty="无贡献"/></Box>)}</Stack>
+          </SurfaceSection>
+          <SurfaceSection title="Before / After" description="执行会话保存的数据库快照；已有值受 fill-empty-only 保护。">
+            <Table size="small"><TableHead><TableRow><TableCell>字段</TableCell><TableCell>Before</TableCell><TableCell>After</TableCell></TableRow></TableHead><TableBody>
+              {Array.from(new Set([...Object.keys(selectedItem.beforeValues), ...Object.keys(selectedItem.afterValues)])).map(field => <TableRow key={field}><TableCell>{fieldLabel(field)}</TableCell><TableCell sx={{ overflowWrap: 'anywhere' }}>{selectedItem.beforeValues[field] || '—'}</TableCell><TableCell sx={{ overflowWrap: 'anywhere' }}>{selectedItem.afterValues[field] || '—'}</TableCell></TableRow>)}
+            </TableBody></Table>
+          </SurfaceSection>
+          <SurfaceSection title="执行日志" description="包含 Provider、HTTP 线索、重试、落盘和 Database Merge。">
+            <Stack divider={<Divider flexItem/>}>{selectedItem.logs.length ? selectedItem.logs.map((log, index) => <Box key={`${log.at}-${index}`} sx={{ py: .75 }}>
+              <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}><Typography variant="caption" sx={{ minWidth: 165 }}>{formatTime(log.at)}</Typography><Typography variant="caption" sx={{ minWidth: 140, fontWeight: 800 }}>{log.provider} / {log.stage}</Typography><Typography variant="caption">尝试 {log.attempt || '—'} · HTTP {log.httpStatusCode ?? '—'} · {log.elapsedMilliseconds} ms</Typography></Stack>
+              <Typography variant="body2" sx={{ mt: .35, overflowWrap: 'anywhere' }}>{log.message}</Typography>
+            </Box>) : <Typography variant="body2" color="text.secondary">Dry Run 尚未执行 Provider。</Typography>}</Stack>
+          </SurfaceSection>
+        </Stack>}
+      </DialogContent>
+      <DialogActions><Button onClick={() => setSelectedItem(undefined)}>关闭</Button></DialogActions>
+    </Dialog>
     <Snackbar open={Boolean(notice)} autoHideDuration={5000} onClose={() => setNotice('')} message={notice}/>
   </WorkspacePage>
 }
 
-function CompletionRow({ item }: { item: MetadataCompletionItem }) {
+function CompletionRow({ item, onDetails }: { item: MetadataCompletionItem; onDetails: () => void }) {
   return <TableRow hover>
     <TableCell sx={{ minWidth: 220, maxWidth: 330 }}><Typography variant="body2" sx={{ fontWeight: 850 }}>{item.number}</Typography><Typography variant="caption" color="text.secondary">MovieId {item.movieId}</Typography><Typography variant="caption" sx={{ display: 'block', overflowWrap: 'anywhere' }}>{item.videoPath}</Typography></TableCell>
     <TableCell sx={{ minWidth: 180 }}><TokenList values={item.missingFields.map(fieldLabel)}/></TableCell>
@@ -206,6 +239,7 @@ function CompletionRow({ item }: { item: MetadataCompletionItem }) {
     <TableCell sx={{ minWidth: 260 }}><Typography variant="body2">{item.reason}</Typography>{item.failureCategory && <Typography variant="caption" color="text.secondary">{failureLabel(item.failureCategory)}</Typography>}</TableCell>
     <TableCell><TokenList values={item.addedFields} empty="—"/></TableCell>
     <TableCell><StatusBadge label={statusLabel(item.status)} tone={statusTone(item.status)}/></TableCell>
+    <TableCell><Button size="small" startIcon={<ArticleRoundedIcon/>} onClick={onDetails}>查看</Button></TableCell>
   </TableRow>
 }
 

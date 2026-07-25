@@ -28,6 +28,7 @@ const taskNames: Record<string, string> = {
   AI: 'AI 任务',
   ActorRepair: '演员修复',
   ActorProfileComplete: '演员资料补全',
+  MetadataCompletion: '元数据补全',
   ImageCacheRebuild: '图片缓存重建',
   Organizer: '批量整理',
   Rename: '重命名',
@@ -49,12 +50,14 @@ const sourceNames: Record<string, string> = {
   DeleteMedia: 'Safe Delete',
   ImageCacheRebuild: '图片缓存',
   ActorProfileComplete: '演员资料',
+  MetadataCompletion: 'Provider Pipeline',
 }
 
 const statusOptions = [
   { value: 'all', label: '全部任务' },
   { value: 'active', label: '执行中' },
   { value: 'completed', label: '已完成' },
+  { value: 'warning', label: '部分错误' },
   { value: 'failed', label: '已失败' },
   { value: 'cancelled', label: '已取消' },
 ] as const
@@ -93,7 +96,7 @@ export default function TasksPage() {
   const load = useCallback((showLoading = false) => {
     if (showLoading) setTasks(undefined)
     setError('')
-    return bridge.tasks().then(setTasks).catch((reason: Error) => setError(reason.message))
+    return bridge.tasks(100).then(setTasks).catch((reason: Error) => setError(reason.message))
   }, [])
   useEffect(() => { void load(true) }, [load])
 
@@ -113,6 +116,7 @@ export default function TasksPage() {
   const visibleTerminal = useMemo(() => visible.filter(item => terminalStates.includes(item.status)), [visible])
   const active = tasks?.filter(item => activeStates.includes(item.status)).length ?? 0
   const completed = tasks?.filter(item => item.status === 'Completed').length ?? 0
+  const warning = tasks?.filter(item => item.status === 'CompletedWithErrors').length ?? 0
   const failed = tasks?.filter(item => item.status === 'Failed').length ?? 0
 
   useEffect(() => {
@@ -218,6 +222,7 @@ export default function TasksPage() {
     <StatCard label="任务总数" value={tasks.length} icon={<HourglassTopRoundedIcon/>}/>
     <StatCard label="活动任务" value={active} icon={<HourglassTopRoundedIcon/>} tone="primary.main"/>
     <StatCard label="已完成" value={completed} icon={<CheckCircleRoundedIcon/>} tone="success.main"/>
+    <StatCard label="部分错误" value={warning} icon={<ErrorRoundedIcon/>} tone="warning.main"/>
     <StatCard label="失败" value={failed} icon={<ErrorRoundedIcon/>} tone="error.main"/>
   </Box>
   const filters = <Stack direction="row" spacing={1.25} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
@@ -243,18 +248,20 @@ export default function TasksPage() {
 }
 
 function TaskCard({ task, busy, onMutate, onCancel, onDelete, onLogs }: { task: TaskItem; busy?: number; onMutate: (task: TaskItem, action: 'pause' | 'resume' | 'retry') => void; onCancel: () => void; onDelete: () => void; onLogs: () => void }) {
-  const complete = task.status === 'Completed' || task.status === 'CompletedWithErrors'
+  const complete = task.status === 'Completed'
+  const completedWithErrors = task.status === 'CompletedWithErrors'
   const failedTask = task.status === 'Failed'
-  const progress = complete ? 100 : Math.max(0, Math.min(100, task.progress))
-  const completedItems = complete ? Math.max(task.completedItems, task.totalItems) : task.completedItems
-  const Icon = complete ? CheckCircleRoundedIcon : failedTask ? ErrorRoundedIcon : HourglassTopRoundedIcon
+  const terminalCompletion = complete || completedWithErrors
+  const progress = terminalCompletion ? 100 : Math.max(0, Math.min(100, task.progress))
+  const completedItems = terminalCompletion ? Math.max(task.completedItems, task.totalItems) : task.completedItems
+  const Icon = complete ? CheckCircleRoundedIcon : completedWithErrors || failedTask ? ErrorRoundedIcon : HourglassTopRoundedIcon
   const canPause = ['Scan', 'Sync', 'Screenshot', 'GIF', 'Organizer', 'DeleteMetadata', 'DeleteMedia'].includes(task.type) && activeStates.includes(task.status) && task.status !== 'Paused'
   const canResume = ['Scan', 'Sync', 'Screenshot', 'GIF', 'Organizer', 'DeleteMetadata', 'DeleteMedia'].includes(task.type) && task.status === 'Paused'
   const canCancel = activeStates.includes(task.status)
   const canRetry = ['Scan', 'Sync', 'Screenshot', 'GIF', 'Organizer', 'DeleteMetadata', 'DeleteMedia'].includes(task.type) && ['Failed', 'Cancelled'].includes(task.status)
   const canDelete = terminalStates.includes(task.status)
   return <Card sx={{ p: 2 }}><Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '160px 115px minmax(160px,1fr) minmax(170px,1.1fr) 155px auto' }, gap: 2, alignItems: 'center' }}>
-    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}><Icon color={complete ? 'success' : failedTask ? 'error' : 'primary'}/><Typography sx={{ fontWeight: 750 }}>{labelForType(task.type)}</Typography></Box>
+    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}><Icon color={complete ? 'success' : completedWithErrors ? 'warning' : failedTask ? 'error' : 'primary'}/><Typography sx={{ fontWeight: 750 }}>{labelForType(task.type)}</Typography></Box>
     <TaskStatusBadge status={task.status}/>
     <Box sx={{ minWidth: 0 }}><Typography noWrap title={task.name}>{task.name}</Typography><Typography variant="caption" color="text.secondary">{task.provider || sourceNames[task.type] || '本地任务'}{task.retryCount ? ` · 重试 ${task.retryCount}` : ''}</Typography></Box>
     <Box><LinearProgress variant="determinate" value={progress}/><Typography variant="caption" color="text.secondary">{completedItems}/{task.totalItems} · {progress.toFixed(0)}%</Typography></Box>
@@ -273,7 +280,8 @@ function TaskCard({ task, busy, onMutate, onCancel, onDelete, onLogs }: { task: 
 function matchesStatus(task: TaskItem, filter: StatusFilter) {
   if (filter === 'all') return true
   if (filter === 'active') return activeStates.includes(task.status)
-  if (filter === 'completed') return task.status === 'Completed' || task.status === 'CompletedWithErrors'
+  if (filter === 'completed') return task.status === 'Completed'
+  if (filter === 'warning') return task.status === 'CompletedWithErrors'
   if (filter === 'failed') return task.status === 'Failed'
   return task.status === 'Cancelled'
 }

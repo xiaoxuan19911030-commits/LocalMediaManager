@@ -6,6 +6,12 @@
 
 ### Features
 
+- v0.7.5-P1 adds a production-gated Metadata Completion session that deterministically selects exactly 20 eligible Standard movies from a persisted random seed.
+- The P1 selector balances distinct samples across missing Actors, Provider Genres, Poster, Fanart, and NFO, persists the selected MovieIds, and rejects plans above the 20-movie safety ceiling.
+- Completion items now retain Provider/HTTP/retry logs, elapsed time, Provider contributions, AddedFields, and Before/After values; Home reads current Completion/Repair task evidence instead of hard-coded audit counts.
+- Task Center distinguishes completion sessions that end with unsuccessful items as `CompletedWithErrors` / 部分错误 instead of reporting a false successful completion.
+- P1 stopped after 20 movies with 0 completed, 7 skipped, and 13 no-result items. Metadata Health remained 833 / 1370 because MetaTube was unavailable, MDC-NG media paths were unmapped, and JavBus supplied no writable target field. Deployment and P2 remain blocked.
+
 - v0.7.4-C adds Standard-only targeted metadata completion with an offline Dry Run, explicit confirmation, per-field Provider capability routing, and fill-empty-only Merge.
 - Completion sessions support bounded concurrency, Provider throttling, exponential retry, per-item failure classification, persisted pause/resume checkpoints, report export, health refresh, and database rollback through existing task/audit infrastructure.
 - Local, unassigned, missing-media, low-confidence, multiple-number, Code-conflict, locked, and user-owned data are excluded or protected; normal Standard synchronization order is unchanged.

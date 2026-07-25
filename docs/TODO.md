@@ -4,13 +4,17 @@
 
 ## High
 
-### 0.7.4-C Metadata Completion Acceptance
+### 0.7.5-P1 Metadata Completion Production
 
-- [ ] Review `docs/releases/0.7.4-C-METADATA-COMPLETION.md` and the 523-row CSV plan.
+- [x] Review `docs/releases/0.7.4-C-METADATA-COMPLETION.md` and establish the 219-movie eligible pool.
+- [x] Add a persisted balanced random selection and a hard P1 ceiling of 20 movies.
+- [x] Back up the production database, inspect the exact 20-movie Dry Run, then execute only that confirmed plan.
+- [x] Verify per-movie Provider/HTTP/retry logs, Before/After, Provider contributions, AddedFields, health refresh, Dashboard, and UI.
+- [x] Stop after 20 terminal items and await Human approval before P2 (100 movies).
+- [ ] Restore MetaTube availability and add valid MDC-NG mappings for the `Z:\` and `F:\` candidate media roots.
+- [ ] Prove at least one real Provider -> Merge -> Database -> Health AddedField before authorizing P2.
 - [ ] Resolve or explicitly defer 88 inaccessible media records, 134 low-confidence numbers, and 82 Code conflicts before expanding the completion scope.
-- [ ] After explicit Human confirmation, create a fresh production database backup and execute one small completion session before the remaining 219 eligible movies.
-- [ ] Verify Provider request counts, field-level AddedFields, pause/resume, rollback, and Metadata Health changes on the real session.
-- [ ] Keep production execution and deployment disabled until the Dry Run is accepted.
+- [ ] Keep deployment and P2/P3 execution disabled until P1 Human acceptance.
 
 ### 0.7.4-B Metadata Repair Acceptance
 

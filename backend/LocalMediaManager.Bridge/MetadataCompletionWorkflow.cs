@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Hosting;
 
@@ -21,6 +22,8 @@ public sealed record MetadataCompletionScanCommand(
     bool Studio = true,
     bool ReleaseDate = true,
     int Concurrency = 4,
+    int MaxMovies = 20,
+    int? SelectionSeed = null,
     IReadOnlyDictionary<string, IReadOnlyList<string>>? ProviderPriorities = null);
 
 public sealed record MetadataCompletionLaunchResult(long TaskId, string Status, string Message);
@@ -40,6 +43,7 @@ public sealed record MetadataCompletionCounts(
     long ExcludedLocked,
     IReadOnlyDictionary<string, long> MissingByField,
     IReadOnlyDictionary<string, long> ProviderRequests,
+    IReadOnlyDictionary<string, long> ActualProviderRequests,
     long Completed,
     long Partial,
     long Skipped,
@@ -53,6 +57,23 @@ public sealed record MetadataCompletionProjection(
     long CompleteProjected,
     long? CompleteAfter,
     long EstimatedSeconds);
+
+public sealed record MetadataCompletionSelection(
+    int Seed,
+    int MaxMovies,
+    IReadOnlyList<long> SelectedMovieIds,
+    IReadOnlyDictionary<string, long> BalancedCoverage);
+
+public sealed record MetadataCompletionItemLog(
+    string At,
+    string Provider,
+    string Stage,
+    string Level,
+    string Message,
+    int Attempt,
+    long ElapsedMilliseconds,
+    int? HttpStatusCode,
+    string? FailureCategory);
 
 public sealed record MetadataCompletionItem(
     string ItemId,
@@ -69,7 +90,10 @@ public sealed record MetadataCompletionItem(
     int Attempts,
     long ElapsedMilliseconds,
     IReadOnlyList<string> AddedFields,
-    IReadOnlyDictionary<string, IReadOnlyList<string>> ProviderContributions);
+    IReadOnlyDictionary<string, IReadOnlyList<string>> ProviderContributions,
+    IReadOnlyDictionary<string, string?> BeforeValues,
+    IReadOnlyDictionary<string, string?> AfterValues,
+    IReadOnlyList<MetadataCompletionItemLog> Logs);
 
 public sealed record MetadataCompletionPreview(
     long TaskId,
@@ -81,6 +105,7 @@ public sealed record MetadataCompletionPreview(
     IReadOnlyList<MetadataCompletionProviderCapability> Capabilities,
     MetadataCompletionCounts Counts,
     MetadataCompletionProjection Projection,
+    MetadataCompletionSelection Selection,
     IReadOnlyList<MetadataCompletionItem> Items,
     IReadOnlyList<string> Warnings,
     string CreatedAt,
@@ -89,6 +114,49 @@ public sealed record MetadataCompletionPreview(
     bool CanResume,
     bool CanRollback,
     bool DryRun);
+
+internal static class MetadataCompletionTaskStatus
+{
+    private static readonly Regex CompletedCount = new(
+        @"(?:^|[：；，])\s*完成\s*(?<count>\d+)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    public static string Normalize(string taskType, string status, string? resultJson)
+    {
+        if (!taskType.Equals("MetadataCompletion", StringComparison.OrdinalIgnoreCase)
+            || !status.Equals("Completed", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(resultJson)) return status;
+        try {
+            using JsonDocument document = JsonDocument.Parse(resultJson);
+            if (!document.RootElement.TryGetProperty("items", out JsonElement items)
+                || items.ValueKind != JsonValueKind.Array) return status;
+            foreach (JsonElement item in items.EnumerateArray()) {
+                if (!item.TryGetProperty("status", out JsonElement itemStatus)
+                    || !string.Equals(itemStatus.GetString(), "Completed", StringComparison.OrdinalIgnoreCase))
+                    return "CompletedWithErrors";
+            }
+        }
+        catch (JsonException) { }
+        return status;
+    }
+
+    public static string NormalizeSummary(
+        string taskType,
+        string status,
+        string? resultSummary,
+        long totalItems)
+    {
+        if (!taskType.Equals("MetadataCompletion", StringComparison.OrdinalIgnoreCase)
+            || !status.Equals("Completed", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(resultSummary)) return status;
+        Match match = CompletedCount.Match(resultSummary);
+        return match.Success
+            && long.TryParse(match.Groups["count"].Value, CultureInfo.InvariantCulture, out long completed)
+            && completed < totalItems
+                ? "CompletedWithErrors"
+                : status;
+    }
+}
 
 public interface IMetadataCompletionProviderClient
 {
@@ -137,11 +205,13 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
 {
     private const string TaskType = "MetadataCompletion";
     private const int MaximumAttempts = 3;
+    private const int MaximumP1Movies = 20;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string[] KnownFields = [
         "Actors", "Genres", "Poster", "Fanart", "NFO", "Description", "Series", "Director", "Studio", "ReleaseDate",
     ];
     private static readonly string[] RequiredFields = ["ReleaseDate", "Studio", "Actors", "Genres", "Poster", "Fanart", "NFO"];
+    private static readonly string[] P1CoverageFields = ["Actors", "Genres", "Poster", "Fanart", "NFO"];
     private static readonly IReadOnlyList<MetadataCompletionProviderCapability> CapabilityCatalog = [
         new("JavBus", ["Actors", "Genres", "ReleaseDate", "Description", "Director", "Studio", "Series", "Poster", "Fanart", "NFO"], 900),
         new("MetaTube", ["Actors", "Genres", "ReleaseDate", "Description", "Director", "Studio", "Series", "Poster", "Fanart", "NFO"], 150),
@@ -226,6 +296,8 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
         CancellationToken cancellationToken = default)
     {
         MetadataCompletionScanCommand normalized = Normalize(input);
+        if (normalized.SelectionSeed is null or 0)
+            normalized = normalized with { SelectionSeed = RandomNumberGenerator.GetInt32(1, int.MaxValue) };
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, cancellationToken);
         long existing = await ScalarLongAsync(connection, null,
             $"SELECT COALESCE(MAX(Id),0) FROM Tasks WHERE TaskType='{TaskType}' AND Status IN ('Pending','Running')",
@@ -248,21 +320,32 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
         CompletionPlanDocument? plan = DeserializePlan(task.ResultJson);
         if (plan is null) {
             MetadataCompletionScanCommand options = DeserializeOptions(task.PayloadJson);
-            return new(taskId, task.Status, task.Stage, task.Progress, string.Empty, options, CapabilityCatalog,
-                EmptyCounts(), new(0, 0, 0, null, 0), [], task.ErrorMessage is null ? [] : [task.ErrorMessage],
-                task.CreatedAt, task.CompletedAt, false, task.Status == "Paused", false, true);
+            string status = MetadataCompletionTaskStatus.Normalize(TaskType, task.Status, task.ResultJson);
+            string? stage = status == "CompletedWithErrors" && task.Stage == "Completed" ? status : task.Stage;
+            return new(taskId, status, stage, task.Progress, string.Empty, options, CapabilityCatalog,
+                EmptyCounts(), new(0, 0, 0, null, 0), EmptySelection(options), [],
+                task.ErrorMessage is null ? [] : [task.ErrorMessage],
+                task.CreatedAt, task.CompletedAt, false, status == "Paused", false, true);
         }
+        string displayStatus = task.Status == "Completed" && plan.Items.Any(item => item.Status != "Completed")
+            ? "CompletedWithErrors"
+            : task.Status;
+        string? displayStage = displayStatus == "CompletedWithErrors" && task.Stage == "Completed"
+            ? displayStatus : task.Stage;
         string token = ConfirmationToken(taskId, plan);
-        bool canExecute = task.Status == "PreviewReady" && plan.Items.Any(item => item.Status == "Pending");
+        bool canExecute = task.Status == "PreviewReady"
+            && plan.Items.Count == Math.Min(plan.Selection.MaxMovies, checked((int)plan.Counts.EligibleMovies))
+            && plan.Items.Count <= MaximumP1Movies
+            && plan.Items.Any(item => item.Status == "Pending");
         bool canRollback = task.Status is "Completed" or "CompletedWithErrors" or "Failed"
             && !string.IsNullOrWhiteSpace(plan.RollbackToken)
             && await ScalarLongAsync(connection, null, """
                 SELECT COUNT(*) FROM OperationAudit
                  WHERE OperationType='MetadataCompletion' AND RollbackToken=$token AND RevertedAt IS NULL
                 """, cancellationToken, ("$token", plan.RollbackToken)) > 0;
-        return new(taskId, task.Status, task.Stage, task.Progress, token, plan.Options, CapabilityCatalog,
-            plan.Counts, plan.Projection, plan.Items, plan.Warnings, task.CreatedAt, task.CompletedAt,
-            canExecute, task.Status == "Paused", canRollback, plan.DryRun);
+        return new(taskId, displayStatus, displayStage, task.Progress, token, plan.Options, CapabilityCatalog,
+            plan.Counts, plan.Projection, plan.Selection, plan.Items, plan.Warnings, task.CreatedAt, task.CompletedAt,
+            canExecute, displayStatus == "Paused", canRollback, plan.DryRun);
     }
 
     public async Task<MetadataCompletionLaunchResult> ExecuteConfirmedAsync(
@@ -395,7 +478,8 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
             databasePath, storage, cancellationToken: token, includeStorageInventory: false);
         MetadataProviderContext providerSettings = await ReadProviderContextAsync();
         CompletionPlanDocument plan = await BuildPlanAsync(options, baseline, providerSettings, token);
-        string summary = $"Dry Run：扫描 {plan.Counts.ScannedStandardMovies} 部 Standard；预计联网 {plan.Counts.PlannedNetworkMovies} 部；" +
+        string summary = $"P1 Dry Run：扫描 {plan.Counts.ScannedStandardMovies} 部 Standard；合格池 {plan.Counts.EligibleMovies} 部；" +
+            $"固定选择 {plan.Counts.PlannedNetworkMovies} 部（seed {plan.Selection.Seed}）；" +
             $"当前完整 {plan.Projection.CompleteBefore}，乐观预计 {plan.Projection.CompleteProjected}。";
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, token);
         await ExecuteSqlAsync(connection, null, """
@@ -413,6 +497,10 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
     {
         CompletionPlanDocument initial = DeserializePlan(task.ResultJson)
             ?? throw new InvalidOperationException("补全计划丢失，请重新 Dry Run。");
+        if (initial.Items.Count > MaximumP1Movies
+            || initial.Items.Count != Math.Min(initial.Selection.MaxMovies, checked((int)initial.Counts.EligibleMovies))
+            || initial.Items.Select(item => item.MovieId).Distinct().Count() != initial.Items.Count)
+            throw new InvalidDataException("P1 补全计划超出 20 部安全边界或包含重复影片，已拒绝执行。");
         MetadataProviderContext context = await ReadProviderContextAsync();
         MetadataCompletionItem[] items = initial.Items.ToArray();
         Dictionary<string, int> indexes = items.Select((item, index) => (item.ItemId, index))
@@ -454,9 +542,13 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
             async (item, itemToken) => {
                 MetadataCompletionItem running = item with { Status = "Running", Reason = "正在按 Provider 能力补全缺失字段。" };
                 await PersistAsync(running);
+                await logs.WriteAsync(taskId, "Info",
+                    $"[MovieId {item.MovieId} {item.Number}] P1 completion start; missing={string.Join(',', item.MissingFields)}", itemToken);
                 MetadataCompletionItem result = await ProcessItemAsync(taskId, running, initial.Options, context,
                     rollbackToken, writeGate, itemToken);
                 await PersistAsync(result);
+                await logs.WriteAsync(taskId, result.Status == "Failed" ? "Error" : result.Status == "Completed" ? "Info" : "Warning",
+                    $"[MovieId {item.MovieId} {item.Number}] P1 completion {result.Status}; attempts={result.Attempts}; elapsed={result.ElapsedMilliseconds}ms; added={string.Join(',', result.AddedFields)}", itemToken);
             });
 
         health.Invalidate();
@@ -468,7 +560,7 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
             RollbackToken = rollbackToken,
             DryRun = false,
         };
-        bool errors = completedPlan.Counts.Failed > 0 || completedPlan.Counts.Partial > 0;
+        bool errors = completedPlan.Items.Any(item => item.Status != "Completed");
         string status = errors ? "CompletedWithErrors" : "Completed";
         string summary = $"定向补全结束：完成 {completedPlan.Counts.Completed}，部分 {completedPlan.Counts.Partial}，" +
             $"无结果 {completedPlan.Counts.NoResult}，失败 {completedPlan.Counts.Failed}；完整影片 " +
@@ -497,23 +589,33 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
         var attempts = 0;
         var contributions = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var errors = new List<string>();
+        var itemLogs = new ConcurrentQueue<MetadataCompletionItemLog>();
+        IReadOnlyDictionary<string, string?> beforeValues =
+            new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        IReadOnlyDictionary<string, string?> afterValues = beforeValues;
+        MetadataCompletionItem Complete(string status, string reason, string? category,
+            IReadOnlyList<string> added) => Finish(item, status, reason, category, attempts, timer, added,
+                contributions, beforeValues, afterValues, itemLogs.ToArray());
         try {
             CompletionMovieState current = await ReadMovieStateAsync(item.MovieId, token);
+            CompletionSnapshot before = await CaptureSnapshotAsync(item.MovieId, token);
+            beforeValues = SnapshotValues(before);
+            afterValues = beforeValues;
+            AddItemLog(itemLogs, "Safety", "Validation", "Info", "开始执行前安全校验。", 0, timer.ElapsedMilliseconds);
             if (!File.Exists(current.VideoPath))
-                return Finish(item, "Skipped", "媒体文件不存在或当前存储不可访问。", "MissingMedia", attempts, timer, [], contributions);
+                return Complete("Skipped", "媒体文件不存在或当前存储不可访问。", "MissingMedia", []);
             MovieNumberExtractionResult extraction = movieNumberExtractor.Extract(current.FileName);
             if (string.IsNullOrWhiteSpace(extraction.NormalizedNumber)
                 || extraction.Confidence < movieNumberExtractor.MinimumAutoSyncConfidence)
-                return Finish(item, "Skipped", "番号识别置信度不足，未发起 Provider 请求。", "CodeInvalid", attempts, timer, [], contributions);
+                return Complete("Skipped", "番号识别置信度不足，未发起 Provider 请求。", "CodeInvalid", []);
             if (!extraction.NormalizedNumber.Equals(item.Number, StringComparison.OrdinalIgnoreCase))
-                return Finish(item, "Conflict", "番号在 Dry Run 后发生变化，禁止执行。", "CodeConflict", attempts, timer, [], contributions);
+                return Complete("Conflict", "番号在 Dry Run 后发生变化，禁止执行。", "CodeConflict", []);
 
             HashSet<string> remaining = MissingFields(current, options).ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (string protectedField in ProtectedFields(current)) remaining.Remove(protectedField);
             if (remaining.Count == 0)
-                return Finish(item, "Skipped", "缺失字段已被其他任务补齐，或当前字段受用户保护。", "ExistingProtected", attempts, timer, [], contributions);
+                return Complete("Skipped", "缺失字段已被其他任务补齐，或当前字段受用户保护。", "ExistingProtected", []);
 
-            CompletionSnapshot before = await CaptureSnapshotAsync(item.MovieId, token);
             ProviderMetadata? aggregate = null;
             ProviderMetadata? nfoSource = null;
             var savedImages = new List<SavedImage>();
@@ -525,8 +627,8 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
                 token.ThrowIfCancellationRequested();
                 string[] providerFields = remaining.Where(field => Supports(provider, field)).ToArray();
                 if (providerFields.Length == 0) continue;
-                ProviderFetchResult fetched = await FetchWithRetryAsync(taskId, provider, item.Number,
-                    current.VideoPath, baseContext, token);
+                ProviderFetchResult fetched = await FetchWithRetryAsync(taskId, item.MovieId, provider, item.Number,
+                    current.VideoPath, baseContext, itemLogs, timer, token);
                 attempts += fetched.Attempts;
                 if (fetched.Metadata is null) {
                     errors.Add($"{provider}:{fetched.FailureCategory ?? "NoResult"}");
@@ -543,6 +645,8 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
                 string[] imageTargets = providerFields.Where(field => field is "Poster" or "Fanart" && HasValue(metadata, field)).ToArray();
                 if (imageTargets.Length > 0 && baseContext.DownloadImages(provider)) {
                     try {
+                        AddItemLog(itemLogs, provider, "ImageDownload", "Info",
+                            $"开始下载目标图片字段：{string.Join(',', imageTargets)}。", attempts, timer.ElapsedMilliseconds);
                         IReadOnlyList<MetadataImage> selected = metadata.Images
                             .Where(image => imageTargets.Contains(MediaStoragePathResolver.NormalizeResourceType(image.Type), StringComparer.OrdinalIgnoreCase))
                             .ToArray();
@@ -553,9 +657,13 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
                         createdPaths.AddRange(downloaded.Where(value => value.Created).Select(value => value.Path));
                         foreach (string field in imageTargets.Where(field => downloaded.Any(image => image.Type.Equals(field, StringComparison.OrdinalIgnoreCase))))
                             provided.Add(field);
+                        AddItemLog(itemLogs, provider, "ImageDownload", "Info",
+                            $"图片落盘完成：{downloaded.Count} 个有效资源。", attempts, timer.ElapsedMilliseconds);
                     }
                     catch (Exception error) when (error is not OperationCanceledException) {
                         errors.Add($"{provider}:Image:{Classify(error)}");
+                        AddItemLog(itemLogs, provider, "ImageDownload", "Warning", error.Message, attempts,
+                            timer.ElapsedMilliseconds, null, Classify(error));
                     }
                 }
                 if (providerFields.Contains("NFO", StringComparer.OrdinalIgnoreCase)) provided.Add("NFO");
@@ -571,30 +679,43 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
             if (item.MissingFields.Contains("NFO", StringComparer.OrdinalIgnoreCase)
                 && current.NfoMissing && !current.NfoProtected && nfoSource is not null) {
                 try {
+                    AddItemLog(itemLogs, lastProvider ?? "Provider", "NFO", "Info", "开始生成缺失 NFO。",
+                        attempts, timer.ElapsedMilliseconds);
                     (nfoPath, bool created) = await nfo.WriteAsync(
                         new SyncMovie(current.MovieId, current.Code, current.Title, current.Description,
                             current.ReleaseDate, current.DurationSeconds, current.VideoPath, current.NfoPath),
                         nfoSource, token);
                     if (created && nfoPath is not null) createdPaths.Add(nfoPath);
                     if (nfoPath is not null && File.Exists(nfoPath)) remaining.Remove("NFO");
+                    AddItemLog(itemLogs, lastProvider ?? "Provider", "NFO", "Info",
+                        nfoPath is null ? "NFO 未生成。" : "NFO 已生成并验证实体存在。", attempts, timer.ElapsedMilliseconds);
                 }
                 catch (Exception error) when (error is not OperationCanceledException) {
                     errors.Add($"{lastProvider ?? "Provider"}:NFO:{Classify(error)}");
+                    AddItemLog(itemLogs, lastProvider ?? "Provider", "NFO", "Warning", error.Message, attempts,
+                        timer.ElapsedMilliseconds, null, Classify(error));
                 }
             }
 
-            if (aggregate is null && savedImages.Count == 0 && nfoPath is null)
-                return Finish(item, "NoResult", "所有计划 Provider 均未返回可写入的缺失字段。",
-                    errors.FirstOrDefault()?.Split(':').LastOrDefault() ?? "NoData", attempts, timer, [], contributions);
+            bool hasDatabaseContribution = contributions.Values.SelectMany(value => value)
+                .Any(field => !field.Equals("NFO", StringComparison.OrdinalIgnoreCase));
+            bool hasPhysicalContribution = savedImages.Count > 0
+                || (!string.IsNullOrWhiteSpace(nfoPath) && File.Exists(nfoPath));
+            if (!hasDatabaseContribution && !hasPhysicalContribution)
+                return Complete("NoResult", "所有计划 Provider 均未返回可写入的缺失字段。",
+                    errors.FirstOrDefault()?.Split(':').LastOrDefault() ?? "NoData", []);
 
             aggregate ??= EmptyMetadata(lastProvider ?? "MetadataCompletion", item.Number);
             await writeGate.WaitAsync(token);
             CompletionSnapshot after;
             try {
+                AddItemLog(itemLogs, "Database", "Merge", "Info", "开始 fill-empty-only Database Merge。",
+                    attempts, timer.ElapsedMilliseconds);
                 SyncMovie movie = new(current.MovieId, current.Code, current.Title, current.Description,
                     current.ReleaseDate, current.DurationSeconds, current.VideoPath, current.NfoPath);
                 await writer.ApplyAsync(taskId, movie, aggregate, new(savedImages, nfoPath, createdPaths), false, token);
                 after = await CaptureSnapshotAsync(item.MovieId, token);
+                afterValues = SnapshotValues(after);
                 try { await WriteAuditAsync(taskId, rollbackToken, before, after, token); }
                 catch {
                     await CompensateMissingAuditAsync(taskId, before, after, token);
@@ -603,7 +724,12 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
             }
             finally { writeGate.Release(); }
 
-            IReadOnlyList<string> added = AddedFields(before, after);
+            var added = AddedFields(before, after).ToList();
+            if (!string.IsNullOrWhiteSpace(nfoPath)
+                && createdPaths.Contains(nfoPath, StringComparer.OrdinalIgnoreCase)
+                && !added.Contains("NFO", StringComparer.OrdinalIgnoreCase)) added.Add("NFO");
+            AddItemLog(itemLogs, "Database", "Merge", "Info",
+                $"Database Merge 完成；AddedFields={string.Join(',', added)}。", attempts, timer.ElapsedMilliseconds);
             CompletionMovieState finalState = await ReadMovieStateAsync(item.MovieId, token);
             HashSet<string> stillMissing = MissingFields(finalState, options).ToHashSet(StringComparer.OrdinalIgnoreCase);
             stillMissing.IntersectWith(item.MissingFields);
@@ -611,39 +737,67 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
             string? category = stillMissing.Count == 0 ? null : added.Count > 0 ? "ProviderEmpty" : "MergeSkipped";
             string reason = stillMissing.Count == 0
                 ? $"已仅补入空字段：{string.Join("、", added)}。"
-                : $"仍缺少：{string.Join("、", stillMissing.Order())}；已写入：{string.Join("、", added)}。";
+                : $"仍缺少：{string.Join("、", stillMissing.Order())}；已写入：{(added.Count == 0 ? "无" : string.Join("、", added))}。";
             if (errors.Count > 0) reason += $" Provider 记录：{string.Join(" | ", errors)}。";
-            return Finish(item, status, reason, category, attempts, timer, added, contributions);
+            return Complete(status, reason, category, added);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception error) {
-            return Finish(item, "Failed", error.Message, Classify(error), attempts, timer, [], contributions);
+            AddItemLog(itemLogs, "Workflow", "Failure", "Error", error.Message, attempts,
+                timer.ElapsedMilliseconds, null, Classify(error));
+            return Complete("Failed", error.Message, Classify(error), []);
         }
     }
 
     private async Task<ProviderFetchResult> FetchWithRetryAsync(
         long taskId,
+        long movieId,
         string provider,
         string code,
         string moviePath,
         MetadataProviderContext baseContext,
+        ConcurrentQueue<MetadataCompletionItemLog> itemLogs,
+        Stopwatch itemTimer,
         CancellationToken token)
     {
         Exception? last = null;
         for (int attempt = 1; attempt <= MaximumAttempts; attempt++) {
+            Stopwatch requestTimer = Stopwatch.StartNew();
+            string prefix = $"[MovieId {movieId} {code}][{provider}]";
+            AddItemLog(itemLogs, provider, "RequestStart", "Info", "Provider 请求开始。", attempt,
+                itemTimer.ElapsedMilliseconds);
+            await logs.WriteAsync(taskId, "Info", $"{prefix} attempt {attempt}/{MaximumAttempts} start", token);
             try {
                 ProviderMetadata? metadata = await WithThrottleAsync(provider,
                     ct => providerClient.GetMetadataAsync(provider, code, moviePath,
                         baseContext with {
-                            ProviderLog = (source, message, logToken) => logs.WriteAsync(taskId, "Info", $"[{source}] {message}", logToken),
-                            ProviderDebugLog = (source, message, logToken) => logs.WriteAsync(taskId, "Debug", $"[{source}] {message}", logToken),
+                            ProviderLog = async (source, message, logToken) => {
+                                AddItemLog(itemLogs, source, "ProviderLog", "Info", message, attempt,
+                                    itemTimer.ElapsedMilliseconds, ParseHttpStatus(message));
+                                await logs.WriteAsync(taskId, "Info", $"[MovieId {movieId} {code}][{source}] {message}", logToken);
+                            },
+                            ProviderDebugLog = async (source, message, logToken) => {
+                                AddItemLog(itemLogs, source, "ProviderLog", "Debug", message, attempt,
+                                    itemTimer.ElapsedMilliseconds, ParseHttpStatus(message));
+                                await logs.WriteAsync(taskId, "Debug", $"[MovieId {movieId} {code}][{source}] {message}", logToken);
+                            },
                         }, ct), token);
+                requestTimer.Stop();
+                AddItemLog(itemLogs, provider, metadata is null ? "RequestNoResult" : "RequestSuccess",
+                    metadata is null ? "Warning" : "Info",
+                    metadata is null ? "Provider 返回无结果。" : "Provider 返回可解析元数据。",
+                    attempt, itemTimer.ElapsedMilliseconds, null, metadata is null ? "NoData" : null);
+                await logs.WriteAsync(taskId, metadata is null ? "Warning" : "Info",
+                    $"{prefix} attempt {attempt}/{MaximumAttempts} {(metadata is null ? "no result" : "success")} in {requestTimer.ElapsedMilliseconds} ms", token);
                 return new(metadata, attempt, metadata is null ? "NoData" : null);
             }
             catch (Exception error) when (error is not OperationCanceledException) {
                 last = error;
                 string category = Classify(error);
-                await logs.WriteAsync(taskId, "Warning", $"[{provider}] attempt {attempt}/{MaximumAttempts}: {category}: {error.Message}", token);
+                requestTimer.Stop();
+                AddItemLog(itemLogs, provider, "RequestFailure", "Warning", error.Message, attempt,
+                    itemTimer.ElapsedMilliseconds, ParseHttpStatus(error.Message), category);
+                await logs.WriteAsync(taskId, "Warning", $"{prefix} attempt {attempt}/{MaximumAttempts}: {category}: {error.Message}", token);
                 if (attempt < MaximumAttempts)
                     await delay(TimeSpan.FromMilliseconds(250 * Math.Pow(2, attempt - 1)), token);
             }
@@ -679,11 +833,10 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
         bool hasDirectors = await TableExistsAsync(connection, "MovieDirectors", token)
             && await TableExistsAsync(connection, "Directors", token);
         List<CompletionMovieState> movies = await ReadMovieStatesAsync(connection, hasDirectors, token);
-        var items = new List<MetadataCompletionItem>();
+        var eligibleItems = new List<MetadataCompletionItem>();
         Dictionary<string, long> missing = KnownFields.ToDictionary(field => field, _ => 0L, StringComparer.OrdinalIgnoreCase);
         Dictionary<string, long> requests = CapabilityCatalog.ToDictionary(value => value.Provider, _ => 0L, StringComparer.OrdinalIgnoreCase);
         long incomplete = 0, eligible = 0, missingMedia = 0, lowConfidence = 0, multiple = 0, conflicts = 0, locked = 0;
-        long projectedGain = 0;
 
         foreach (CompletionMovieState movie in movies) {
             token.ThrowIfCancellationRequested();
@@ -695,66 +848,102 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
             IReadOnlyList<string> requiredMissing = RequiredMissingFields(movie);
             IReadOnlyList<string> protectedFields = ProtectedFields(movie).Where(selectedMissing.Contains).ToArray();
 
-            string status = "Pending";
-            string reason = "只请求当前缺失字段；执行前会再次校验。";
-            string? failure = null;
-            IReadOnlyList<string> providerPlan = [];
             if (!File.Exists(movie.VideoPath)) {
-                missingMedia++; status = "Skipped"; failure = "MissingMedia"; reason = "媒体文件不存在或存储当前不可访问。";
+                missingMedia++;
             }
             else {
                 MovieNumberExtractionResult extraction = movieNumberExtractor.Extract(movie.FileName);
                 bool hasMultiple = extraction.Warnings.Any(value => value.StartsWith("MultipleCandidates", StringComparison.OrdinalIgnoreCase));
                 if (hasMultiple) {
-                    multiple++; status = "Conflict"; failure = "MultipleNumbers"; reason = "文件名存在多个番号候选，禁止自动补全。";
+                    multiple++;
                 }
                 else if (string.IsNullOrWhiteSpace(extraction.NormalizedNumber)
                     || extraction.Confidence < movieNumberExtractor.MinimumAutoSyncConfidence) {
-                    lowConfidence++; status = "Skipped"; failure = "CodeInvalid"; reason = "番号识别置信度低于自动联网阈值。";
+                    lowConfidence++;
                 }
                 else if (!extraction.NormalizedNumber.Equals(number, StringComparison.OrdinalIgnoreCase)) {
-                    conflicts++; status = "Conflict"; failure = "CodeConflict"; reason = $"数据库番号 {number} 与文件重识别 {extraction.NormalizedNumber} 不一致。";
+                    conflicts++;
                 }
                 else {
                     string[] actionable = selectedMissing.Except(protectedFields, StringComparer.OrdinalIgnoreCase).ToArray();
                     if (protectedFields.Count > 0) locked++;
-                    providerPlan = BuildProviderPlan(actionable, priorities, enabledProviders);
+                    IReadOnlyList<string> providerPlan = BuildProviderPlan(actionable, priorities, enabledProviders);
                     if (actionable.Length == 0) {
-                        status = "Skipped"; failure = "Locked"; reason = "所有缺失字段均受用户上传或锁定状态保护。";
+                        // The locked count above is the audit evidence; locked-only movies do not enter P1 selection.
                     }
                     else if (providerPlan.Count == 0) {
-                        status = "Skipped"; failure = "ProviderDisabled"; reason = "没有已启用且具备相应能力的 Provider。";
+                        // Provider-disabled movies are not safe production candidates.
                     }
                     else {
                         eligible++;
-                        foreach (string provider in BuildPrimaryProviderPlan(actionable, priorities, enabledProviders)) requests[provider]++;
-                        bool canComplete = requiredMissing.Count > 0
-                            && requiredMissing.All(field => actionable.Contains(field, StringComparer.OrdinalIgnoreCase))
-                            && requiredMissing.All(field => providerPlan.Any(provider => Supports(provider, field)));
-                        if (canComplete) projectedGain++;
+                        eligibleItems.Add(new(Guid.NewGuid().ToString("N"), movie.MovieId, number, movie.VideoPath,
+                            selectedMissing, requiredMissing, protectedFields, providerPlan, "Pending",
+                            "P1 已选中；只请求当前缺失字段，执行前会再次校验。", null, 0, 0, [],
+                            new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase),
+                            new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase),
+                            new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase), []));
                     }
                 }
             }
-            items.Add(new(Guid.NewGuid().ToString("N"), movie.MovieId, number, movie.VideoPath,
-                selectedMissing, requiredMissing, protectedFields, providerPlan, status, reason, failure, 0, 0, [],
-                new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)));
         }
 
+        int seed = options.SelectionSeed ?? throw new InvalidOperationException("P1 Dry Run 缺少持久化随机种子。");
+        (IReadOnlyList<MetadataCompletionItem> items, IReadOnlyDictionary<string, long> coverage) =
+            SelectBalancedP1Items(eligibleItems, options.MaxMovies, seed);
+        foreach (MetadataCompletionItem item in items)
+            foreach (string provider in BuildPrimaryProviderPlan(
+                item.MissingFields.Except(item.ProtectedFields, StringComparer.OrdinalIgnoreCase).ToArray(),
+                priorities, enabledProviders)) requests[provider]++;
+        long projectedGain = items.LongCount(item => item.RequiredMissingFields.Count > 0
+            && item.RequiredMissingFields.All(field => item.MissingFields.Contains(field, StringComparer.OrdinalIgnoreCase))
+            && item.RequiredMissingFields.All(field => item.ProviderPlan.Any(provider => Supports(provider, field))));
         long estimatedSeconds = (long)Math.Ceiling(requests.Values.Sum() * 2.5 / Math.Max(1, options.Concurrency));
-        MetadataCompletionCounts counts = new(movies.Count, incomplete, eligible, eligible, missingMedia, lowConfidence,
-            multiple, conflicts, locked, missing, requests, 0, 0,
-            items.LongCount(item => item.Status == "Skipped"), 0, 0, items.LongCount(item => item.Status == "Conflict"));
+        MetadataCompletionCounts counts = new(movies.Count, incomplete, eligible, items.Count, missingMedia, lowConfidence,
+            multiple, conflicts, locked, missing, requests, EmptyProviderCounts(), 0, 0, 0, 0, 0, 0);
         MetadataCompletionProjection projection = new(baseline.Scope.StandardMovies, baseline.CompleteMovies,
             Math.Min(baseline.Scope.StandardMovies, baseline.CompleteMovies + projectedGain), null, estimatedSeconds);
+        MetadataCompletionSelection selection = new(seed, options.MaxMovies,
+            items.Select(item => item.MovieId).ToArray(), coverage);
         var warnings = new List<string> {
             "Dry Run 不调用 Provider，不下载图片，不写 NFO，也不修改影片元数据。",
+            $"P1 生产批次硬上限为 {MaximumP1Movies} 部；本计划从 {eligible} 部合格影片中固定选择 {items.Count} 部，随机种子 {seed}。",
             "Provider 远端接口不能按单个 JSON 字段裁剪；系统只调用有能力贡献缺失字段的 Provider，并在 Merge 前丢弃非目标字段。",
             "完整影片提升为乐观估计，只有 Provider 实际返回所需字段且文件落盘成功后才会计入最终统计。",
             "回滚只恢复数据库状态；为遵守文件安全规则，不自动删除执行期间下载或生成的实体文件。",
         };
+        foreach (string field in P1CoverageFields.Where(field => !coverage.ContainsKey(field)))
+            warnings.Add($"合格池中没有可覆盖 {field} 的独立影片，P1 无法满足该类别抽样。 ");
         if (baseline.Coverage.ResourceInventoryComplete is false)
             warnings.Add("当前健康统计未完成完整 MediaStorage 盘点，图片/NFO 预计值将在执行后重新统计。");
-        return new(options, counts, projection, items, warnings, true, null);
+        return new(options, counts, projection, selection, items, warnings, true, null);
+    }
+
+    private static (IReadOnlyList<MetadataCompletionItem> Items, IReadOnlyDictionary<string, long> Coverage)
+        SelectBalancedP1Items(IReadOnlyList<MetadataCompletionItem> source, int maximum, int seed)
+    {
+        var shuffled = source.ToList();
+        var random = new Random(seed);
+        for (int index = shuffled.Count - 1; index > 0; index--) {
+            int swap = random.Next(index + 1);
+            (shuffled[index], shuffled[swap]) = (shuffled[swap], shuffled[index]);
+        }
+
+        var selected = new List<MetadataCompletionItem>(Math.Min(maximum, shuffled.Count));
+        var selectedIds = new HashSet<long>();
+        var coverage = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (string field in P1CoverageFields) {
+            MetadataCompletionItem? candidate = shuffled.FirstOrDefault(item => !selectedIds.Contains(item.MovieId)
+                && item.MissingFields.Contains(field, StringComparer.OrdinalIgnoreCase));
+            if (candidate is null) continue;
+            selected.Add(candidate);
+            selectedIds.Add(candidate.MovieId);
+            coverage[field] = candidate.MovieId;
+        }
+        foreach (MetadataCompletionItem candidate in shuffled) {
+            if (selected.Count >= maximum) break;
+            if (selectedIds.Add(candidate.MovieId)) selected.Add(candidate);
+        }
+        return (selected, coverage);
     }
 
     private static IReadOnlyList<string> MissingFields(CompletionMovieState movie, MetadataCompletionScanCommand options)
@@ -1048,6 +1237,25 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
         await transaction.CommitAsync(token);
     }
 
+    private static IReadOnlyDictionary<string, string?> SnapshotValues(CompletionSnapshot snapshot) =>
+        new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) {
+            ["Title"] = snapshot.Movie.Title,
+            ["Description"] = snapshot.Movie.Description,
+            ["ReleaseDate"] = snapshot.Movie.ReleaseDate,
+            ["ProviderRating"] = snapshot.Movie.ProviderRating?.ToString(CultureInfo.InvariantCulture),
+            ["NFO"] = snapshot.Movie.NfoPath,
+            ["Actors"] = string.Join(',', snapshot.ActorIds),
+            ["Genres"] = string.Join(',', snapshot.GenreIds),
+            ["Directors"] = string.Join(',', snapshot.DirectorIds),
+            ["Studios"] = string.Join(',', snapshot.StudioRelations),
+            ["Series"] = string.Join(',', snapshot.SeriesIds),
+            ["Poster"] = string.Join(',', snapshot.Images.Where(image =>
+                MediaStoragePathResolver.NormalizeResourceType(image.Type) == "Poster").Select(image => image.Id)),
+            ["Fanart"] = string.Join(',', snapshot.Images.Where(image =>
+                MediaStoragePathResolver.NormalizeResourceType(image.Type) == "Fanart").Select(image => image.Id)),
+            ["NfoDocuments"] = string.Join(',', snapshot.NfoDocumentIds),
+        };
+
     private static IReadOnlyList<string> AddedFields(CompletionSnapshot before, CompletionSnapshot after)
     {
         var result = new List<string>();
@@ -1134,15 +1342,23 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
 
     private static MetadataCompletionItem Finish(MetadataCompletionItem item, string status, string reason,
         string? category, int attempts, Stopwatch timer, IReadOnlyList<string> added,
-        IReadOnlyDictionary<string, IReadOnlyList<string>> contributions)
+        IReadOnlyDictionary<string, IReadOnlyList<string>> contributions,
+        IReadOnlyDictionary<string, string?> beforeValues,
+        IReadOnlyDictionary<string, string?> afterValues,
+        IReadOnlyList<MetadataCompletionItemLog> itemLogs)
     {
         timer.Stop();
         return item with { Status = status, Reason = reason, FailureCategory = category, Attempts = attempts,
-            ElapsedMilliseconds = timer.ElapsedMilliseconds, AddedFields = added, ProviderContributions = contributions };
+            ElapsedMilliseconds = timer.ElapsedMilliseconds, AddedFields = added, ProviderContributions = contributions,
+            BeforeValues = beforeValues, AfterValues = afterValues, Logs = itemLogs };
     }
 
     private static MetadataCompletionCounts CountExecution(MetadataCompletionCounts baseline, IReadOnlyList<MetadataCompletionItem> items) =>
         baseline with {
+            ActualProviderRequests = CapabilityCatalog.ToDictionary(capability => capability.Provider,
+                capability => items.Sum(item => item.Logs.LongCount(log => log.Stage == "RequestStart"
+                    && log.Provider.Equals(capability.Provider, StringComparison.OrdinalIgnoreCase))),
+                StringComparer.OrdinalIgnoreCase),
             Completed = items.LongCount(item => item.Status == "Completed"),
             Partial = items.LongCount(item => item.Status == "Partial"),
             Skipped = items.LongCount(item => item.Status == "Skipped"),
@@ -1165,10 +1381,25 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
         return "ProviderError";
     }
 
+    private static int? ParseHttpStatus(string message)
+    {
+        Match match = Regex.Match(message, @"\bHTTP(?:/[0-9.]+)?\s*(?<status>[1-5][0-9]{2})\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return match.Success && int.TryParse(match.Groups["status"].Value, CultureInfo.InvariantCulture, out int status)
+            ? status : null;
+    }
+
+    private static void AddItemLog(ConcurrentQueue<MetadataCompletionItemLog> target, string provider,
+        string stage, string level, string message, int attempt, long elapsedMilliseconds,
+        int? httpStatusCode = null, string? failureCategory = null) =>
+        target.Enqueue(new(Now(), provider, stage, level, message, attempt, elapsedMilliseconds,
+            httpStatusCode, failureCategory));
+
     private static MetadataCompletionScanCommand Normalize(MetadataCompletionScanCommand input)
     {
         if (!KnownFields.Any(field => IsSelected(input, field))) throw new ArgumentException("至少选择一个补全字段。");
-        return input with { Concurrency = Math.Clamp(input.Concurrency, 1, 8) };
+        int maximum = Math.Clamp(input.MaxMovies, 1, MaximumP1Movies);
+        return input with { Concurrency = Math.Clamp(input.Concurrency, 1, 8), MaxMovies = maximum };
     }
 
     private static bool IsSelected(MetadataCompletionScanCommand input, string field) => field switch {
@@ -1186,7 +1417,21 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
     private static CompletionPlanDocument? DeserializePlan(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) return null;
-        try { return JsonSerializer.Deserialize<CompletionPlanDocument>(json, JsonOptions); }
+        try {
+            CompletionPlanDocument? plan = JsonSerializer.Deserialize<CompletionPlanDocument>(json, JsonOptions);
+            if (plan is null) return null;
+            MetadataCompletionScanCommand options = Normalize(plan.Options);
+            MetadataCompletionSelection selection = plan.Selection ?? EmptySelection(options);
+            IReadOnlyDictionary<string, long> actual = plan.Counts.ActualProviderRequests ?? EmptyProviderCounts();
+            MetadataCompletionItem[] items = (plan.Items ?? []).Select(item => item with {
+                ProviderContributions = item.ProviderContributions ?? new Dictionary<string, IReadOnlyList<string>>(),
+                BeforeValues = item.BeforeValues ?? new Dictionary<string, string?>(),
+                AfterValues = item.AfterValues ?? new Dictionary<string, string?>(),
+                Logs = item.Logs ?? [],
+            }).ToArray();
+            return plan with { Options = options, Selection = selection,
+                Counts = plan.Counts with { ActualProviderRequests = actual }, Items = items };
+        }
         catch (JsonException) { return null; }
     }
 
@@ -1363,8 +1608,14 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
         return await command.ExecuteNonQueryAsync(token);
     }
 
+    private static IReadOnlyDictionary<string, long> EmptyProviderCounts() =>
+        CapabilityCatalog.ToDictionary(value => value.Provider, _ => 0L, StringComparer.OrdinalIgnoreCase);
+
     private static MetadataCompletionCounts EmptyCounts() => new(0, 0, 0, 0, 0, 0, 0, 0, 0,
-        new Dictionary<string, long>(), new Dictionary<string, long>(), 0, 0, 0, 0, 0, 0);
+        new Dictionary<string, long>(), EmptyProviderCounts(), EmptyProviderCounts(), 0, 0, 0, 0, 0, 0);
+
+    private static MetadataCompletionSelection EmptySelection(MetadataCompletionScanCommand options) =>
+        new(options.SelectionSeed ?? 0, options.MaxMovies, [], new Dictionary<string, long>());
 
     private static string RenderMarkdown(MetadataCompletionPreview preview)
     {
@@ -1373,26 +1624,43 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
         builder.AppendLine($"- Task: {preview.TaskId}");
         builder.AppendLine($"- Status: {preview.Status}");
         builder.AppendLine($"- Standard scanned: {preview.Counts.ScannedStandardMovies}");
+        builder.AppendLine($"- Eligible pool: {preview.Counts.EligibleMovies}");
         builder.AppendLine($"- Planned network movies: {preview.Counts.PlannedNetworkMovies}");
+        builder.AppendLine($"- Selection seed: {preview.Selection.Seed}");
+        builder.AppendLine($"- Selected MovieIds: {string.Join(',', preview.Selection.SelectedMovieIds)}");
         builder.AppendLine($"- Complete: {preview.Projection.CompleteBefore} -> {preview.Projection.CompleteAfter?.ToString() ?? preview.Projection.CompleteProjected.ToString(CultureInfo.InvariantCulture)}");
         builder.AppendLine($"- Dry Run: {preview.DryRun}").AppendLine();
-        builder.AppendLine("## Provider Requests");
+        builder.AppendLine("## Balanced Selection");
+        foreach ((string field, long movieId) in preview.Selection.BalancedCoverage)
+            builder.AppendLine($"- {field}: MovieId {movieId}");
+        builder.AppendLine().AppendLine("## Planned Provider Requests");
         foreach ((string provider, long count) in preview.Counts.ProviderRequests) builder.AppendLine($"- {provider}: {count}");
+        builder.AppendLine().AppendLine("## Actual Provider Requests");
+        foreach ((string provider, long count) in preview.Counts.ActualProviderRequests) builder.AppendLine($"- {provider}: {count}");
         builder.AppendLine().AppendLine("## Items");
-        foreach (MetadataCompletionItem item in preview.Items)
+        foreach (MetadataCompletionItem item in preview.Items) {
             builder.AppendLine($"- {item.Number} (MovieId {item.MovieId}): {item.Status}; missing={string.Join(',', item.MissingFields)}; providers={string.Join('>', item.ProviderPlan)}; {item.Reason}");
+            builder.AppendLine($"  - AddedFields: {string.Join(',', item.AddedFields)}");
+            builder.AppendLine($"  - ProviderContributions: {JsonSerializer.Serialize(item.ProviderContributions, JsonOptions)}");
+            builder.AppendLine($"  - Before: {JsonSerializer.Serialize(item.BeforeValues, JsonOptions)}");
+            builder.AppendLine($"  - After: {JsonSerializer.Serialize(item.AfterValues, JsonOptions)}");
+            foreach (MetadataCompletionItemLog log in item.Logs)
+                builder.AppendLine($"  - Log {log.At} [{log.Provider}/{log.Stage}] attempt={log.Attempt} http={log.HttpStatusCode?.ToString() ?? "-"} elapsed={log.ElapsedMilliseconds}ms {log.Level}: {log.Message}");
+        }
         return builder.ToString();
     }
 
     private static string RenderCsv(MetadataCompletionPreview preview)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("MovieId,Number,VideoPath,MissingFields,ProtectedFields,ProviderPlan,Status,FailureCategory,Attempts,ElapsedMilliseconds,AddedFields,Reason");
+        builder.AppendLine("MovieId,Number,VideoPath,MissingFields,ProtectedFields,ProviderPlan,Status,FailureCategory,Attempts,ElapsedMilliseconds,AddedFields,ProviderContributions,BeforeValues,AfterValues,Logs,Reason");
         foreach (MetadataCompletionItem item in preview.Items) builder.AppendLine(string.Join(',', new[] {
             item.MovieId.ToString(CultureInfo.InvariantCulture), Csv(item.Number), Csv(item.VideoPath), Csv(string.Join('|', item.MissingFields)),
             Csv(string.Join('|', item.ProtectedFields)), Csv(string.Join('|', item.ProviderPlan)), Csv(item.Status), Csv(item.FailureCategory),
             item.Attempts.ToString(CultureInfo.InvariantCulture), item.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture),
-            Csv(string.Join('|', item.AddedFields)), Csv(item.Reason),
+            Csv(string.Join('|', item.AddedFields)), Csv(JsonSerializer.Serialize(item.ProviderContributions, JsonOptions)),
+            Csv(JsonSerializer.Serialize(item.BeforeValues, JsonOptions)), Csv(JsonSerializer.Serialize(item.AfterValues, JsonOptions)),
+            Csv(JsonSerializer.Serialize(item.Logs, JsonOptions)), Csv(item.Reason),
         }));
         return builder.ToString();
     }
@@ -1405,6 +1673,7 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
         MetadataCompletionScanCommand Options,
         MetadataCompletionCounts Counts,
         MetadataCompletionProjection Projection,
+        MetadataCompletionSelection Selection,
         IReadOnlyList<MetadataCompletionItem> Items,
         IReadOnlyList<string> Warnings,
         bool DryRun,

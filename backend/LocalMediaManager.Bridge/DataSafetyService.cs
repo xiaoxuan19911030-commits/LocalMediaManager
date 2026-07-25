@@ -38,13 +38,19 @@ public sealed class DataSafetyService(string databasePath, string configDatabase
         Directory.CreateDirectory(BackupRoot);
         string stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
         string temp = Path.Combine(BackupRoot, $".lmm-backup-{stamp}.tmp");
+        string databaseSnapshot = Path.Combine(BackupRoot, $".lmm-database-{stamp}.sqlite");
         string final = Path.Combine(BackupRoot, $"lmm-backup-{stamp}.zip");
         var included = new List<string>();
         var warnings = new List<string>();
         if (File.Exists(temp)) File.Delete(temp);
+        if (File.Exists(databaseSnapshot)) File.Delete(databaseSnapshot);
         try {
             using (var archive = ZipFile.Open(temp, ZipArchiveMode.Create)) {
-                if (File.Exists(databasePath)) { await AddFileAsync(archive, databasePath, "database/LocalMediaManager.db", token); included.Add("database"); }
+                if (File.Exists(databasePath)) {
+                    await CreateConsistentDatabaseSnapshotAsync(databasePath, databaseSnapshot, token);
+                    await AddFileAsync(archive, databaseSnapshot, "database/LocalMediaManager.db", token);
+                    included.Add("database");
+                }
                 else warnings.Add("数据库文件不存在，未包含数据库。");
                 if (command.IncludeConfig && File.Exists(configDatabasePath)) { await AddFileAsync(archive, configDatabasePath, "config/app_configs.sqlite", token); included.Add("config"); }
                 if (command.IncludeGeneratedCache && Directory.Exists(CacheRoot)) {
@@ -56,7 +62,7 @@ public sealed class DataSafetyService(string databasePath, string configDatabase
                 }
                 var manifest = new {
                     product = "Local Media Manager",
-                    version = "0.7.2",
+                    version = "0.7.5",
                     createdAt = DateTime.UtcNow,
                     includes = included,
                     excludes = new[] { "original media files", "original images", "cookies", "tokens" },
@@ -70,6 +76,33 @@ public sealed class DataSafetyService(string databasePath, string configDatabase
             if (File.Exists(temp)) File.Delete(temp);
             throw;
         }
+        finally {
+            if (File.Exists(databaseSnapshot)) File.Delete(databaseSnapshot);
+        }
+    }
+
+    private static async Task CreateConsistentDatabaseSnapshotAsync(string sourcePath, string targetPath,
+        CancellationToken token)
+    {
+        await using var source = new SqliteConnection(new SqliteConnectionStringBuilder {
+            DataSource = sourcePath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false,
+        }.ToString());
+        await using var target = new SqliteConnection(new SqliteConnectionStringBuilder {
+            DataSource = targetPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Pooling = false,
+        }.ToString());
+        await source.OpenAsync(token);
+        await target.OpenAsync(token);
+        token.ThrowIfCancellationRequested();
+        source.BackupDatabase(target);
+        await using SqliteCommand integrity = target.CreateCommand();
+        integrity.CommandText = "PRAGMA integrity_check";
+        string result = Convert.ToString(await integrity.ExecuteScalarAsync(token)) ?? string.Empty;
+        if (!result.Equals("ok", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException($"SQLite 备份完整性检查失败：{result}");
     }
 
     public async Task<BackupValidationDto> ValidateBackupAsync(string backupPath, CancellationToken token = default)
@@ -125,7 +158,7 @@ public sealed class DataSafetyService(string databasePath, string configDatabase
             fields = snapshot.Fields.Where(field => !field.Sensitive).Select(field => new { field.Key, field.Category, field.ValueType, field.Value, field.DefaultValue, field.Mapped }),
             metaTube = metaTube with { BaseUrl = metaTube.BaseUrl },
         };
-        return new(DateTime.UtcNow.ToString("O"), "Local Media Manager", "0.7.2", JsonSerializer.SerializeToElement(safe));
+        return new(DateTime.UtcNow.ToString("O"), "Local Media Manager", "0.7.5", JsonSerializer.SerializeToElement(safe));
     }
 
     public Task<SettingsImportPreviewDto> PreviewSettingsImportAsync(JsonElement payload)
@@ -147,7 +180,7 @@ public sealed class DataSafetyService(string databasePath, string configDatabase
         }
         if (JsonSerializer.Serialize(payload).Contains("token", StringComparison.OrdinalIgnoreCase))
             warnings.Add("导入内容疑似包含敏感字段，预览不会应用这些内容。");
-        return Task.FromResult(new SettingsImportPreviewDto(changes.Count > 0, "0.7.2", categories.Order().ToList(), changes.Take(100).ToList(), warnings));
+        return Task.FromResult(new SettingsImportPreviewDto(changes.Count > 0, "0.7.5", categories.Order().ToList(), changes.Take(100).ToList(), warnings));
     }
 
     public async Task<SystemDiagnosticDto> DiagnosticsAsync(CancellationToken token = default)

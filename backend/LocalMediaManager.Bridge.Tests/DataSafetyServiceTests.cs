@@ -72,6 +72,30 @@ public sealed class DataSafetyServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task BackupIncludesCommittedWalRowsThroughSqliteSnapshot()
+    {
+        await using var writer = new SqliteConnection($"Data Source={Database}");
+        await writer.OpenAsync();
+        await using (SqliteCommand command = writer.CreateCommand()) {
+            command.CommandText = "PRAGMA journal_mode=WAL; CREATE TABLE BackupMarker(Value TEXT); INSERT INTO BackupMarker VALUES('committed-in-wal');";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        BackupResultDto created = await Service.CreateBackupAsync(new(false, false));
+        string extracted = Path.Combine(root, "extracted-backup.db");
+        using (ZipArchive archive = ZipFile.OpenRead(created.BackupPath))
+            archive.GetEntry("database/LocalMediaManager.db")!.ExtractToFile(extracted);
+        await using var snapshot = new SqliteConnection($"Data Source={extracted};Mode=ReadOnly");
+        await snapshot.OpenAsync();
+        await using SqliteCommand verify = snapshot.CreateCommand();
+        verify.CommandText = "SELECT Value FROM BackupMarker";
+
+        Assert.Equal("committed-in-wal", await verify.ExecuteScalarAsync());
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(Path.GetDirectoryName(Database)!, "backups"),
+            ".lmm-database-*.sqlite"));
+    }
+
+    [Fact]
     public async Task RestorePlanRequiresValidBackupAndWritesPlan()
     {
         BackupResultDto created = await Service.CreateBackupAsync(new(true, false));

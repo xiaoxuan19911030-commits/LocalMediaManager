@@ -56,7 +56,7 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
         using HttpClient client = clients.CreateClient("MetadataImages");
         client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.Clear();
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.7.2"));
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.7.5"));
         client.DefaultRequestHeaders.Accept.ParseAdd("image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
         int previewIndex = 0;
         string temporaryRoot = await pathResolver.TemporaryRootAsync(cancellationToken);

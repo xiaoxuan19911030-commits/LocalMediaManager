@@ -63,6 +63,7 @@ export interface DashboardSummary {
   studioCount: number
   maintenance: DashboardMaintenance
   metadataHealth: MetadataHealthSummary
+  metadataCompletion: DashboardMetadataCompletion
   recentActivity: DashboardActivity[]
   libraries: DashboardLibrary[]
   topTags: DashboardEntity[]
@@ -84,6 +85,15 @@ export interface DashboardMaintenance {
   cacheProblems: number
   invalidResourceRecords: number
   unregisteredResources: number
+}
+export interface DashboardMetadataCompletion {
+  pendingCompletion?: number
+  providerAllFailed?: number
+  numberAnomalies?: number
+  offlineRepairable?: number
+  eligiblePool?: number
+  selectedBatch?: number
+  evidenceAt?: string
 }
 
 export interface DashboardActivity {
@@ -329,6 +339,7 @@ export interface MetadataRepairExportResult { markdownPath: string; csvPath: str
 export interface MetadataCompletionScanCommand {
   actors: boolean; genres: boolean; poster: boolean; fanart: boolean; nfo: boolean; description: boolean
   series: boolean; director: boolean; studio: boolean; releaseDate: boolean; concurrency: number
+  maxMovies: number; selectionSeed?: number
   providerPriorities?: Record<string, string[]>
 }
 export interface MetadataCompletionLaunchResult { taskId: number; status: string; message: string }
@@ -337,22 +348,31 @@ export interface MetadataCompletionCounts {
   scannedStandardMovies: number; incompleteMovies: number; eligibleMovies: number; plannedNetworkMovies: number
   excludedMissingMedia: number; excludedLowConfidence: number; excludedMultipleNumbers: number
   excludedCodeConflict: number; excludedLocked: number; missingByField: Record<string, number>
-  providerRequests: Record<string, number>; completed: number; partial: number; skipped: number
+  providerRequests: Record<string, number>; actualProviderRequests: Record<string, number>; completed: number; partial: number; skipped: number
   failed: number; noResult: number; conflict: number
 }
 export interface MetadataCompletionProjection {
   standardMovies: number; completeBefore: number; completeProjected: number; completeAfter?: number; estimatedSeconds: number
 }
+export interface MetadataCompletionSelection {
+  seed: number; maxMovies: number; selectedMovieIds: number[]; balancedCoverage: Record<string, number>
+}
+export interface MetadataCompletionItemLog {
+  at: string; provider: string; stage: string; level: string; message: string; attempt: number
+  elapsedMilliseconds: number; httpStatusCode?: number; failureCategory?: string
+}
 export interface MetadataCompletionItem {
   itemId: string; movieId: number; number: string; videoPath: string; missingFields: string[]
   requiredMissingFields: string[]; protectedFields: string[]; providerPlan: string[]; status: string
   reason: string; failureCategory?: string; attempts: number; elapsedMilliseconds: number; addedFields: string[]
-  providerContributions: Record<string, string[]>
+  providerContributions: Record<string, string[]>; beforeValues: Record<string, string | undefined>
+  afterValues: Record<string, string | undefined>; logs: MetadataCompletionItemLog[]
 }
 export interface MetadataCompletionPreview {
   taskId: number; status: string; stage: string; progress: number; confirmationToken: string
   options: MetadataCompletionScanCommand; capabilities: MetadataCompletionProviderCapability[]
-  counts: MetadataCompletionCounts; projection: MetadataCompletionProjection; items: MetadataCompletionItem[]
+  counts: MetadataCompletionCounts; projection: MetadataCompletionProjection; selection: MetadataCompletionSelection
+  items: MetadataCompletionItem[]
   warnings: string[]; createdAt: string; completedAt?: string; canExecute: boolean; canResume: boolean
   canRollback: boolean; dryRun: boolean
 }

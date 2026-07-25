@@ -174,8 +174,61 @@ public sealed class MetadataCompletionWorkflowTests : IAsyncLifetime
         MetadataCompletionPreview completed = await ExecuteAsync(CreateService(new FakeProviderClient(null)), Only("Actors"));
 
         MetadataCompletionItem item = Assert.Single(completed.Items, value => value.MovieId == 1);
+        Assert.Equal("CompletedWithErrors", completed.Status);
         Assert.Equal("NoResult", item.Status);
         Assert.Equal(0, await ScalarAsync("SELECT COUNT(*) FROM MovieActors"));
+    }
+
+    [Fact]
+    public async Task ProviderDocumentWithoutRequestedFieldsDoesNotMutateMovieStatus()
+    {
+        string? beforeStatus = await TextAsync("SELECT ScrapeStatus FROM Movies WHERE Id=1");
+        string? beforeUpdatedAt = await TextAsync("SELECT UpdatedAt FROM Movies WHERE Id=1");
+        ProviderMetadata metadata = DefaultMetadata("JavBus", "SONE-001", description: "Unrequested description");
+
+        MetadataCompletionPreview completed = await ExecuteAsync(
+            CreateService(new FakeProviderClient(metadata)), Only("Actors"));
+
+        MetadataCompletionItem item = Assert.Single(completed.Items);
+        Assert.Equal("CompletedWithErrors", completed.Status);
+        Assert.Equal("NoResult", item.Status);
+        Assert.Empty(item.AddedFields);
+        Assert.Equal(0, await ScalarAsync("SELECT IsScraped FROM Movies WHERE Id=1"));
+        Assert.Equal(beforeStatus, await TextAsync("SELECT ScrapeStatus FROM Movies WHERE Id=1"));
+        Assert.Equal(beforeUpdatedAt, await TextAsync("SELECT UpdatedAt FROM Movies WHERE Id=1"));
+        Assert.Equal(0, await ScalarAsync("SELECT COUNT(*) FROM OperationAudit WHERE OperationType='MetadataCompletion'"));
+    }
+
+    [Fact]
+    public async Task HistoricalCompletedSessionWithUnsuccessfulItemsIsDisplayedWithErrors()
+    {
+        MetadataCompletionWorkflow service = CreateService(new FakeProviderClient(null));
+        MetadataCompletionPreview completed = await ExecuteAsync(service, Only("Actors"));
+        await ExecuteAsync("UPDATE Tasks SET Status='Completed',Stage='Completed' WHERE Id=$id", ("$id", completed.TaskId));
+
+        MetadataCompletionPreview detail = await service.GetAsync(completed.TaskId);
+        TaskDto task = Assert.Single(await ProductReader.ReadTasksAsync(Database), value => value.Id == completed.TaskId);
+
+        Assert.Equal("CompletedWithErrors", detail.Status);
+        Assert.Equal("CompletedWithErrors", detail.Stage);
+        Assert.Equal("CompletedWithErrors", task.Status);
+        Assert.Equal("CompletedWithErrors", task.Stage);
+    }
+
+    [Fact]
+    public async Task CreatedNfoIsReportedAsPhysicalContribution()
+    {
+        ProviderMetadata metadata = DefaultMetadata("JavBus", "SONE-001", description: "Provider description");
+
+        MetadataCompletionPreview completed = await ExecuteAsync(
+            CreateService(new FakeProviderClient(metadata)), Only("NFO"));
+
+        MetadataCompletionItem item = Assert.Single(completed.Items);
+        Assert.Equal("Completed", item.Status);
+        Assert.Contains("NFO", item.AddedFields);
+        string? nfoPath = await TextAsync("SELECT NfoPath FROM Movies WHERE Id=1");
+        Assert.NotNull(nfoPath);
+        Assert.True(File.Exists(nfoPath), nfoPath);
     }
 
     [Fact]
@@ -196,6 +249,118 @@ public sealed class MetadataCompletionWorkflowTests : IAsyncLifetime
 
         Assert.DoesNotContain(preview.Items, item => item.MovieId == 2);
         Assert.Equal(1, preview.Counts.ScannedStandardMovies);
+    }
+
+    [Fact]
+    public async Task P1SelectsExactlyTwentyBalancedMoviesFromEligiblePool()
+    {
+        await AddStandardMoviesAsync(2, 25);
+        MetadataCompletionPreview preview = await ScanAsync(CreateService(new FakeProviderClient(null)),
+            new MetadataCompletionScanCommand(MaxMovies: 20, SelectionSeed: 74201));
+
+        Assert.Equal(25, preview.Counts.EligibleMovies);
+        Assert.Equal(20, preview.Counts.PlannedNetworkMovies);
+        Assert.Equal(20, preview.Items.Count);
+        Assert.Equal(20, preview.Selection.SelectedMovieIds.Distinct().Count());
+        Assert.Equal(74201, preview.Selection.Seed);
+        Assert.Equal(["Actors", "Fanart", "Genres", "NFO", "Poster"],
+            preview.Selection.BalancedCoverage.Keys.Order(StringComparer.OrdinalIgnoreCase));
+        Assert.Equal(5, preview.Selection.BalancedCoverage.Values.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task P1SelectionIsReproducibleAndClampsUnsafeMaximum()
+    {
+        await AddStandardMoviesAsync(2, 25);
+        MetadataCompletionScanCommand options = new(MaxMovies: 200, SelectionSeed: 99173);
+        MetadataCompletionPreview first = await ScanAsync(CreateService(new FakeProviderClient(null)), options);
+        MetadataCompletionPreview second = await ScanAsync(CreateService(new FakeProviderClient(null)), options);
+
+        Assert.Equal(20, first.Options.MaxMovies);
+        Assert.Equal(first.Selection.SelectedMovieIds, second.Selection.SelectedMovieIds);
+        Assert.Equal(first.Selection.BalancedCoverage, second.Selection.BalancedCoverage);
+    }
+
+    [Fact]
+    public async Task P1ExecutionNeverRequestsMoreThanSelectedTwentyMovies()
+    {
+        await AddStandardMoviesAsync(2, 25);
+        var delays = new DelayRecorder();
+        var provider = new FakeProviderClient(DefaultMetadata("JavBus", "SONE-001", actors: ["Actor A"]));
+        MetadataCompletionPreview completed = await ExecuteAsync(CreateService(provider, delays.DelayAsync),
+            Only("Actors") with { MaxMovies = 20, SelectionSeed = 4567 });
+
+        Assert.Equal(20, completed.Items.Count);
+        Assert.Equal(20, completed.Counts.Completed);
+        Assert.Equal(20, provider.Calls.Count);
+        Assert.Equal(20, await ScalarAsync("SELECT COUNT(DISTINCT MovieId) FROM MovieActors"));
+        Assert.Equal(20, completed.Counts.ActualProviderRequests["JavBus"]);
+    }
+
+    [Fact]
+    public async Task ProductionAuditCapturesProviderLogsAndBeforeAfterValues()
+    {
+        MetadataCompletionPreview completed = await ExecuteAsync(
+            CreateService(new FakeProviderClient(DefaultMetadata("JavBus", "SONE-001", actors: ["Actor A"]))),
+            Only("Actors") with { SelectionSeed = 1234 });
+
+        MetadataCompletionItem item = Assert.Single(completed.Items);
+        Assert.Equal(string.Empty, item.BeforeValues["Actors"]);
+        Assert.NotEqual(string.Empty, item.AfterValues["Actors"]);
+        Assert.Contains(item.Logs, log => log.Provider == "JavBus" && log.Stage == "RequestStart");
+        Assert.Contains(item.Logs, log => log.Provider == "JavBus" && log.Stage == "ProviderLog" && log.HttpStatusCode == 200);
+        Assert.Contains(item.Logs, log => log.Provider == "JavBus" && log.Stage == "RequestSuccess");
+        Assert.Contains(item.Logs, log => log.Provider == "Database" && log.Stage == "Merge");
+        Assert.Equal(1, completed.Counts.ActualProviderRequests["JavBus"]);
+    }
+
+    [Fact]
+    public async Task DashboardUsesLatestPersistedCompletionEvidence()
+    {
+        MetadataCompletionWorkflow service = CreateService(new FakeProviderClient(null));
+        MetadataCompletionPreview completed = await ExecuteAsync(service,
+            Only("Actors") with { SelectionSeed = 81 });
+        var resolver = new MediaStoragePathResolver(Database, root);
+        MetadataHealthSummary health = await new MetadataHealthAnalysisService(Database, resolver).GetAsync();
+
+        DashboardDto dashboard = await ProductReader.ReadDashboardAsync(Database, "http://127.0.0.1", health);
+
+        Assert.Equal(1, dashboard.MetadataCompletion.EligiblePool);
+        Assert.Equal(1, dashboard.MetadataCompletion.SelectedBatch);
+        Assert.Equal(1, dashboard.MetadataCompletion.PendingCompletion);
+        Assert.Equal(1, dashboard.MetadataCompletion.ProviderAllFailed);
+        Assert.Equal(0, dashboard.MetadataCompletion.NumberAnomalies);
+        Assert.Equal("NoResult", Assert.Single(completed.Items).Status);
+    }
+
+    [Fact]
+    public async Task P1PreservesNonTargetMetadataAndUserState()
+    {
+        string at = Now();
+        await ExecuteAsync("""
+            INSERT INTO UserMovieState(MovieId,IsFavorite,UserRating,PlayCount,UpdatedAt)
+            VALUES(1,1,4.5,7,$at);
+            INSERT INTO Tags(Id,Name,NormalizedName,CreatedAt,UpdatedAt) VALUES(1,'User tag','USER TAG',$at,$at);
+            INSERT INTO MovieTags(MovieId,TagId,CreatedAt) VALUES(1,1,$at);
+            """, ("$at", at));
+        ProviderMetadata metadata = DefaultMetadata("JavBus", "SONE-001", "Replacement description",
+            ["Unexpected actor"], ["Unexpected genre"]) with {
+            Title = "Replacement title", ReleaseDate = "2030-01-01", Director = "Unexpected director",
+            Studio = "Unexpected studio", Series = "Filled series", Rating = 1.0m,
+        };
+
+        MetadataCompletionPreview completed = await ExecuteAsync(CreateService(new FakeProviderClient(metadata)),
+            Only("Series") with { SelectionSeed = 777 });
+
+        Assert.Equal("Completed", Assert.Single(completed.Items).Status);
+        Assert.Equal("Existing title", await TextAsync("SELECT Title FROM Movies WHERE Id=1"));
+        Assert.Equal("Existing description", await TextAsync("SELECT Description FROM Movies WHERE Id=1"));
+        Assert.Equal("2026-01-01", await TextAsync("SELECT ReleaseDate FROM Movies WHERE Id=1"));
+        Assert.Equal(0, await ScalarAsync("SELECT COUNT(*) FROM MovieActors WHERE MovieId=1"));
+        Assert.Equal(0, await ScalarAsync("SELECT COUNT(*) FROM MovieGenres WHERE MovieId=1"));
+        Assert.Equal(1, await ScalarAsync("SELECT COUNT(*) FROM MovieTags WHERE MovieId=1"));
+        Assert.Equal(1, await ScalarAsync("SELECT IsFavorite FROM UserMovieState WHERE MovieId=1"));
+        Assert.Equal(7, await ScalarAsync("SELECT PlayCount FROM UserMovieState WHERE MovieId=1"));
     }
 
     private MetadataCompletionWorkflow CreateService(FakeProviderClient provider,
@@ -238,6 +403,23 @@ public sealed class MetadataCompletionWorkflowTests : IAsyncLifetime
             """, ("$at", at));
         await using SqliteConnection connection = new($"Data Source={Database}"); await connection.OpenAsync();
         await InsertMediaAsync(connection, 2, 1, second, at);
+    }
+
+    private async Task AddStandardMoviesAsync(int firstId, int lastId)
+    {
+        string at = Now();
+        await using SqliteConnection connection = new($"Data Source={Database}");
+        await connection.OpenAsync();
+        for (int id = firstId; id <= lastId; id++) {
+            string code = $"SONE-{id:000}";
+            string path = Path.Combine(root, "media", code + ".mp4");
+            Write(path);
+            await ExecuteAsync(connection, """
+                INSERT INTO Movies(Id,Code,Title,Description,ReleaseDate,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt)
+                VALUES($id,$code,$title,'Description','2026-01-02',3600,0,'pending','Test',$at,$at)
+                """, ("$id", id), ("$code", code), ("$title", $"Movie {id}"), ("$at", at));
+            await InsertMediaAsync(connection, id, 1, path, at);
+        }
     }
 
     private async Task MakeMovieCompleteExceptActorsAsync()
@@ -324,13 +506,14 @@ public sealed class MetadataCompletionWorkflowTests : IAsyncLifetime
         public ConcurrentQueue<string> Calls { get; } = new();
         public int FailuresRemaining { get => failuresRemaining; set => failuresRemaining = value; }
 
-        public Task<ProviderMetadata?> GetMetadataAsync(string provider, string code, string moviePath,
+        public async Task<ProviderMetadata?> GetMetadataAsync(string provider, string code, string moviePath,
             MetadataProviderContext context, CancellationToken cancellationToken)
         {
             Calls.Enqueue(provider);
             if (Interlocked.Decrement(ref failuresRemaining) >= 0) throw new HttpRequestException("transient network failure");
+            await (context.ProviderLog?.Invoke(provider, "Detail HTTP 200", cancellationToken) ?? Task.CompletedTask);
             ProviderMetadata? result = metadata is null ? null : metadata with { Provider = provider, ExternalId = code, Code = code };
-            return Task.FromResult(result);
+            return result;
         }
     }
 

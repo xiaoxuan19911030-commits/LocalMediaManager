@@ -207,7 +207,7 @@ app.Use(async (context, next) => {
 app.MapGet("/health", () => Results.Ok(new {
     product = "Local Media Manager",
     abbreviation = "LMM",
-    version = "0.7.2",
+    version = "0.7.5",
     status = "ok",
     databaseAvailable = File.Exists(databasePath),
     databasePath,

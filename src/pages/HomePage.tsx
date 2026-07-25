@@ -82,6 +82,12 @@ function normalizeDashboard(input: DashboardSummary): DashboardSummary {
       unregisteredResources: 0,
     },
     metadataHealth: input.metadataHealth,
+    metadataCompletion: input.metadataCompletion ?? {
+      pendingCompletion: undefined,
+      providerAllFailed: undefined,
+      numberAnomalies: undefined,
+      offlineRepairable: undefined,
+    },
     recentActivity: input.recentActivity ?? [],
     libraries: input.libraries ?? [],
     topTags: input.topTags ?? [],
@@ -223,8 +229,19 @@ export default function HomePage() {
       </Box>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0,1.35fr) minmax(320px,.65fr)' }, gap: 2 }}>
-        <SurfaceSection title="元数据健康" description={`覆盖率分母：Standard ${dashboardView.standardMovieCount} 部`}>
+        <SurfaceSection title="元数据健康中心" description={`覆盖率分母：Standard ${dashboardView.standardMovieCount} 部`}>
           <Stack spacing={2}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2,minmax(0,1fr))', xl: 'repeat(5,minmax(0,1fr))' }, gap: 1 }}>
+              <Box onClick={() => navigate('/media')} sx={{ cursor: 'pointer' }}><StatCard label="完整影片" value={`${dashboardView.metadataHealth.completeMovies} / ${dashboardView.standardMovieCount}`} icon={<TaskAltRoundedIcon/>} tone="success.main"/></Box>
+              <Box onClick={() => navigate('/metadata-completion')} sx={{ cursor: 'pointer' }}><StatCard label="待补全" value={evidenceValue(dashboardView.metadataCompletion.pendingCompletion)} icon={<SyncRoundedIcon/>} tone="warning.main"/></Box>
+              <Box onClick={() => navigate('/metadata-completion')} sx={{ cursor: 'pointer' }}><StatCard label="Provider 全失败" value={evidenceValue(dashboardView.metadataCompletion.providerAllFailed)} icon={<BrokenImageRoundedIcon/>} tone="error.main"/></Box>
+              <Box onClick={() => navigate('/data-center?tab=issues')} sx={{ cursor: 'pointer' }}><StatCard label="番号异常" value={evidenceValue(dashboardView.metadataCompletion.numberAnomalies)} icon={<WarningAmberRoundedIcon/>} tone="warning.main"/></Box>
+              <Box onClick={() => navigate('/metadata-repair')} sx={{ cursor: 'pointer' }}><StatCard label="可离线修复" value={evidenceValue(dashboardView.metadataCompletion.offlineRepairable)} icon={<BuildRoundedIcon/>}/></Box>
+            </Box>
+            <Typography variant="caption" color="text.secondary">
+              补全证据：{dashboardView.metadataCompletion.evidenceAt ? formatDateTime(dashboardView.metadataCompletion.evidenceAt) : '尚未生成生产 Dry Run'}
+              {dashboardView.metadataCompletion.eligiblePool != null && ` · 合格池 ${dashboardView.metadataCompletion.eligiblePool} · 当前批次 ${dashboardView.metadataCompletion.selectedBatch ?? 0}`}
+            </Typography>
             <HealthMeter label="完整影片" value={dashboardView.metadataHealth.completeRate} detail={`${dashboardView.metadataHealth.completeMovies} / ${dashboardView.standardMovieCount}`} tone={meterTone(dashboardView.metadataHealth.completeRate)}/>
             <HealthMeter label="演员" value={percentage(dashboardView.metadataHealth.coverage.actorMovies, dashboardView.standardMovieCount)} detail={`${dashboardView.metadataHealth.coverage.actorMovies} / ${dashboardView.standardMovieCount}`} tone={meterTone(percentage(dashboardView.metadataHealth.coverage.actorMovies, dashboardView.standardMovieCount))}/>
             <HealthMeter label="Provider 标签" value={percentage(dashboardView.metadataHealth.coverage.providerTagMovies, dashboardView.standardMovieCount)} detail={`${dashboardView.metadataHealth.coverage.providerTagMovies} / ${dashboardView.standardMovieCount}`} tone={meterTone(percentage(dashboardView.metadataHealth.coverage.providerTagMovies, dashboardView.standardMovieCount))}/>
@@ -290,3 +307,5 @@ export default function HomePage() {
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>
   </Box>
 }
+
+function evidenceValue(value?: number) { return value == null ? '待生成' : value }

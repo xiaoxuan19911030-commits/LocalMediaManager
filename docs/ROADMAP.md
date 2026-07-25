@@ -2,10 +2,24 @@
 
 ## Current Release
 
-- **Version:** 0.7.2
-- **Release:** Movie Number Extractor
-- **Branch policy:** Development is isolated on `sprint/0.7.2-movie-number-extractor` until verification is complete.
+- **Version:** 0.7.5
+- **Release:** Metadata Completion Production
+- **Branch policy:** P1 development and verification are isolated on `codex/sprint-0.7.5-metadata-completion-production`.
 - **Restore policy:** Official version recovery uses immutable release tags, starting with `v0.6.0`; rollback branches are no longer long-term restore points.
+
+## Unreleased - 0.7.5-P1 Metadata Completion Production
+
+**Status:** P1 executed / P2 blocked pending Provider recovery and Human review
+**Date:** 2026-07-25
+
+Scope:
+
+- Select exactly 20 eligible Standard movies from the v0.7.4-C completion pool using a persisted random seed and balanced coverage of missing Actors, Provider Genres, Poster, Fanart, and NFO.
+- Persist the selected MovieIds, per-movie Provider/HTTP/retry logs, Before/After values, Provider contributions, AddedFields, and terminal state.
+- Enforce a P1 execution ceiling of 20 movies and stop after the batch reaches terminal states.
+- Recalculate the shared Metadata Health result and expose current completion/repair evidence on Home without hard-coded audit counts.
+- P1 task `13246` executed 20 persisted movies and stopped: 0 completed, 7 skipped, 13 no-result, 0 failed; health remained 833 / 1370.
+- Do not deploy or continue to P2 until MetaTube is reachable, MDC-NG paths are mapped, a successful AddedField is proven, and Human reviews `docs/releases/0.7.5-P1-METADATA-COMPLETION.md`.
 
 ## Unreleased - 0.7.4-C Metadata Target Sync
 
