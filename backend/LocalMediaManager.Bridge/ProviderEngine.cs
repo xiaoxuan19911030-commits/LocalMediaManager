@@ -101,7 +101,7 @@ public static class ProviderCatalog
             ["MetaTube"] = Describe("MetaTube", 2, 150,
                 ["Title", "OriginalTitle", "Actors", "Genres", "Director", "Studio", "Publisher", "Series", "ReleaseDate", "Duration", "Description", "Plot", "Poster", "Fanart", "Preview", "Rating", "NFO", "SourceURL", "SearchByCode", "SearchByTitle"]),
             ["JavBus"] = Describe("JavBus", 3, 900,
-                ["Title", "Actors", "Genres", "Director", "Studio", "Publisher", "Series", "ReleaseDate", "Duration", "Poster", "Fanart", "Preview", "NFO", "SourceURL", "SearchByCode"]),
+                ["Title", "Actors", "Genres", "Director", "Studio", "Publisher", "Series", "ReleaseDate", "Duration", "Poster", "Preview", "SourceURL", "SearchByCode", "Detail"]),
             ["Mock"] = Describe("Mock", 1000, 0,
                 ["Title", "Actors", "Genres", "Director", "Studio", "Series", "ReleaseDate", "Duration", "Description", "Plot", "Poster", "Fanart", "Preview", "Rating", "NFO", "SourceURL", "SearchByCode"]),
         };
@@ -113,9 +113,9 @@ public static class ProviderCatalog
             ["Actors"] = ["JavBus", "MetaTube", "MDC-NG"],
             ["Genres"] = ["JavBus", "MetaTube", "MDC-NG"],
             ["Poster"] = ["MetaTube", "JavBus", "MDC-NG"],
-            ["Fanart"] = ["MetaTube", "MDC-NG", "JavBus"],
-            ["NFO"] = ["MetaTube", "MDC-NG", "JavBus"],
-            ["Description"] = ["JavBus", "MDC-NG", "MetaTube"],
+            ["Fanart"] = ["MetaTube", "MDC-NG"],
+            ["NFO"] = ["MetaTube", "MDC-NG"],
+            ["Description"] = ["MDC-NG", "MetaTube"],
             ["Series"] = ["MetaTube", "MDC-NG", "JavBus"],
             ["Director"] = ["JavBus", "MetaTube", "MDC-NG"],
             ["Studio"] = ["JavBus", "MetaTube", "MDC-NG"],
@@ -129,7 +129,7 @@ public static class ProviderCatalog
     public static bool Supports(string provider, string field) => Get(provider).Capabilities.Contains(NormalizeField(field));
 
     public static IReadOnlySet<string> Fields(string provider) => Get(provider).Capabilities
-        .Where(value => !value.StartsWith("SearchBy", StringComparison.OrdinalIgnoreCase) && value is not "NFO" and not "SourceURL")
+        .Where(value => !value.StartsWith("SearchBy", StringComparison.OrdinalIgnoreCase) && value is not "Detail" and not "NFO" and not "SourceURL")
         .Select(NormalizeField).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     public static string NormalizeField(string field) => field.Equals("Tags", StringComparison.OrdinalIgnoreCase) ? "Genres"

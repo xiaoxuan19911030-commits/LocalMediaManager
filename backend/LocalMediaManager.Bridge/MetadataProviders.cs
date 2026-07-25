@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
@@ -791,6 +792,13 @@ public sealed class CompositeMetadataProvider(MdcNgProvider mdcNg, MetaTubeProvi
                 await LogAsync(settings, "Metadata Router", "目标字段已满足，停止调用后续 Provider", cancellationToken);
                 break;
             }
+            if (merged is not null
+                && (settings.RequestedFields is null || settings.RequestedFields.Count == 0)
+                && sourceName.Equals("MetaTube", StringComparison.OrdinalIgnoreCase)
+                && !NeedsJavBusSupplement(merged)) {
+                await LogAsync(settings, "Metadata Router", "MetaTube 已覆盖 JavBus 可补字段，停止调用 JavBus", cancellationToken);
+                break;
+            }
         }
         if (merged is null && providerFailures > 0 && completedSearches == 0)
             throw new HttpRequestException("所有已启用 Provider 均发生网络或解析异常；详见任务日志。");
@@ -822,9 +830,7 @@ public sealed class CompositeMetadataProvider(MdcNgProvider mdcNg, MetaTubeProvi
         || metadata.Actors.Count == 0
         || metadata.Genres.Count == 0
         || !HasImageType(metadata.Images, "Poster")
-        || !HasImageType(metadata.Images, "Fanart")
-        || metadata.ActorImages is null
-        || metadata.ActorImages.Count == 0;
+        || !HasImageType(metadata.Images, "Preview");
 
     private static ProviderMetadata Merge(ProviderMetadata primary, ProviderMetadata fallback) => primary with {
         Title = FirstText(primary.Title, fallback.Title),
@@ -839,10 +845,10 @@ public sealed class CompositeMetadataProvider(MdcNgProvider mdcNg, MetaTubeProvi
         WebUrl = FirstText(primary.WebUrl, fallback.WebUrl),
         Country = FirstText(primary.Country, fallback.Country),
         Rating = primary.Rating is > 0 ? primary.Rating : fallback.Rating,
-        Genres = MergeTextValues(primary.Genres, fallback.Genres),
-        Actors = MergeTextValues(primary.Actors, fallback.Actors),
+        Genres = FillMissingValues(primary.Genres, fallback.Genres),
+        Actors = FillMissingValues(primary.Actors, fallback.Actors),
         Images = MergeImages(primary.Images, fallback.Images),
-        ActorImages = MergeActorImages(primary.ActorImages ?? [], fallback.ActorImages ?? []),
+        ActorImages = FillMissingActorImages(primary.ActorImages ?? [], fallback.ActorImages ?? []),
         Confidence = Math.Max(primary.Confidence, fallback.Confidence),
         FieldSources = MergeFieldSources(primary, fallback),
         RawResponseHash = MergeHashes(primary.RawResponseHash, fallback.RawResponseHash),
@@ -856,40 +862,51 @@ public sealed class CompositeMetadataProvider(MdcNgProvider mdcNg, MetaTubeProvi
         IReadOnlyList<MetadataImage> fallback)
     {
         var result = primary.Where(image => !string.IsNullOrWhiteSpace(image.Url)).ToList();
-        foreach (MetadataImage image in fallback.Where(image => !string.IsNullOrWhiteSpace(image.Url))) {
-            bool multiValue = image.Type.Equals("Preview", StringComparison.OrdinalIgnoreCase)
-                || image.Type.Equals("Screenshot", StringComparison.OrdinalIgnoreCase);
-            if (multiValue) {
-                if (!result.Any(current => current.Type.Equals(image.Type, StringComparison.OrdinalIgnoreCase)
-                    && current.Url.Equals(image.Url, StringComparison.OrdinalIgnoreCase))) result.Add(image);
-            }
-            else if (!HasImageType(result, image.Type)) result.Add(image);
+        foreach (IGrouping<string, MetadataImage> group in fallback.Where(image => !string.IsNullOrWhiteSpace(image.Url))
+                     .GroupBy(image => image.Type, StringComparer.OrdinalIgnoreCase)) {
+            if (!HasImageType(result, group.Key))
+                result.AddRange(group.DistinctBy(candidate => candidate.Url, StringComparer.OrdinalIgnoreCase));
         }
-        return result;
+        return result.DistinctBy(image => $"{image.Type}\u0000{image.Url}", StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
-    private static IReadOnlyList<string> MergeTextValues(IReadOnlyList<string> primary, IReadOnlyList<string> fallback) =>
-        primary.Concat(fallback).Where(value => !string.IsNullOrWhiteSpace(value))
+    private static IReadOnlyList<string> FillMissingValues(IReadOnlyList<string> primary, IReadOnlyList<string> fallback) =>
+        (primary.Count > 0 ? primary : fallback).Where(value => !string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
-    private static IReadOnlyList<ActorImageMetadata> MergeActorImages(IReadOnlyList<ActorImageMetadata> primary,
+    private static IReadOnlyList<ActorImageMetadata> FillMissingActorImages(IReadOnlyList<ActorImageMetadata> primary,
         IReadOnlyList<ActorImageMetadata> fallback) =>
-        primary.Concat(fallback).Where(value => !string.IsNullOrWhiteSpace(value.Name) && !string.IsNullOrWhiteSpace(value.ImageUrl))
+        (primary.Count > 0 ? primary : fallback).Where(value => !string.IsNullOrWhiteSpace(value.Name) && !string.IsNullOrWhiteSpace(value.ImageUrl))
             .DistinctBy(value => value.Name, StringComparer.OrdinalIgnoreCase).ToArray();
 
     private static IReadOnlyDictionary<string, string> MergeFieldSources(ProviderMetadata primary, ProviderMetadata fallback)
     {
         var result = new Dictionary<string, string>(primary.FieldSources ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase);
         foreach ((string field, string source) in fallback.FieldSources ?? new Dictionary<string, string>()) {
-            if (!result.TryGetValue(field, out string? existing)) {
+            if (!result.ContainsKey(field) && !HasField(primary, field)) {
                 result[field] = source;
-                continue;
             }
-            if (field is "Actors" or "Genres" or "Preview" or "Screenshot")
-                result[field] = string.Join(" + ", new[] { existing, source }.Distinct(StringComparer.OrdinalIgnoreCase));
         }
         return result;
     }
+
+    private static bool HasField(ProviderMetadata metadata, string field) => field switch {
+        "Code" => !string.IsNullOrWhiteSpace(metadata.Code),
+        "Title" => !string.IsNullOrWhiteSpace(metadata.Title),
+        "OriginalTitle" => !string.IsNullOrWhiteSpace(metadata.OriginalTitle),
+        "Plot" or "Description" => !string.IsNullOrWhiteSpace(metadata.Description),
+        "Director" => !string.IsNullOrWhiteSpace(metadata.Director),
+        "Studio" => !string.IsNullOrWhiteSpace(metadata.Studio),
+        "Publisher" => !string.IsNullOrWhiteSpace(metadata.Publisher),
+        "Series" => !string.IsNullOrWhiteSpace(metadata.Series),
+        "ReleaseDate" => !string.IsNullOrWhiteSpace(metadata.ReleaseDate),
+        "Country" => !string.IsNullOrWhiteSpace(metadata.Country),
+        "Duration" => metadata.DurationSeconds is > 0,
+        "Rating" => metadata.Rating is > 0,
+        "Actors" => metadata.Actors.Count > 0,
+        "Genres" => metadata.Genres.Count > 0,
+        _ => HasImageType(metadata.Images, field),
+    };
 
     private static string? MergeHashes(string? primary, string? fallback)
     {
@@ -954,6 +971,9 @@ public sealed class CompositeMetadataProvider(MdcNgProvider mdcNg, MetaTubeProvi
 
 public sealed class JavBusProvider(IHttpClientFactory clients) : IMetadataProvider
 {
+    private const int MaximumPageCacheEntries = 64;
+    private static readonly TimeSpan PageCacheTtl = TimeSpan.FromMinutes(2);
+    private readonly ConcurrentDictionary<string, CachedPage> pageCache = new(StringComparer.OrdinalIgnoreCase);
     public const string DefaultBaseUrl = "https://www.javbus.com/";
     public string Name => "JavBus";
 
@@ -972,9 +992,12 @@ public sealed class JavBusProvider(IHttpClientFactory clients) : IMetadataProvid
                 if (context.ResponseCapture is not null && !string.IsNullOrWhiteSpace(html))
                     await context.ResponseCapture(Name, "html", html, cancellationToken);
                 if (string.IsNullOrWhiteSpace(html)) continue;
+                JavBusPageGuard.EnsureMoviePage(html);
                 string parsedCode = JavBusParser.Code(html) ?? normalized;
-                if (Comparable(parsedCode) == Comparable(normalized))
+                if (Comparable(parsedCode) == Comparable(normalized)) {
+                    StorePage(uri, candidate, html);
                     return [new("JavBus", uri.ToString(), parsedCode, JavBusParser.Title(html))];
+                }
             } catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested) {
                 last = error;
             }
@@ -990,10 +1013,14 @@ public sealed class JavBusProvider(IHttpClientFactory clients) : IMetadataProvid
             ? absolute
             : new Uri(new Uri(settings.BaseUrl), Uri.EscapeDataString(JavBusCode.Normalize(result.ExternalId)));
         JavBusSettingsDto effective = settings with { BaseUrl = uri.GetLeftPart(UriPartial.Authority) + "/" };
-        using HttpClient client = CreateClient(effective, context.NetworkSettings);
-        string html = await GetHtmlAsync(client, uri, effective, cancellationToken);
-        if (context.ResponseCapture is not null)
+        bool cacheHit = TryTakePage(uri, effective, out string html);
+        if (!cacheHit) {
+            using HttpClient client = CreateClient(effective, context.NetworkSettings);
+            html = await GetHtmlAsync(client, uri, effective, cancellationToken);
+        }
+        if (context.ResponseCapture is not null && !cacheHit)
             await context.ResponseCapture(Name, "html", html, cancellationToken);
+        JavBusPageGuard.EnsureMoviePage(html);
         ProviderMetadata parsed = JavBusParser.Parse(html, uri.ToString(), result.Code);
         ProviderMetadata metadata = ProviderMetadataEvidence.Attach(parsed with {
             Images = parsed.Images.Select(image => image with { Provider = "JavBus" }).ToArray(),
@@ -1077,6 +1104,50 @@ public sealed class JavBusProvider(IHttpClientFactory clients) : IMetadataProvid
     private static bool HasUsefulMetadata(ProviderMetadata value) =>
         !string.IsNullOrWhiteSpace(value.Title) || value.Images.Count > 0 || value.Actors.Count > 0;
     private static string Comparable(string value) => value.Replace("-", "").Replace("_", "").Replace(" ", "").Trim();
+
+    private void StorePage(Uri uri, JavBusSettingsDto settings, string html)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        foreach ((string key, CachedPage value) in pageCache.Where(value => value.Value.ExpiresAt <= now))
+            pageCache.TryRemove(key, out _);
+        if (pageCache.Count >= MaximumPageCacheEntries) {
+            foreach (string key in pageCache.OrderBy(value => value.Value.ExpiresAt)
+                         .Take(pageCache.Count - MaximumPageCacheEntries + 1).Select(value => value.Key))
+                pageCache.TryRemove(key, out _);
+        }
+        pageCache[PageKey(uri, settings)] = new(html, now.Add(PageCacheTtl));
+    }
+
+    private bool TryTakePage(Uri uri, JavBusSettingsDto settings, out string html)
+    {
+        if (pageCache.TryRemove(PageKey(uri, settings), out CachedPage? cached)
+            && cached.ExpiresAt > DateTimeOffset.UtcNow) {
+            html = cached.Html;
+            return true;
+        }
+        html = "";
+        return false;
+    }
+
+    private static string PageKey(Uri uri, JavBusSettingsDto settings) =>
+        $"{uri.AbsoluteUri}|{ProviderMetadataEvidence.Sha256(settings.Cookie ?? "")}";
+
+    private sealed record CachedPage(string Html, DateTimeOffset ExpiresAt);
+}
+
+internal static class JavBusPageGuard
+{
+    public static void EnsureMoviePage(string html)
+    {
+        if (ContainsAny(html, "cf-chl-", "challenge-platform", "cf-turnstile", "Just a moment..."))
+            throw new InvalidOperationException("JavBus Cloudflare challenge detected.");
+        if (Regex.IsMatch(html, @"<link\b[^>]*rel\s*=\s*[""']canonical[""'][^>]*driver-verify", RegexOptions.IgnoreCase)
+            || Regex.IsMatch(html, @"<form\b[^>]*action\s*=\s*[""'][^""']*driver-verify", RegexOptions.IgnoreCase))
+            throw new InvalidOperationException("JavBus authentication required: verification page returned. Configure a valid Cookie.");
+    }
+
+    private static bool ContainsAny(string value, params string[] markers) =>
+        markers.Any(marker => value.Contains(marker, StringComparison.OrdinalIgnoreCase));
 }
 
 internal static class JavBusCode

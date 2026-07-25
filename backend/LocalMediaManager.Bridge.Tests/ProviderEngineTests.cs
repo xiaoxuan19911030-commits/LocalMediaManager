@@ -15,6 +15,10 @@ public sealed class ProviderEngineTests
         Assert.True(ProviderCatalog.Get("MDC-NG").RequiresMedia);
         Assert.False(ProviderCatalog.Get("MetaTube").RequiresPath);
         Assert.True(ProviderCatalog.Supports("JavBus", "Actors"));
+        Assert.True(ProviderCatalog.Supports("JavBus", "Detail"));
+        Assert.False(ProviderCatalog.Supports("JavBus", "Fanart"));
+        Assert.False(ProviderCatalog.Supports("JavBus", "NFO"));
+        Assert.False(ProviderCatalog.Supports("JavBus", "Plot"));
         Assert.True(ProviderCatalog.Supports("MetaTube", "Tags"));
         Assert.Contains("SearchByCode", ProviderCatalog.Get("Mock").Capabilities);
     }

@@ -153,7 +153,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CompositeProviderSupplementsPreviewOnlyMdcNgImagesWithPosterAndFanart()
+    public async Task CompositeProviderFillsMissingFieldsWithoutAppendingExistingCollections()
     {
         int manualJobReads = 0;
         int javBusRequests = 0;
@@ -195,24 +195,147 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         Assert.NotNull(metadata);
         Assert.Equal("MDC title", metadata.Title);
         Assert.Contains("Tag", metadata.Genres);
-        Assert.Contains("Meta genre", metadata.Genres);
-        Assert.Contains("Drama", metadata.Genres);
+        Assert.DoesNotContain("Meta genre", metadata.Genres);
+        Assert.DoesNotContain("Drama", metadata.Genres);
         Assert.Contains("Actor", metadata.Actors);
-        Assert.Contains("Meta actor", metadata.Actors);
-        Assert.Contains("Actor A", metadata.Actors);
+        Assert.DoesNotContain("Meta actor", metadata.Actors);
+        Assert.DoesNotContain("Actor A", metadata.Actors);
         Assert.Contains(metadata.Images, image => image.Type == "Preview" && image.Url == "https://img.example/preview.jpg");
-        Assert.Contains(metadata.Images, image => image.Type == "Preview" && image.Url == "https://img.example/meta-preview.jpg");
-        Assert.True(metadata.Images.Count(image => image.Type == "Preview") >= 2);
+        Assert.DoesNotContain(metadata.Images, image => image.Type == "Preview" && image.Url == "https://img.example/meta-preview.jpg");
+        Assert.Single(metadata.Images, image => image.Type == "Preview");
         Assert.Contains(metadata.Images, image => image.Type == "Poster");
         Assert.Contains(metadata.Images, image => image.Type == "Fanart");
-        Assert.True(javBusRequests > 0);
+        Assert.Equal(0, javBusRequests);
         Assert.Contains(providerLogs, message => message.StartsWith("MDC-NG:开始"));
         Assert.Contains(providerLogs, message => message.StartsWith("MetaTube:开始"));
-        Assert.Contains(providerLogs, message => message.StartsWith("JavBus:开始"));
+        Assert.DoesNotContain(providerLogs, message => message.StartsWith("JavBus:开始"));
         Assert.Contains(providerLogs, message => message.StartsWith("Metadata Merge:最终字段"));
-        Assert.Contains("MDC-NG", metadata.FieldSources!["Genres"]);
-        Assert.Contains("MetaTube/FANZA", metadata.FieldSources["Genres"]);
-        Assert.Contains("JavBus", metadata.FieldSources["Genres"]);
+        Assert.Equal("MDC-NG", metadata.FieldSources!["Genres"]);
+    }
+
+    [Fact]
+    public async Task JavBusSearchAndDetailReuseOneHttpRequest()
+    {
+        int requests = 0;
+        var provider = new JavBusProvider(new FakeHttpClientFactory(_ => {
+            requests++;
+            return new(HttpStatusCode.OK) { Content = new StringContent(JavBusHtml(), Encoding.UTF8, "text/html") };
+        }));
+        MetadataProviderContext context = Context(javBus: SettingsDefaults.JavBus with { Enabled = true });
+
+        MetadataSearchResult result = Assert.Single(await provider.SearchAsync("ABP-001", context, CancellationToken.None));
+        ProviderMetadata? metadata = await provider.GetMetadataAsync(result, context, CancellationToken.None);
+
+        Assert.NotNull(metadata);
+        Assert.Equal(1, requests);
+    }
+
+    [Fact]
+    public async Task JavBusVerificationPageIsAuthenticationFailureInsteadOfMovieResult()
+    {
+        const string html = """
+            <html><head><link rel="canonical" href="https://www.javbus.com/doc/driver-verify?referer=ABP-001"></head>
+            <body><h3>Verification</h3><form method="POST" action="driver-verify.php?referer=ABP-001"></form></body></html>
+            """;
+        var provider = new JavBusProvider(new FakeHttpClientFactory(_ =>
+            new(HttpStatusCode.OK) { Content = new StringContent(html, Encoding.UTF8, "text/html") }));
+
+        InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.SearchAsync("ABP-001", Context(javBus: SettingsDefaults.JavBus with { Enabled = true }), CancellationToken.None));
+
+        Assert.Equal(ProviderFailureCategory.Authentication, ProviderFailureClassifier.Classify(error));
+    }
+
+    [Fact]
+    public async Task JavBusCloudflareChallengeIsRejectedBeforeParsing()
+    {
+        const string html = """<html><head><title>Just a moment...</title></head><body><div id="cf-chl-widget"></div></body></html>""";
+        var provider = new JavBusProvider(new FakeHttpClientFactory(_ =>
+            new(HttpStatusCode.OK) { Content = new StringContent(html, Encoding.UTF8, "text/html") }));
+
+        InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.SearchAsync("ABP-001", Context(javBus: SettingsDefaults.JavBus with { Enabled = true }), CancellationToken.None));
+
+        Assert.Equal(ProviderFailureCategory.Cloudflare, ProviderFailureClassifier.Classify(error));
+    }
+
+    [Fact]
+    public async Task CompositeSkipsJavBusWhenMetaTubeCoversItsCapabilities()
+    {
+        int javBusRequests = 0;
+        var metaTube = new FakeHttpClientFactory(request => {
+            string body = request.RequestUri!.AbsolutePath.Contains("search")
+                ? """{"data":[{"provider":"FANZA","id":"target","number":"ABP-001","title":"Target"}]}"""
+                : """{"data":{"number":"ABP-001","title":"Target","director":"Director","maker":"Studio","label":"Publisher","series":"Series","runtime":120,"release_date":"2026-01-02","actors":["Actor A"],"genres":["Genre A"],"preview_images":["https://img.example/meta-preview.jpg"]}}""";
+            return new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+        });
+        var javBus = new FakeHttpClientFactory(_ => {
+            javBusRequests++;
+            return new(HttpStatusCode.OK) { Content = new StringContent(JavBusHtml(), Encoding.UTF8, "text/html") };
+        });
+        var provider = new CompositeMetadataProvider(new MdcNgProvider(), new MetaTubeProvider(metaTube), new JavBusProvider(javBus));
+        MetadataProviderContext context = Context(javBus: SettingsDefaults.JavBus with { Enabled = true }) with {
+            MdcNg = SettingsDefaults.MdcNg with { Enabled = false },
+        };
+
+        ProviderMetadata? metadata = await provider.GetMetadataAsync(new("Composite", "ABP-001", "ABP-001", null), context, CancellationToken.None);
+
+        Assert.NotNull(metadata);
+        Assert.Equal(0, javBusRequests);
+        Assert.Equal("Series", metadata.Series);
+    }
+
+    [Fact]
+    public async Task CompositeCallsJavBusOnceAndOnlyFillsMissingFields()
+    {
+        int javBusRequests = 0;
+        var metaTube = new FakeHttpClientFactory(request => {
+            string body = request.RequestUri!.AbsolutePath.Contains("search")
+                ? """{"data":[{"provider":"FANZA","id":"target","number":"ABP-001","title":"Target"}]}"""
+                : """{"data":{"number":"ABP-001","title":"Target","director":"Director","maker":"Studio","label":"Publisher","runtime":120,"release_date":"2026-01-02","actors":["Primary Actor"],"genres":["Primary Genre"],"preview_images":["https://img.example/meta-preview.jpg"]}}""";
+            return new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+        });
+        var javBus = new FakeHttpClientFactory(_ => {
+            javBusRequests++;
+            return new(HttpStatusCode.OK) { Content = new StringContent(JavBusHtml(), Encoding.UTF8, "text/html") };
+        });
+        var provider = new CompositeMetadataProvider(new MdcNgProvider(), new MetaTubeProvider(metaTube), new JavBusProvider(javBus));
+        MetadataProviderContext context = Context(javBus: SettingsDefaults.JavBus with { Enabled = true }) with {
+            MdcNg = SettingsDefaults.MdcNg with { Enabled = false },
+        };
+
+        ProviderMetadata? metadata = await provider.GetMetadataAsync(new("Composite", "ABP-001", "ABP-001", null), context, CancellationToken.None);
+
+        Assert.NotNull(metadata);
+        Assert.Equal(1, javBusRequests);
+        Assert.Equal("Series A", metadata.Series);
+        Assert.Equal(["Primary Actor"], metadata.Actors);
+        Assert.Equal(["Primary Genre"], metadata.Genres);
+        Assert.Single(metadata.Images, image => image.Type == "Preview");
+        Assert.Contains(metadata.Images, image => image.Type == "Preview" && image.Url == "https://img.example/meta-preview.jpg");
+        Assert.Equal("JavBus", metadata.FieldSources!["Series"]);
+        Assert.Equal("MetaTube/FANZA", metadata.FieldSources["Actors"]);
+    }
+
+    [Fact]
+    public async Task CompositeUsesJavBusWhenMetaTubeFails()
+    {
+        int javBusRequests = 0;
+        var metaTube = new FakeHttpClientFactory(_ => new(HttpStatusCode.ServiceUnavailable));
+        var javBus = new FakeHttpClientFactory(_ => {
+            javBusRequests++;
+            return new(HttpStatusCode.OK) { Content = new StringContent(JavBusHtml(), Encoding.UTF8, "text/html") };
+        });
+        var provider = new CompositeMetadataProvider(new MdcNgProvider(), new MetaTubeProvider(metaTube), new JavBusProvider(javBus));
+        MetadataProviderContext context = Context(javBus: SettingsDefaults.JavBus with { Enabled = true }) with {
+            MdcNg = SettingsDefaults.MdcNg with { Enabled = false },
+        };
+
+        ProviderMetadata? metadata = await provider.GetMetadataAsync(new("Composite", "ABP-001", "ABP-001", null), context, CancellationToken.None);
+
+        Assert.NotNull(metadata);
+        Assert.Equal("JavBus", metadata.Provider);
+        Assert.Equal(1, javBusRequests);
     }
 
     [Fact]
