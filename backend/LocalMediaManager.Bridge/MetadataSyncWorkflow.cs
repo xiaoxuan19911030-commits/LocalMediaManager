@@ -186,6 +186,8 @@ public sealed class MetadataWriteService(string databasePath)
     {
         await using var connection = await OpenAsync();
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        bool normalizeEquivalentCode = !string.IsNullOrWhiteSpace(metadata.Code)
+            && JavBusCode.Normalize(movie.Code).Equals(JavBusCode.Normalize(metadata.Code), StringComparison.OrdinalIgnoreCase);
         IReadOnlyList<string> addedFields = await DetermineAddedFieldsAsync(connection, transaction, movie, metadata, files, overwrite);
         string before = JsonSerializer.Serialize(new { movie.Title, movie.Description, movie.ReleaseDate, movie.DurationSeconds, movie.NfoPath });
         long snapshotId = await InsertIdAsync(connection, transaction, """
@@ -195,7 +197,7 @@ public sealed class MetadataWriteService(string databasePath)
 
         await ExecuteAsync(connection, transaction, """
             UPDATE Movies SET
-              Code=CASE WHEN $overwrite=1 THEN COALESCE($code,Code) WHEN trim(ifnull(Code,''))='' THEN $code ELSE Code END,
+              Code=CASE WHEN $overwrite=1 THEN COALESCE($code,Code) WHEN trim(ifnull(Code,''))='' OR $normalizeCode=1 THEN $code ELSE Code END,
               Title=CASE WHEN $overwrite=1 THEN COALESCE($title,Title) WHEN trim(ifnull(Title,''))='' OR Title=Code THEN COALESCE($title,Title) ELSE Title END,
               OriginalTitle=CASE WHEN $overwrite=1 THEN COALESCE($original,OriginalTitle) WHEN trim(ifnull(OriginalTitle,''))='' THEN $original ELSE OriginalTitle END,
               SortTitle=CASE WHEN $overwrite=1 THEN COALESCE($title,SortTitle) WHEN trim(ifnull(SortTitle,''))='' OR SortTitle=Code THEN COALESCE($title,SortTitle) ELSE SortTitle END,
@@ -209,6 +211,7 @@ public sealed class MetadataWriteService(string databasePath)
             """, ("$code", metadata.Code), ("$title", metadata.Title), ("$description", metadata.Description),
             ("$original", metadata.OriginalTitle), ("$release", metadata.ReleaseDate), ("$duration", metadata.DurationSeconds),
             ("$rating", metadata.Rating), ("$nfo", files.NfoPath), ("$overwrite", overwrite ? 1 : 0),
+            ("$normalizeCode", normalizeEquivalentCode ? 1 : 0),
             ("$at", Now()), ("$movie", movie.Id));
         await ExecuteAsync(connection, transaction,
             "INSERT OR IGNORE INTO ExternalIds(EntityType,EntityId,Provider,ExternalId) VALUES('Movie',$movie,$provider,$external)",

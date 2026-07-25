@@ -365,6 +365,23 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task MetadataWriteNormalizesEquivalentCodeWithoutOverwrite()
+    {
+        await using var connection = await Open();
+        string at = DateTimeOffset.UtcNow.ToString("O");
+        await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES(1,'abf-120','Manual title',0,0,'pending','Test',$at,$at)", ("$at", at));
+        await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Progress,TotalItems,CompletedItems,CreatedAt,CurrentMovieId) VALUES(1,'Sync','WritingMetadata',80,1,0,$at,1)", ("$at", at));
+        var movie = new SyncMovie(1, "ABF-120", "Manual title", null, null, 0, null, null);
+        var metadata = new ProviderMetadata("FANZA", "118abf120", "ABF-120", "Remote title", null, null,
+            null, null, null, null, null, null, [], [], []);
+
+        await new MetadataWriteService(Database).ApplyAsync(1, movie, metadata, new([], null, []), false, CancellationToken.None);
+
+        Assert.Equal("ABF-120", await Text(connection, "SELECT Code FROM Movies WHERE Id=1"));
+        Assert.Equal("Manual title", await Text(connection, "SELECT Title FROM Movies WHERE Id=1"));
+    }
+
+    [Fact]
     public async Task MetadataWriteRegistersPreservedImageForCurrentMovieWithoutDuplicates()
     {
         await using var connection = await Open();
