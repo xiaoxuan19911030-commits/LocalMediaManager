@@ -112,6 +112,8 @@ public sealed class MdcNgProvider(IHttpClientFactory? clients = null) : IMetadat
         if (scrape.Message.Contains("file operation failed", StringComparison.OrdinalIgnoreCase))
             await (settings.ProviderLog?.Invoke(Name, scrape.Message, cancellationToken) ?? Task.CompletedTask);
 
+        if (settings.ResponseCapture is not null)
+            await settings.ResponseCapture(Name, "json", scrape.RawJson, cancellationToken);
         return ToProviderMetadata(scrape.Metadata, scrape.RawJson);
     }
 
@@ -419,15 +421,7 @@ public sealed class MetadataProviderBlockedException(string message) : InvalidOp
 
 public static class MetadataProviderCapabilities
 {
-    private static readonly IReadOnlyDictionary<string, IReadOnlySet<string>> Catalog =
-        new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase) {
-            ["MDC-NG"] = Fields("Title", "OriginalTitle", "Actors", "Genres", "Director", "Studio", "Publisher", "Series", "ReleaseDate", "Duration", "Description", "Poster", "Fanart", "Preview"),
-            ["MetaTube"] = Fields("Title", "OriginalTitle", "Actors", "Genres", "Director", "Studio", "Publisher", "Series", "ReleaseDate", "Duration", "Description", "Poster", "Fanart", "Preview"),
-            ["JavBus"] = Fields("Title", "Actors", "Genres", "Director", "Studio", "Publisher", "Series", "ReleaseDate", "Duration", "Poster", "Preview"),
-        };
-
-    public static IReadOnlySet<string> For(string provider) =>
-        Catalog.TryGetValue(provider, out IReadOnlySet<string>? fields) ? fields : Fields();
+    public static IReadOnlySet<string> For(string provider) => ProviderCatalog.Fields(provider);
 
     public static bool SupportsAny(string provider, IReadOnlySet<string>? requested)
     {
@@ -465,7 +459,6 @@ public static class MetadataProviderCapabilities
         .Where(field => !field.Equals("NFO", StringComparison.OrdinalIgnoreCase))
         .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-    private static IReadOnlySet<string> Fields(params string[] fields) => fields.ToHashSet(StringComparer.OrdinalIgnoreCase);
 }
 public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProvider
 {
@@ -478,6 +471,8 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
         using HttpClient client = CreateClient(settings, context.NetworkSettings);
         using JsonDocument document = await GetJsonAsync(client,
             new Uri(new Uri(settings.BaseUrl), $"v1/movies/search?q={Uri.EscapeDataString(NormalizeCode(code))}&fallback=True"), cancellationToken, notFoundAsEmpty: true);
+        if (context.ResponseCapture is not null)
+            await context.ResponseCapture(Name, "json", document.RootElement.GetRawText(), cancellationToken);
         if (!document.RootElement.TryGetProperty("data", out JsonElement data) || data.ValueKind != JsonValueKind.Array)
             return [];
         var results = new List<MetadataSearchResult>();
@@ -501,6 +496,8 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
         using HttpClient client = CreateClient(settings, context.NetworkSettings);
         Uri detailUrl = new(new Uri(settings.BaseUrl), $"v1/movies/{Uri.EscapeDataString(result.Provider)}/{Uri.EscapeDataString(result.ExternalId)}?lazy=True");
         using JsonDocument document = await GetJsonAsync(client, detailUrl, cancellationToken);
+        if (context.ResponseCapture is not null)
+            await context.ResponseCapture(Name, "json", document.RootElement.GetRawText(), cancellationToken);
         JsonElement root = document.RootElement;
         JsonElement movie = root.TryGetProperty("data", out JsonElement data) && data.ValueKind == JsonValueKind.Object ? data : root;
         string code = JavBusCode.Normalize(NormalizeCode(String(movie, "number")));
@@ -565,7 +562,7 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
             : ProviderHttpClients.Create(settings.TimeoutSeconds, network);
         client.Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.Clear();
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.7.5"));
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LocalMediaManager", "0.7.6"));
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         return client;
     }
@@ -658,7 +655,16 @@ public sealed class MetaTubeProvider(IHttpClientFactory clients) : IMetadataProv
 public sealed class CompositeMetadataProvider(MdcNgProvider mdcNg, MetaTubeProvider metaTube, JavBusProvider javBus,
     IMovieNumberExtractor? movieNumberExtractor = null) : IMetadataProvider
 {
+    private readonly ProviderManager providerManager = new(
+        new IMetadataProvider[] { mdcNg, metaTube, javBus }, movieNumberExtractor);
     public string Name => "Metadata";
+
+    public CompositeMetadataProvider(ProviderManager providerManager, MdcNgProvider mdcNg, MetaTubeProvider metaTube,
+        JavBusProvider javBus, IMovieNumberExtractor? movieNumberExtractor = null)
+        : this(mdcNg, metaTube, javBus, movieNumberExtractor)
+    {
+        this.providerManager = providerManager;
+    }
 
     public async Task<IReadOnlyList<MetadataSearchResult>> SearchAsync(string code, MetadataProviderContext settings, CancellationToken cancellationToken)
     {
@@ -670,13 +676,13 @@ public sealed class CompositeMetadataProvider(MdcNgProvider mdcNg, MetaTubeProvi
         if (providers.Length == 0)
             throw new InvalidOperationException("当前网络检测没有可用的元数据来源，本次同步已跳过不可达 Provider。");
         var results = new List<MetadataSearchResult>();
-        foreach (IMetadataProvider provider in providers) {
+        foreach (IProviderSdk provider in providers) {
             try {
                 IReadOnlyList<MetadataSearchResult> found = await provider.SearchAsync(code, settings, cancellationToken);
                 results.AddRange(found);
                 if (found.Count > 0 && !string.IsNullOrWhiteSpace(settings.PreferredSource)) break;
             } catch (Exception error) when (error is not OperationCanceledException && string.IsNullOrWhiteSpace(settings.PreferredSource)) {
-                results.Add(new($"__error:{provider.Name}", error.Message, code, null));
+                results.Add(new($"__error:{provider.Descriptor.Name}", error.Message, code, null));
             }
         }
         MetadataSearchResult[] errors = results.Where(value => value.Provider.StartsWith("__error:", StringComparison.Ordinal)).ToArray();
@@ -688,15 +694,11 @@ public sealed class CompositeMetadataProvider(MdcNgProvider mdcNg, MetaTubeProvi
 
     public async Task<ProviderMetadata?> GetMetadataAsync(MetadataSearchResult result, MetadataProviderContext settings, CancellationToken cancellationToken)
     {
-        IMetadataProvider provider = result.Provider.ToLowerInvariant() switch {
-            "mdc-ng" => mdcNg,
-            "javbus" => javBus,
-            _ => metaTube,
-        };
+        IProviderSdk provider = providerManager.Resolve(ResolveSourceName(result.Provider));
         if (result.Provider.Equals("Composite", StringComparison.OrdinalIgnoreCase))
             return await CompositeAsync(result.Code, settings, cancellationToken);
-        if (provider == javBus || !settings.JavBus.Enabled || !string.IsNullOrWhiteSpace(settings.PreferredSource))
-            return await provider.GetMetadataAsync(result, settings, cancellationToken);
+        if (provider.Descriptor.Name.Equals("JavBus", StringComparison.OrdinalIgnoreCase) || !settings.JavBus.Enabled || !string.IsNullOrWhiteSpace(settings.PreferredSource))
+            return await provider.GetDetailAsync(result, settings, cancellationToken);
 
         ProviderMetadata? primary = null;
         Exception? primaryError = null;
@@ -719,70 +721,54 @@ public sealed class CompositeMetadataProvider(MdcNgProvider mdcNg, MetaTubeProvi
     }
 
     public Task<IReadOnlyList<MetadataImage>> GetImagesAsync(ProviderMetadata metadata, CancellationToken cancellationToken) =>
-        metadata.Provider.ToLowerInvariant() switch {
-            "mdc-ng" => mdcNg.GetImagesAsync(metadata, cancellationToken),
-            "javbus" => javBus.GetImagesAsync(metadata, cancellationToken),
-            _ => metaTube.GetImagesAsync(metadata, cancellationToken),
-        };
+        Task.FromResult(metadata.Images);
 
     public Task<ProviderConnectionResult> TestConnectionAsync(MetadataProviderContext settings, CancellationToken cancellationToken) =>
         metaTube.TestConnectionAsync(settings, cancellationToken);
 
-    private IEnumerable<IMetadataProvider> Ordered(MetadataProviderContext settings)
-    {
-        if (settings.PreferredSource?.Equals("JavBus", StringComparison.OrdinalIgnoreCase) == true) {
-            if (settings.JavBus.Enabled) yield return javBus;
-            yield break;
-        }
-        if (settings.PreferredSource?.Equals("MDC-NG", StringComparison.OrdinalIgnoreCase) == true) {
-            if (settings.MdcNg.Enabled) yield return mdcNg;
-            yield break;
-        }
-        if (settings.PreferredSource?.Equals("MetaTube", StringComparison.OrdinalIgnoreCase) == true) {
-            if (settings.MetaTube.Enabled) yield return metaTube;
-            yield break;
-        }
-        var items = new List<(int Priority, IMetadataProvider Provider)>();
-        if (settings.MdcNg.Enabled) items.Add((1, mdcNg));
-        if (settings.MetaTube.Enabled) items.Add((2, metaTube));
-        if (settings.JavBus.Enabled) items.Add((3, javBus));
-        foreach ((_, IMetadataProvider provider) in items.OrderBy(item => item.Priority)) yield return provider;
-    }
+    private IEnumerable<IProviderSdk> Ordered(MetadataProviderContext settings) =>
+        providerManager.OrderedProviders(settings);
+
+    private static string ResolveSourceName(string provider) =>
+        provider.Equals("MDC-NG", StringComparison.OrdinalIgnoreCase) ? "MDC-NG"
+        : provider.Equals("JavBus", StringComparison.OrdinalIgnoreCase) ? "JavBus"
+        : "MetaTube";
 
     private async Task<ProviderMetadata?> CompositeAsync(string code, MetadataProviderContext settings, CancellationToken cancellationToken)
     {
         ProviderMetadata? merged = null;
         int providerFailures = 0;
         int completedSearches = 0;
-        foreach (IMetadataProvider source in Ordered(settings)) {
-            if (!MetadataProviderCapabilities.SupportsAny(source.Name, settings.RequestedFields)) {
-                await LogAsync(settings, source.Name, "跳过：该 Provider 不负责本次目标字段", cancellationToken);
+        foreach (IProviderSdk source in Ordered(settings)) {
+            string sourceName = source.Descriptor.Name;
+            if (!MetadataProviderCapabilities.SupportsAny(sourceName, settings.RequestedFields)) {
+                await LogAsync(settings, sourceName, "跳过：该 Provider 不负责本次目标字段", cancellationToken);
                 continue;
             }
-            await LogAsync(settings, source.Name, "开始", cancellationToken);
+            await LogAsync(settings, sourceName, "开始", cancellationToken);
             IReadOnlyList<MetadataSearchResult> results;
             try {
                 results = await source.SearchAsync(code, settings, cancellationToken);
                 completedSearches++;
-                await LogAsync(settings, source.Name, $"搜索结束：候选 {results.Count} 个", cancellationToken);
+                await LogAsync(settings, sourceName, $"搜索结束：候选 {results.Count} 个", cancellationToken);
             }
             catch (Exception error) when (error is not OperationCanceledException) {
                 providerFailures++;
-                await (settings.ProviderFailure?.Invoke(source.Name, error, cancellationToken) ?? Task.CompletedTask);
-                await LogAsync(settings, source.Name, $"失败：{error.Message}", cancellationToken);
+                await (settings.ProviderFailure?.Invoke(sourceName, error, cancellationToken) ?? Task.CompletedTask);
+                await LogAsync(settings, sourceName, $"失败：{error.Message}", cancellationToken);
                 continue;
             }
             bool accepted = false;
             foreach (MetadataSearchResult result in results.Take(2)) {
                 try {
-                    ProviderMetadata? candidate = await source.GetMetadataAsync(result, settings, cancellationToken);
+                    ProviderMetadata? candidate = await source.GetDetailAsync(result, settings, cancellationToken);
                     if (candidate is null) {
-                        await LogAsync(settings, source.Name, "详情为空，继续下一候选", cancellationToken);
+                        await LogAsync(settings, sourceName, "详情为空，继续下一候选", cancellationToken);
                         continue;
                     }
                     if (!(movieNumberExtractor?.AreEquivalent(code, candidate.Code)
                         ?? JavBusCode.Normalize(candidate.Code).Equals(JavBusCode.Normalize(code), StringComparison.OrdinalIgnoreCase))) {
-                        await LogAsync(settings, source.Name, $"番号不匹配：期望 {code}，实际 {candidate.Code}", cancellationToken);
+                        await LogAsync(settings, sourceName, $"番号不匹配：期望 {code}，实际 {candidate.Code}", cancellationToken);
                         continue;
                     }
                     string returned = Describe(candidate);
@@ -790,17 +776,17 @@ public sealed class CompositeMetadataProvider(MdcNgProvider mdcNg, MetaTubeProvi
                     string added = merged is null ? Describe(candidate) : DescribeAdded(merged, next);
                     merged = next;
                     accepted = true;
-                    await (settings.ProviderSuccess?.Invoke(source.Name, cancellationToken) ?? Task.CompletedTask);
-                    await LogAsync(settings, source.Name, $"返回：{returned}", cancellationToken);
-                    await LogAsync(settings, source.Name, $"补全：{added}", cancellationToken);
+                    await (settings.ProviderSuccess?.Invoke(sourceName, cancellationToken) ?? Task.CompletedTask);
+                    await LogAsync(settings, sourceName, $"返回：{returned}", cancellationToken);
+                    await LogAsync(settings, sourceName, $"补全：{added}", cancellationToken);
                     break;
                 }
                 catch (Exception error) when (error is not OperationCanceledException) {
-                    await (settings.ProviderFailure?.Invoke(source.Name, error, cancellationToken) ?? Task.CompletedTask);
-                    await LogAsync(settings, source.Name, $"详情失败：{error.Message}", cancellationToken);
+                    await (settings.ProviderFailure?.Invoke(sourceName, error, cancellationToken) ?? Task.CompletedTask);
+                    await LogAsync(settings, sourceName, $"详情失败：{error.Message}", cancellationToken);
                 }
             }
-            await LogAsync(settings, source.Name, accepted ? "结束：已参与合并" : "结束：无可合并结果", cancellationToken);
+            await LogAsync(settings, sourceName, accepted ? "结束：已参与合并" : "结束：无可合并结果", cancellationToken);
             if (merged is not null && MetadataProviderCapabilities.Satisfies(merged, settings.RequestedFields)) {
                 await LogAsync(settings, "Metadata Router", "目标字段已满足，停止调用后续 Provider", cancellationToken);
                 break;
@@ -983,6 +969,8 @@ public sealed class JavBusProvider(IHttpClientFactory clients) : IMetadataProvid
                 Uri uri = new(new Uri(candidate.BaseUrl), urlCode);
                 using HttpClient client = CreateClient(candidate, context.NetworkSettings);
                 string html = await GetHtmlAsync(client, uri, candidate, cancellationToken, notFoundAsEmpty: true);
+                if (context.ResponseCapture is not null && !string.IsNullOrWhiteSpace(html))
+                    await context.ResponseCapture(Name, "html", html, cancellationToken);
                 if (string.IsNullOrWhiteSpace(html)) continue;
                 string parsedCode = JavBusParser.Code(html) ?? normalized;
                 if (Comparable(parsedCode) == Comparable(normalized))
@@ -1004,6 +992,8 @@ public sealed class JavBusProvider(IHttpClientFactory clients) : IMetadataProvid
         JavBusSettingsDto effective = settings with { BaseUrl = uri.GetLeftPart(UriPartial.Authority) + "/" };
         using HttpClient client = CreateClient(effective, context.NetworkSettings);
         string html = await GetHtmlAsync(client, uri, effective, cancellationToken);
+        if (context.ResponseCapture is not null)
+            await context.ResponseCapture(Name, "html", html, cancellationToken);
         ProviderMetadata parsed = JavBusParser.Parse(html, uri.ToString(), result.Code);
         ProviderMetadata metadata = ProviderMetadataEvidence.Attach(parsed with {
             Images = parsed.Images.Select(image => image with { Provider = "JavBus" }).ToArray(),

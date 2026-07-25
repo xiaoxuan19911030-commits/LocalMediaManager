@@ -6,6 +6,11 @@
 
 ### Features
 
+- v0.7.6 adds a unified Provider Catalog and Manager for registration, enabled state, priority, capabilities, requirements, health, failure classification, benchmark, and bounded TTL cache.
+- Standard composite routing and Metadata Completion now consume the same Provider definitions; the existing MDC-NG -> MetaTube -> JavBus order and existing Merge/Writer behavior remain unchanged.
+- Settings -> Developer now includes a read-only Provider Playground for raw JSON/HTML/XML, ProviderResult, Merge Preview, stage diagnostics, cache state, and current-process Provider metrics.
+- A deterministic offline Mock Provider and 50-case local JavBus parser regression baseline allow Provider, parser, merge-preview, and diagnostic tests without relying on live websites or production data.
+
 - v0.7.5-P1 adds a production-gated Metadata Completion session that deterministically selects exactly 20 eligible Standard movies from a persisted random seed.
 - The P1 selector balances distinct samples across missing Actors, Provider Genres, Poster, Fanart, and NFO, persists the selected MovieIds, and rejects plans above the 20-movie safety ceiling.
 - Completion items now retain Provider/HTTP/retry logs, elapsed time, Provider contributions, AddedFields, and Before/After values; Home reads current Completion/Repair task evidence instead of hard-coded audit counts.

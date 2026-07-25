@@ -1402,6 +1402,10 @@ React → bridge.ts → Bridge
 
 ### 13.2 Metadata Providers
 
+Provider registration, ordering, capability declarations, path/media/authentication requirements, health classification, diagnostics, benchmark metrics, and bounded TTL cache are owned by one `ProviderCatalog` / `ProviderManager`. `CompositeMetadataProvider` and Metadata Completion resolve providers through this layer; synchronization code must not add another provider-name switch or duplicate capability table.
+
+Settings -> Developer -> Provider Playground is a diagnostic-only client of the Manager. It may execute Search and Detail, capture redacted response bodies, produce `ProviderResult` and Merge Preview, and expose diagnostics. It never invokes `MetadataWriteService`, image/NFO writers, or production database mutations. The Mock Provider is deterministic and offline. Cache, request history, metrics, and Playground raw responses are bounded process-memory state and contain no request credentials. See DEC-026.
+
 **配置：** `UnifiedSettings.metaTube` — enabled · baseUrl · timeout · downloadImages · writeNfo · autoExecute · **nonDestructive（强制 true）**
 
 **测试：** `POST /api/settings/providers/metatube/test`（Draft 值，不 Save）

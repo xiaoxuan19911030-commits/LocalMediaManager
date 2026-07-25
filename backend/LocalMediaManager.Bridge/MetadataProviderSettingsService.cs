@@ -52,6 +52,7 @@ public sealed record MetadataProviderContext(MetaTubeSettingsDto MetaTube, JavBu
     public Func<string, string, CancellationToken, Task>? ProviderDebugLog { get; init; }
     public Func<string, Exception, CancellationToken, Task>? ProviderFailure { get; init; }
     public Func<string, CancellationToken, Task>? ProviderSuccess { get; init; }
+    public Func<string, string, string, CancellationToken, Task>? ResponseCapture { get; init; }
     public ProviderNetworkSettingsDto NetworkSettings => Network ?? ProviderNetworkSettingsDto.Default;
 
     public int TimeoutSeconds(string provider) =>

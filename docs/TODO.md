@@ -4,6 +4,15 @@
 
 ## High
 
+### 0.7.6 Provider Engine Acceptance
+
+- [x] Centralize Provider registration, order, capabilities, requirements, and completion routing in one Catalog/Manager.
+- [x] Add bounded in-memory diagnostics, benchmark, TTL cache, failure classification, and a deterministic offline Mock Provider.
+- [x] Add the read-only Settings -> Developer -> Provider Playground and Bridge endpoints.
+- [x] Add a 50-case local parser regression baseline and Provider Engine unit coverage.
+- [ ] Human smoke the isolated Desktop Playground with configured MDC-NG, MetaTube, JavBus, and Mock providers.
+- [ ] Keep production deployment, production database writes, and full-library synchronization disabled until Human acceptance.
+
 ### 0.7.5-P1 Metadata Completion Production
 
 - [x] Review `docs/releases/0.7.4-C-METADATA-COMPLETION.md` and establish the 219-movie eligible pool.

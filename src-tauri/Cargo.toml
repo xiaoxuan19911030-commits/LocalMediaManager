@@ -1,6 +1,6 @@
 [package]
 name = "local-media-manager"
-version = "0.7.5"
+version = "0.7.6"
 description = "Local Media Manager desktop application"
 authors = ["Local Media Manager contributors"]
 license = "GPL-3.0-only"

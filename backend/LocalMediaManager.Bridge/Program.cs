@@ -78,6 +78,15 @@ builder.Services.AddSingleton<MetaTubeProvider>();
 builder.Services.AddSingleton<MdcNgProvider>();
 builder.Services.AddSingleton<MetadataSyncService>();
 builder.Services.AddSingleton<JavBusProvider>();
+builder.Services.AddSingleton<MockMetadataProvider>();
+builder.Services.AddSingleton(serviceProvider => new ProviderManager(
+    new IMetadataProvider[] {
+        serviceProvider.GetRequiredService<MdcNgProvider>(),
+        serviceProvider.GetRequiredService<MetaTubeProvider>(),
+        serviceProvider.GetRequiredService<JavBusProvider>(),
+        serviceProvider.GetRequiredService<MockMetadataProvider>(),
+    }, serviceProvider.GetRequiredService<IMovieNumberExtractor>()));
+builder.Services.AddSingleton<ProviderPlaygroundService>();
 builder.Services.AddSingleton<DmmProvider>();
 builder.Services.AddSingleton<JavDbProvider>();
 builder.Services.AddSingleton<MinnanoActorProfileProvider>();
@@ -98,7 +107,12 @@ builder.Services.AddSingleton(serviceProvider => new ActorProfileCompleteTaskSer
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<ActorProfileCompleteTaskService>());
 builder.Services.AddSingleton<ProviderDiagnosticsService>();
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<ProviderDiagnosticsService>());
-builder.Services.AddSingleton<IMetadataProvider, CompositeMetadataProvider>();
+builder.Services.AddSingleton<IMetadataProvider>(serviceProvider => new CompositeMetadataProvider(
+    serviceProvider.GetRequiredService<ProviderManager>(),
+    serviceProvider.GetRequiredService<MdcNgProvider>(),
+    serviceProvider.GetRequiredService<MetaTubeProvider>(),
+    serviceProvider.GetRequiredService<JavBusProvider>(),
+    serviceProvider.GetRequiredService<IMovieNumberExtractor>()));
 builder.Services.AddSingleton<IMetadataCompletionProviderClient, MetadataCompletionProviderClient>();
 builder.Services.AddSingleton(serviceProvider => new MetadataSyncExecutor(
     databasePath,
@@ -207,7 +221,7 @@ app.Use(async (context, next) => {
 app.MapGet("/health", () => Results.Ok(new {
     product = "Local Media Manager",
     abbreviation = "LMM",
-    version = "0.7.5",
+    version = "0.7.6",
     status = "ok",
     databaseAvailable = File.Exists(databasePath),
     databasePath,
@@ -247,6 +261,14 @@ app.MapPost("/api/settings/providers/wikipedia-jp/test", async (WebMetadataSetti
     Results.Ok(await provider.TestConnectionAsync(MetadataProviderSettingsService.NormalizeWeb(input, "Wikipedia JP"), CancellationToken.None)));
 app.MapPost("/api/settings/providers/diagnostics", async (ProviderDiagnosticsService service, CancellationToken token) =>
     Results.Ok(await service.ProbeAsync(token)));
+app.MapGet("/api/developer/providers", async (ProviderPlaygroundService service, CancellationToken token) =>
+    Results.Ok(await service.DashboardAsync(token)));
+app.MapGet("/api/developer/providers/history", (int? limit, ProviderPlaygroundService service) =>
+    Results.Ok(service.Recent(limit ?? 20)));
+app.MapPost("/api/developer/providers/test", async (ProviderPlaygroundRequest input, ProviderPlaygroundService service, CancellationToken token) =>
+    Results.Ok(await service.TestAsync(input, token)));
+app.MapPost("/api/developer/providers/cache/clear", (ProviderPlaygroundService service) =>
+    Results.Ok(service.ClearCache()));
 app.MapGet("/api/actors/{actorId:long}/profile-preview", async (long actorId, string? source, ActorProfileProviderService service, CancellationToken token) =>
     Results.Ok(await service.PreviewAsync(actorId, source, token)));
 app.MapPost("/api/actors/{actorId:long}/profile-apply", async (long actorId, ActorProfileCandidate candidate, ActorProfileProviderService service, CancellationToken token) =>

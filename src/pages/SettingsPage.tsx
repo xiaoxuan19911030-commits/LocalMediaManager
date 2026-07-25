@@ -14,6 +14,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { FormEvent, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useBlocker, useNavigate } from 'react-router'
 import { BrandMark } from '@/components/BrandMark'
+import { ProviderPlayground } from '@/components/ProviderPlayground'
 import { HealthMeter, SurfaceSection } from '@/components/ProductComponents'
 import { DangerConfirmDialog } from '@/components/workspace/DangerConfirmDialog'
 import { StatusBadge } from '@/components/workspace/StatusBadges'
@@ -29,7 +30,7 @@ import type { ImageCachePreview } from '@/types/media'
 
 const categories = [
   ['general', '常规'], ['appearance', '外观'], ['search', '搜索与筛选'], ['metadata', '元数据'],
-  ['plugins', '插件中心'], ['rename', '重命名'], ['mediaStorage', '媒体资源'], ['shortcuts', '快捷键'], ['data', '数据与备份'], ['about', '关于'],
+  ['plugins', '插件中心'], ['rename', '重命名'], ['mediaStorage', '媒体资源'], ['shortcuts', '快捷键'], ['data', '数据与备份'], ['developer', '开发者'], ['about', '关于'],
 ] as const
 
 type Category = (typeof categories)[number][0]
@@ -291,6 +292,7 @@ export default function SettingsPage() {
           <MovieWallSection value={normalizeMovieWallDisplay(draft.movieWallDisplay ?? defaultMovieWallDisplay)} setValue={(value) => updateDraft('movieWallDisplay', normalizeMovieWallDisplay(value))}/>
         </Stack>}
         {category === 'data' && <DataSection overview={overview} ratingRetention={draft.ratingRetention} setRatingRetention={(value) => updateDraft('ratingRetention', value)} dataBackup={draft.dataBackup} setDataBackup={(value) => updateDraft('dataBackup', value)} backupPath={backupPath} setBackupPath={setBackupPath} restoreMode={restoreMode} setRestoreMode={setRestoreMode} validation={backupValidation} setValidation={setBackupValidation} setNotice={setNotice} onBackup={() => setConfirm('backup')} onRestore={() => setConfirm('restore')}/>}
+        {category === 'developer' && <ProviderPlayground/>}
         {category === 'about' && <AboutSection overview={overview} health={health} system={draft.system} setSystem={(value) => updateDraft('system', value)} updateResult={updateResult} checkUpdates={checkUpdates}/>}
       </Stack>
     </Box>

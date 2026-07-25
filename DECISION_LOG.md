@@ -1645,3 +1645,31 @@ A completion session is successful only when every selected item completes succe
 - Do not call the writer when no requested Provider field survived field filtering.
 - Do not continue to P2 or P3 without the preceding Human gate.
 - Do not treat Provider infrastructure failure or unchanged Metadata Health as production acceptance.
+
+---
+
+### DEC-026: Unified Provider Engine
+
+| Field | Value |
+|------|-----|
+| **Decision ID** | DEC-026 |
+| **Module** | Metadata Providers / Developer Diagnostics |
+| **Sprint** | 0.7.6 |
+| **Date** | 2026-07-25 |
+| **Status** | Accepted |
+
+#### Decision
+
+All Standard metadata providers are registered through one `ProviderCatalog` and resolved through one `ProviderManager`. The catalog is the single source for provider order, enabled-state interpretation, field and search capabilities, minimum delay, and path/media/authentication requirements. Composite Standard synchronization and Metadata Completion consume this definition instead of maintaining provider-name switches or duplicate capability tables.
+
+Provider health, failure classification, bounded request history, benchmark metrics, and code-keyed TTL cache are process-memory diagnostics. Cache keys include provider name and normalized movie number. They do not introduce a database migration or a second Settings system. The deterministic Mock Provider is offline and is available for framework, parser, merge-preview, and diagnostic tests.
+
+The Settings -> Developer -> Provider Playground is read-only. It may call Provider Search and Detail, capture redacted response bodies, and show ProviderResult, Merge Preview, cache state, and stage diagnostics. It never calls metadata, image, or NFO writers. Authorization, Cookie, token, password, API key, or request headers must not be retained in raw response capture, logs, cache, or UI output.
+
+#### Prohibited
+
+- Do not add a provider by editing synchronization switches or copying a second capability/priority catalog.
+- Do not let Playground, benchmark, parser regression, or Mock Provider write production metadata or user data.
+- Do not persist raw Provider bodies, credentials, cache entries, or request history in the production database.
+- Do not change the current Standard Provider order or Merge/Writer policy as part of Provider Engine maintenance.
+- Do not treat parser fixtures or Mock Provider results as live-site acceptance evidence.

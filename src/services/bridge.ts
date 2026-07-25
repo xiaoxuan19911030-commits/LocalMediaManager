@@ -3,6 +3,7 @@ import type { ActorDetail, ActorProfileCandidate, ActorProfileCompleteLaunchResu
 import type { JavBusSettings } from '@/types/settings'
 import type { MediaStorageAvailability, MetadataHealthAnalysisState, MetadataHealthSummary } from '@/types/media'
 import type { BackupCreateCommand, BackupResult, BackupValidation, DataSafetyOverview, FfmpegPluginSettings, FfmpegToolStatus, LogCleanupPreview, LogCleanupResult, MdcNgSettings, MdcNgToolStatus, MetaTubeSettings, PersonDetectionStatus, ProviderConnectionResult, ProviderDiagnosticResult, RenameSettings, RestorePlan, SettingsExport, SettingsImportPreview, SettingsSnapshot, SystemDiagnostic, UnifiedSettings, UnifiedSettingsSaveResult, UpdateCheckResult } from '@/types/settings'
+import type { ProviderDashboardItem, ProviderPlaygroundResult } from '@/types/providerEngine'
 
 export const BRIDGE_ORIGIN = 'http://127.0.0.1:47831'
 export const LMM_DATA_CHANGED_EVENT = 'lmm:data-changed'
@@ -53,7 +54,7 @@ async function request<T>(path: string, init?: RequestInit, retrySession = true,
     throw new Error(error.message)
     }
     const result = await response.json() as T
-    if (method !== 'GET' && !path.startsWith('/api/metadata/health/analysis')) {
+    if (method !== 'GET' && !path.startsWith('/api/metadata/health/analysis') && !path.startsWith('/api/developer/providers')) {
       window.dispatchEvent(new CustomEvent(LMM_DATA_CHANGED_EVENT, { detail: { path, method } }))
     }
     return result
@@ -109,6 +110,10 @@ export const bridge = {
   testMetaTube: (value: MetaTubeSettings) => request<ProviderConnectionResult>('/api/settings/providers/metatube/test', { method: 'POST', body: JSON.stringify(value) }, true, 60_000),
   testJavBus: (value: JavBusSettings) => request<ProviderConnectionResult>('/api/settings/providers/javbus/test', { method: 'POST', body: JSON.stringify(value) }, true, 60_000),
   providerDiagnostics: () => request<ProviderDiagnosticResult[]>('/api/settings/providers/diagnostics', { method: 'POST' }, true, 60_000),
+  providerDashboard: () => request<ProviderDashboardItem[]>('/api/developer/providers'),
+  providerHistory: (limit = 20) => request<ProviderPlaygroundResult[]>(`/api/developer/providers/history?${new URLSearchParams({ limit: String(limit) })}`),
+  testProvider: (provider: string, code: string, bypassCache = false) => request<ProviderPlaygroundResult>('/api/developer/providers/test', { method: 'POST', body: JSON.stringify({ provider, code, bypassCache }) }, true, 120_000),
+  clearProviderCache: () => request<{ clearedEntries: number; clearedAt: string }>('/api/developer/providers/cache/clear', { method: 'POST' }),
   ffmpegStatus: () => request<FfmpegToolStatus>('/api/plugins/ffmpeg/status'),
   ffmpegSettings: () => request<FfmpegPluginSettings>('/api/plugins/ffmpeg/settings'),
   saveFfmpegSettings: (value: FfmpegPluginSettings) => request<FfmpegPluginSettings>('/api/plugins/ffmpeg/settings', { method: 'PUT', body: JSON.stringify(value) }),

@@ -2,10 +2,23 @@
 
 ## Current Release
 
-- **Version:** 0.7.5
-- **Release:** Metadata Completion Production
-- **Branch policy:** P1 development and verification are isolated on `codex/sprint-0.7.5-metadata-completion-production`.
+- **Version:** 0.7.6
+- **Release:** Provider Engine
+- **Branch policy:** Provider Engine development and verification are isolated on `codex/sprint-0.7.6-provider-engine`.
 - **Restore policy:** Official version recovery uses immutable release tags, starting with `v0.6.0`; rollback branches are no longer long-term restore points.
+
+## Unreleased - 0.7.6 Provider Engine
+
+**Status:** Develop / Self Test; Human acceptance pending
+**Date:** 2026-07-25
+
+Scope:
+
+- Establish one Provider Catalog and Manager for registration, enabled state, priority, capabilities, requirements, health, diagnostics, benchmark, and bounded TTL cache.
+- Route Standard composite ordering and Metadata Completion provider resolution through the Manager without changing the current MDC-NG, MetaTube, JavBus order or merge/write behavior.
+- Add a read-only Settings -> Developer -> Provider Playground for raw response, ProviderResult, Merge Preview, diagnostics, and cache inspection.
+- Add an offline deterministic Mock Provider and a 50-case parser regression baseline.
+- Do not deploy, change the production database, run full-library synchronization, or change user data before Human acceptance.
 
 ## Unreleased - 0.7.5-P1 Metadata Completion Production
 

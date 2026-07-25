@@ -169,9 +169,7 @@ public interface IMetadataCompletionProviderClient
 }
 
 public sealed class MetadataCompletionProviderClient(
-    MdcNgProvider mdcNg,
-    MetaTubeProvider metaTube,
-    JavBusProvider javBus,
+    ProviderManager providerManager,
     IMovieNumberExtractor movieNumberExtractor) : IMetadataCompletionProviderClient
 {
     public async Task<ProviderMetadata?> GetMetadataAsync(
@@ -181,19 +179,14 @@ public sealed class MetadataCompletionProviderClient(
         MetadataProviderContext context,
         CancellationToken cancellationToken)
     {
-        IMetadataProvider source = provider switch {
-            "MDC-NG" => mdcNg,
-            "MetaTube" => metaTube,
-            "JavBus" => javBus,
-            _ => throw new ArgumentException($"Unknown metadata completion provider: {provider}", nameof(provider)),
-        };
+        IProviderSdk source = providerManager.Resolve(provider);
         MetadataProviderContext scoped = context with {
             PreferredSource = provider,
             CurrentMoviePath = moviePath,
         };
         IReadOnlyList<MetadataSearchResult> results = await source.SearchAsync(code, scoped, cancellationToken);
         foreach (MetadataSearchResult result in results.Take(3)) {
-            ProviderMetadata? metadata = await source.GetMetadataAsync(result, scoped, cancellationToken);
+            ProviderMetadata? metadata = await source.GetDetailAsync(result, scoped, cancellationToken);
             if (metadata is null) continue;
             if (movieNumberExtractor.AreEquivalent(code, metadata.Code))
                 return metadata;
@@ -213,24 +206,11 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
     ];
     private static readonly string[] RequiredFields = ["ReleaseDate", "Studio", "Actors", "Genres", "Poster", "Fanart", "NFO"];
     private static readonly string[] P1CoverageFields = ["Actors", "Genres", "Poster", "Fanart", "NFO"];
-    private static readonly IReadOnlyList<MetadataCompletionProviderCapability> CapabilityCatalog = [
-        new("JavBus", ["Actors", "Genres", "ReleaseDate", "Description", "Director", "Studio", "Series", "Poster", "Fanart", "NFO"], 900),
-        new("MetaTube", ["Actors", "Genres", "ReleaseDate", "Description", "Director", "Studio", "Series", "Poster", "Fanart", "NFO"], 150),
-        new("MDC-NG", ["Actors", "Genres", "ReleaseDate", "Description", "Director", "Studio", "Series", "Poster", "Fanart", "NFO"], 250),
-    ];
-    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> DefaultPriorities =
-        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase) {
-            ["Actors"] = ["JavBus", "MetaTube", "MDC-NG"],
-            ["Genres"] = ["JavBus", "MetaTube", "MDC-NG"],
-            ["Poster"] = ["MetaTube", "JavBus", "MDC-NG"],
-            ["Fanart"] = ["MetaTube", "MDC-NG", "JavBus"],
-            ["NFO"] = ["MetaTube", "MDC-NG", "JavBus"],
-            ["Description"] = ["JavBus", "MDC-NG", "MetaTube"],
-            ["Series"] = ["MetaTube", "MDC-NG", "JavBus"],
-            ["Director"] = ["JavBus", "MetaTube", "MDC-NG"],
-            ["Studio"] = ["JavBus", "MetaTube", "MDC-NG"],
-            ["ReleaseDate"] = ["JavBus", "MetaTube", "MDC-NG"],
-        };
+    private static readonly IReadOnlyList<MetadataCompletionProviderCapability> CapabilityCatalog =
+        ProviderCatalog.All.Where(value => value.Name != "Mock").Select(value => new MetadataCompletionProviderCapability(
+            value.Name, value.Capabilities.Where(field => KnownFields.Contains(field, StringComparer.OrdinalIgnoreCase)).ToArray(),
+            value.MinimumDelayMilliseconds)).ToArray();
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> DefaultPriorities = ProviderCatalog.DefaultPriorities;
 
     private readonly string databasePath;
     private readonly MediaStoragePathResolver pathResolver;

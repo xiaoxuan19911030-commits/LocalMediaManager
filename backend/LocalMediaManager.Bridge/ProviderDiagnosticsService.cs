@@ -11,7 +11,8 @@ public sealed class ProviderDiagnosticsService(
     MdcNgProvider mdcNg,
     MetaTubeProvider metaTube,
     JavBusProvider javBus,
-    bool enableNetworkFiltering = true) : BackgroundService
+    bool enableNetworkFiltering = true,
+    ProviderManager? providerManager = null) : BackgroundService
 {
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
     private readonly ConcurrentDictionary<string, ProviderDiagnosticResult> cache = new(StringComparer.OrdinalIgnoreCase);
@@ -92,6 +93,7 @@ public sealed class ProviderDiagnosticsService(
             Message = message,
             TestedAt = DateTimeOffset.UtcNow.ToString("O"),
         };
+        providerManager?.ReportHealth(provider, ToEngineStatus(status));
         refreshedAt = DateTimeOffset.UtcNow;
         return Task.CompletedTask;
     }
@@ -112,6 +114,8 @@ public sealed class ProviderDiagnosticsService(
             TestedAt = now,
             LastSuccessfulAt = now,
         };
+        providerManager?.ReportHealth(provider, provider.Equals("MDC-NG", StringComparison.OrdinalIgnoreCase)
+            ? ProviderHealthStatus.Partial : ProviderHealthStatus.Available);
         refreshedAt = DateTimeOffset.UtcNow;
         return Task.CompletedTask;
     }
@@ -171,6 +175,7 @@ public sealed class ProviderDiagnosticsService(
             "ConfigurationError" => "检查 Provider 地址和配置",
             _ => "当前不可用；正式同步会暂时跳过该来源",
         };
+        providerManager?.ReportHealth(result.Provider, ToEngineStatus(status));
         return new(result.Provider, result.Success, scope, recommendation, result.Message,
             DateTimeOffset.UtcNow.ToString("O"), result.ElapsedMilliseconds, status, lastSuccess);
     }
@@ -193,4 +198,15 @@ public sealed class ProviderDiagnosticsService(
         scope.Contains("预览图", StringComparison.OrdinalIgnoreCase) ? "MDC-NG"
         : scope.Contains("导演", StringComparison.OrdinalIgnoreCase) ? "JavBus"
         : "MetaTube";
+
+    private static ProviderHealthStatus ToEngineStatus(string status) => status switch {
+        "Available" => ProviderHealthStatus.Available,
+        "Partial" => ProviderHealthStatus.Partial,
+        "AuthenticationRequired" => ProviderHealthStatus.AuthenticationRequired,
+        "RateLimited" => ProviderHealthStatus.RateLimited,
+        "ConfigurationError" or "PathMappingMissing" => ProviderHealthStatus.ConfigurationError,
+        "ParserBroken" => ProviderHealthStatus.ParserBroken,
+        "Unsupported" => ProviderHealthStatus.Unsupported,
+        _ => ProviderHealthStatus.Offline,
+    };
 }
