@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Data.Sqlite;
 
@@ -38,6 +39,8 @@ public sealed record MetadataHealthSummary(
 
 public static class MetadataHealthDefinition
 {
+    private static readonly ConcurrentDictionary<string, bool> NetworkRoots = new(StringComparer.OrdinalIgnoreCase);
+
     public static readonly IReadOnlyList<string> CompleteRule = [
         "标准化番号", "标题", "发行日期", "片商", "演员", "Provider 标签", "Poster 实体", "Fanart 实体", "NFO 实体",
     ];
@@ -67,8 +70,8 @@ public static class MetadataHealthDefinition
     public static string NfoValidPath(string movieAlias, bool hasNfoDocuments = false) => NfoPredicate(
         movieAlias, hasNfoDocuments, path => $"lmm_nfo_path_valid({path})=1");
 
-    public static string NfoPhysical(string movieAlias, bool hasNfoDocuments = false) => NfoPredicate(
-        movieAlias, hasNfoDocuments, path => $"lmm_nfo_exists({path})=1");
+    public static string NfoPhysical(string movieAlias, bool hasNfoDocuments = false, bool allowNetworkAccess = true) => NfoPredicate(
+        movieAlias, hasNfoDocuments, path => $"{(allowNetworkAccess ? "lmm_nfo_exists" : "lmm_nfo_exists_local")}({path})=1");
 
     public static string Actors(string movieAlias) =>
         $"EXISTS(SELECT 1 FROM MovieActors hma JOIN Actors ha ON ha.Id=hma.ActorId AND trim(COALESCE(ha.Name,''))<>'' WHERE hma.MovieId={movieAlias}.Id)";
@@ -92,8 +95,8 @@ public static class MetadataHealthDefinition
     public static string ImageDatabase(string movieAlias, string type) =>
         $"EXISTS(SELECT 1 FROM Images hi WHERE hi.MovieId={movieAlias}.Id AND {ImageTypePredicate("hi", type)})";
 
-    public static string ImagePhysical(string movieAlias, string type) =>
-        $"EXISTS(SELECT 1 FROM Images hi WHERE hi.MovieId={movieAlias}.Id AND {ImageTypePredicate("hi", type)} AND lmm_file_exists(hi.FilePath)=1)";
+    public static string ImagePhysical(string movieAlias, string type, bool allowNetworkAccess = true) =>
+        $"EXISTS(SELECT 1 FROM Images hi WHERE hi.MovieId={movieAlias}.Id AND {ImageTypePredicate("hi", type)} AND {(allowNetworkAccess ? "lmm_file_exists" : "lmm_file_exists_local")}(hi.FilePath)=1)";
 
     public static string Complete(string movieAlias, bool hasNfoDocuments = false) => string.Join(" AND ", [
         $"({Number(movieAlias)})", $"({Title(movieAlias)})", $"({ReleaseDate(movieAlias)})", $"({Studios(movieAlias)})",
@@ -104,8 +107,10 @@ public static class MetadataHealthDefinition
     public static void RegisterFileFunctions(SqliteConnection connection)
     {
         connection.CreateFunction("lmm_file_exists", (string? path) => FileExists(path) ? 1L : 0L);
+        connection.CreateFunction("lmm_file_exists_local", (string? path) => FileExistsWithoutNetworkAccess(path) ? 1L : 0L);
         connection.CreateFunction("lmm_nfo_path_valid", (string? path) => ValidNfoPath(path) ? 1L : 0L);
         connection.CreateFunction("lmm_nfo_exists", (string? path) => ValidNfoPath(path) && FileExists(path) ? 1L : 0L);
+        connection.CreateFunction("lmm_nfo_exists_local", (string? path) => ValidNfoPath(path) && FileExistsWithoutNetworkAccess(path) ? 1L : 0L);
     }
 
     public static bool FileExists(string? path)
@@ -113,6 +118,23 @@ public static class MetadataHealthDefinition
         if (string.IsNullOrWhiteSpace(path)) return false;
         try { return File.Exists(Path.GetFullPath(path)); }
         catch (Exception) { return false; }
+    }
+
+    public static bool FileExistsWithoutNetworkAccess(string? path) =>
+        !RequiresNetworkAccess(path) && FileExists(path);
+
+    public static bool RequiresNetworkAccess(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        try {
+            string fullPath = Path.GetFullPath(path);
+            if (fullPath.StartsWith("\\\\", StringComparison.Ordinal)) return true;
+            string? root = Path.GetPathRoot(fullPath);
+            return !string.IsNullOrWhiteSpace(root) && NetworkRoots.GetOrAdd(root, static value => {
+                try { return new DriveInfo(value).DriveType == DriveType.Network; }
+                catch (Exception) { return false; }
+            });
+        } catch (Exception) { return false; }
     }
 
     public static bool ValidNfoPath(string? path)
@@ -175,7 +197,7 @@ public static class MetadataHealthReader
         bool hasDirectors = await TableExistsAsync(db, "Directors", cancellationToken)
             && await TableExistsAsync(db, "MovieDirectors", cancellationToken);
         bool hasNfoDocuments = await TableExistsAsync(db, "NfoDocuments", cancellationToken);
-        var states = await ReadMovieStatesAsync(db, hasDirectors, hasNfoDocuments, cancellationToken);
+        var states = await ReadMovieStatesAsync(db, hasDirectors, hasNfoDocuments, includeStorageInventory, cancellationToken);
         Report("分析字段覆盖");
 
         var imageRecords = await ReadImageRecordsAsync(db, cancellationToken);
@@ -209,7 +231,7 @@ public static class MetadataHealthReader
             Parallel.ForEach(imageRecords.GroupBy(item => (item.MovieId, item.Type)),
                 new ParallelOptions { CancellationToken = cancellationToken, MaxDegreeOfParallelism = 16 }, group => {
                     if (statesById.TryGetValue(group.Key.MovieId, out MovieHealthState? state))
-                        state.AddImage(group.Key.Type, group.Any(item => MetadataHealthDefinition.FileExists(item.Path)));
+                        state.AddImage(group.Key.Type, group.Any(item => MetadataHealthDefinition.FileExistsWithoutNetworkAccess(item.Path)));
                 });
             missingImageRecords = new(StringComparer.OrdinalIgnoreCase);
             unregistered = ResourceDictionary().ToDictionary(item => item.Key, _ => 0L, StringComparer.OrdinalIgnoreCase);
@@ -268,6 +290,7 @@ public static class MetadataHealthReader
         SqliteConnection db,
         bool hasDirectors,
         bool hasNfoDocuments,
+        bool allowNetworkAccess,
         CancellationToken token)
     {
         await using SqliteCommand command = db.CreateCommand();
@@ -282,7 +305,7 @@ public static class MetadataHealthReader
                 CASE WHEN {MetadataHealthDefinition.UserTags("m")} THEN 1 ELSE 0 END,
                 CASE WHEN {MetadataHealthDefinition.NfoDatabase("m", hasNfoDocuments)} THEN 1 ELSE 0 END,
                 CASE WHEN {MetadataHealthDefinition.NfoValidPath("m", hasNfoDocuments)} THEN 1 ELSE 0 END,
-                CASE WHEN {MetadataHealthDefinition.NfoPhysical("m", hasNfoDocuments)} THEN 1 ELSE 0 END,
+                CASE WHEN {MetadataHealthDefinition.NfoPhysical("m", hasNfoDocuments, allowNetworkAccess)} THEN 1 ELSE 0 END,
                 CASE WHEN {MetadataHealthDefinition.Description("m")} THEN 1 ELSE 0 END,
                 CASE WHEN {MetadataHealthDefinition.Duration("m")} THEN 1 ELSE 0 END,
                 CASE WHEN {MetadataHealthDefinition.Directors("m", hasDirectors)} THEN 1 ELSE 0 END,
@@ -523,7 +546,7 @@ public sealed class MetadataHealthAnalysisService(string databasePath, MediaStor
                 RefreshInvalidationLocked();
                 if (result is not null && !invalidated) return result;
             }
-            bool deferredInventory = await UsesNetworkStorageAsync(token);
+            bool deferredInventory = await RequiresDeferredInventoryAsync(token);
             MetadataHealthSummary next = await AnalyzeAsync(null, token, !deferredInventory);
             lock (gate) {
                 StoreResultLocked(next);
@@ -600,14 +623,30 @@ public sealed class MetadataHealthAnalysisService(string databasePath, MediaStor
         return await MetadataHealthReader.ReadAsync(databasePath, storage, progress, token, includeStorageInventory);
     }
 
-    private async Task<bool> UsesNetworkStorageAsync(CancellationToken token)
+    private async Task<bool> RequiresDeferredInventoryAsync(CancellationToken token)
     {
         MediaStorageSettingsDto storage = await pathResolver.GetSettingsAsync(token);
-        try {
-            if (storage.RootPath.StartsWith("\\\\", StringComparison.Ordinal)) return true;
-            string? root = Path.GetPathRoot(Path.GetFullPath(storage.RootPath));
-            return !string.IsNullOrWhiteSpace(root) && new DriveInfo(root).DriveType == DriveType.Network;
-        } catch (Exception) { return false; }
+        if (MetadataHealthDefinition.RequiresNetworkAccess(storage.RootPath)) return true;
+
+        await using var db = new SqliteConnection(new SqliteConnectionStringBuilder {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Cache = SqliteCacheMode.Private,
+        }.ToString());
+        await db.OpenAsync(token);
+        await using SqliteCommand table = db.CreateCommand();
+        table.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='NfoDocuments'";
+        bool hasNfoDocuments = Convert.ToInt64(await table.ExecuteScalarAsync(token) ?? 0L) > 0;
+        await using SqliteCommand command = db.CreateCommand();
+        command.CommandText = hasNfoDocuments
+            ? "SELECT FilePath FROM Images WHERE trim(COALESCE(FilePath,''))<>'' UNION ALL SELECT NfoPath FROM Movies WHERE trim(COALESCE(NfoPath,''))<>'' UNION ALL SELECT FilePath FROM NfoDocuments WHERE trim(COALESCE(FilePath,''))<>''"
+            : "SELECT FilePath FROM Images WHERE trim(COALESCE(FilePath,''))<>'' UNION ALL SELECT NfoPath FROM Movies WHERE trim(COALESCE(NfoPath,''))<>''";
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token)) {
+            token.ThrowIfCancellationRequested();
+            if (MetadataHealthDefinition.RequiresNetworkAccess(reader.GetString(0))) return true;
+        }
+        return false;
     }
 
     private void StoreResultLocked(MetadataHealthSummary next)

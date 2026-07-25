@@ -80,7 +80,7 @@ public sealed record DuplicateResultsDto(long TotalGroups, long TotalMovies, lon
 
 public static class ProductReader
 {
-    public static async Task<DashboardDto> ReadDashboardAsync(string databasePath, string bridgeUrl, MetadataHealthSummary health)
+    public static async Task<DashboardDto> ReadDashboardAsync(string databasePath, string bridgeUrl, MetadataHealthSummary health, CancellationToken token = default)
     {
         await using var connection = await OpenAsync(databasePath);
         bool hasDirectors = await HasDirectorsAsync(connection);
@@ -89,7 +89,7 @@ public static class ProductReader
         long played = await ScalarAsync(connection, "SELECT COUNT(DISTINCT m.Id) FROM Movies m JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video' AND f.ExistsState<>'Missing' JOIN UserMovieState s ON s.MovieId=m.Id WHERE s.PlayCount>0");
         long missing = await ScalarAsync(connection, "SELECT COUNT(DISTINCT MovieId) FROM MediaFiles WHERE ExistsState='Missing'");
         long libraries = await ScalarAsync(connection, "SELECT COUNT(*) FROM Libraries WHERE IsEnabled=1");
-        long tasks = await ScalarAsync(connection, "SELECT COUNT(*) FROM Tasks WHERE Status NOT IN ('Completed','Failed','Cancelled')");
+        long tasks = await ScalarAsync(connection, "SELECT COUNT(*) FROM Tasks WHERE Status NOT IN ('Completed','CompletedWithErrors','CompletedWithWarnings','NoResult','Blocked','Failed','Cancelled')");
         long complete = health.CompleteMovies;
         long pending = health.IncompleteMovies;
         long unscraped = await ScalarAsync(connection, $"SELECT COUNT(*) FROM Movies m WHERE {MetadataHealthDefinition.StandardMovie("m")} AND COALESCE(m.IsScraped,0)=0");
@@ -107,7 +107,7 @@ public static class ProductReader
             await CountDuplicateMovieIdsAsync(connection),
             missingImages,
             missingNfo,
-            await CountInvalidCacheRowsAsync(connection),
+            await CountInvalidCacheRowsAsync(connection, token),
             health.Coverage.InvalidResourceRecords,
             health.Coverage.UnregisteredResources);
         DashboardMetadataCompletionDto metadataCompletion = await ReadMetadataCompletionDashboardAsync(connection);
@@ -118,8 +118,8 @@ public static class ProductReader
         var topDirectors = hasDirectors ? await ReadTopEntitiesAsync(connection, "Directors", "MovieDirectors", "DirectorId") : [];
         var topStudios = await ReadTopEntitiesAsync(connection, "Studios", "MovieStudios", "StudioId");
         var topSeries = await ReadTopEntitiesAsync(connection, "Series", "MovieSeries", "SeriesId");
-        var recentImports = await ReadCardsAsync(connection, bridgeUrl, "m.ImportedAt DESC, m.Id DESC", 8, false);
-        var recentPlays = await ReadCardsAsync(connection, bridgeUrl, "s.LastPlayedAt DESC, m.Id DESC", 8, true);
+        var recentImports = await ReadCardsAsync(connection, bridgeUrl, "m.ImportedAt DESC, m.Id DESC", 8, false, false, token);
+        var recentPlays = await ReadCardsAsync(connection, bridgeUrl, "s.LastPlayedAt DESC, m.Id DESC", 8, true, false, token);
         return new(movies, health.Scope.StandardMovies, health.Scope.LocalMovies, health.Scope.UnassignedMovies,
             favorites, played, missing, libraries, tasks, complete, pending, unscraped,
             actors, directors, tags, series, studios, maintenance, health, metadataCompletion, recentActivity, libraryStats,
@@ -268,9 +268,9 @@ public static class ProductReader
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT Id,TaskType,Status,
-                   CASE WHEN Status IN ('Completed','CompletedWithErrors') THEN 100 ELSE Progress END,
+                   CASE WHEN Status IN ('Completed','CompletedWithErrors','CompletedWithWarnings','NoResult','Blocked') THEN 100 ELSE Progress END,
                    TotalItems,
-                   CASE WHEN Status IN ('Completed','CompletedWithErrors') THEN MAX(TotalItems,CompletedItems) ELSE CompletedItems END,
+                   CASE WHEN Status IN ('Completed','CompletedWithErrors','CompletedWithWarnings') THEN MAX(TotalItems,CompletedItems) ELSE CompletedItems END,
                    ErrorMessage,CreatedAt,StartedAt,CompletedAt,PayloadJson,Stage,Provider,RetryCount,CurrentMovieId,ResultSummary
             FROM Tasks
             ORDER BY CASE WHEN Status IN ('Preparing','FetchingMetadata','DownloadingImages','WritingMetadata','WritingNfo','Running') THEN 0
@@ -912,11 +912,13 @@ public static class ProductReader
         return new(reader.IsDBNull(0) ? null : reader.GetInt64(0), reader.IsDBNull(1) ? null : reader.GetInt64(1));
     }
 
-    private static async Task<List<MediaCardDto>> ReadCardsAsync(SqliteConnection connection, string bridgeUrl, string orderBy, int limit, bool playedOnly)
+    private static async Task<List<MediaCardDto>> ReadCardsAsync(SqliteConnection connection, string bridgeUrl, string orderBy, int limit,
+        bool playedOnly, bool allowNetworkAccess = true, CancellationToken token = default)
     {
         string metadataColumns = MetadataColumnsSql(
             await HasDirectorsAsync(connection),
-            await TableExistsAsync(connection, "NfoDocuments"));
+            await TableExistsAsync(connection, "NfoDocuments"),
+            allowNetworkAccess);
         await using var command=connection.CreateCommand();
         command.CommandText=$"""
             SELECT m.Id,COALESCE(NULLIF(m.Code,''),NULLIF(m.Title,''),CAST(m.Id AS TEXT)),COALESCE(m.Title,''),COALESCE(f.FilePath,''),
@@ -925,7 +927,7 @@ public static class ProductReader
               FROM Movies m LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video' LEFT JOIN UserMovieState s ON s.MovieId=m.Id
              WHERE f.ExistsState<>'Missing' AND {(playedOnly ? "COALESCE(s.PlayCount,0)>0" : "1=1")} ORDER BY {orderBy} LIMIT $limit
             """; command.Parameters.AddWithValue("$limit",limit);
-        var items=new List<MediaCardDto>(); await using var reader=await command.ExecuteReaderAsync(); while(await reader.ReadAsync()) items.Add(Card(reader,bridgeUrl,"poster")); return items;
+        var items=new List<MediaCardDto>(); await using var reader=await command.ExecuteReaderAsync(token); while(await reader.ReadAsync(token)) items.Add(Card(reader,bridgeUrl,"poster")); return items;
     }
     private static async Task<MediaPageDto> ReadFilteredCardsAsync(string databasePath, string bridgeUrl,
         string condition, IReadOnlyList<(string Name,object Value)> parameters, string orderBy, int limit, int offset)
@@ -990,14 +992,17 @@ public static class ProductReader
             """;
         return Convert.ToInt64(await command.ExecuteScalarAsync() ?? 0L);
     }
-    private static async Task<long> CountInvalidCacheRowsAsync(SqliteConnection connection)
+    private static async Task<long> CountInvalidCacheRowsAsync(SqliteConnection connection, CancellationToken token)
     {
         if (!await TableExistsAsync(connection, "ImageCacheEntries")) return 0;
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT CachePath FROM ImageCacheEntries LIMIT 10000";
         long count = 0;
-        await using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync()) if (!reader.IsDBNull(0) && !File.Exists(reader.GetString(0))) count++;
+        await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token)) {
+            token.ThrowIfCancellationRequested();
+            if (!reader.IsDBNull(0) && !MetadataHealthDefinition.RequiresNetworkAccess(reader.GetString(0)) && !File.Exists(reader.GetString(0))) count++;
+        }
         return count;
     }
     private static async Task<IReadOnlyList<DashboardActivityDto>> ReadDashboardActivityAsync(SqliteConnection connection)
@@ -1104,22 +1109,25 @@ public static class ProductReader
     private static string MissingFanartSql() => $"NOT ({MetadataHealthDefinition.ImagePhysical("m", "Fanart")})";
     private static string MissingPreviewSql() => $"NOT ({MetadataHealthDefinition.ImagePhysical("m", "Preview")})";
     private static string MissingDirectorSql(bool hasDirectors) => $"NOT ({MetadataHealthDefinition.Directors("m", hasDirectors)})";
-    private static string MetadataColumnsSql(bool hasDirectors, bool hasNfoDocuments) => $"""
+    private static string MetadataColumnsSql(bool hasDirectors, bool hasNfoDocuments, bool allowNetworkAccess = true) => $"""
         CASE WHEN COALESCE(m.IsScraped,0)=1 THEN 1 ELSE 0 END AS MetadataScraped,
         CASE WHEN {MetadataHealthDefinition.Number("m")} THEN 1 ELSE 0 END AS MetadataCode,
         CASE WHEN {MetadataHealthDefinition.Title("m")} THEN 1 ELSE 0 END AS MetadataTitle,
         CASE WHEN {MetadataHealthDefinition.ReleaseDate("m")} THEN 1 ELSE 0 END AS MetadataReleaseDate,
         CASE WHEN {MetadataHealthDefinition.Studios("m")} THEN 1 ELSE 0 END AS MetadataStudio,
-        CASE WHEN {MissingCoverSql()} THEN 0 ELSE 1 END AS MetadataCover,
-        CASE WHEN {MissingFanartSql()} THEN 0 ELSE 1 END AS MetadataFanart,
-        CASE WHEN {MissingPreviewSql()} THEN 0 ELSE 1 END AS MetadataPreview,
-        CASE WHEN {MetadataHealthDefinition.NfoPhysical("m", hasNfoDocuments)} THEN 1 ELSE 0 END AS MetadataNfo,
+        CASE WHEN {MissingImageSql("Poster", allowNetworkAccess)} THEN 0 ELSE 1 END AS MetadataCover,
+        CASE WHEN {MissingImageSql("Fanart", allowNetworkAccess)} THEN 0 ELSE 1 END AS MetadataFanart,
+        CASE WHEN {MissingImageSql("Preview", allowNetworkAccess)} THEN 0 ELSE 1 END AS MetadataPreview,
+        CASE WHEN {MetadataHealthDefinition.NfoPhysical("m", hasNfoDocuments, allowNetworkAccess)} THEN 1 ELSE 0 END AS MetadataNfo,
         CASE WHEN {MetadataHealthDefinition.Actors("m")} THEN 1 ELSE 0 END AS MetadataActors,
         CASE WHEN {MissingDirectorSql(hasDirectors)} THEN 0 ELSE 1 END AS MetadataDirectors,
         CASE WHEN {MetadataHealthDefinition.Series("m")} THEN 1 ELSE 0 END AS MetadataSeries,
         CASE WHEN {MetadataHealthDefinition.ProviderTags("m")} THEN 1 ELSE 0 END AS MetadataTags,
         CASE WHEN {MetadataHealthDefinition.Description("m")} THEN 1 ELSE 0 END AS MetadataDescription
         """;
+
+    private static string MissingImageSql(string type, bool allowNetworkAccess) =>
+        $"NOT ({MetadataHealthDefinition.ImagePhysical("m", type, allowNetworkAccess)})";
     private static MetadataStatusDto MetadataStatusFromReader(SqliteDataReader reader, int start)
     {
         var checks = new List<MetadataCheckDto> {

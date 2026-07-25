@@ -292,7 +292,7 @@ app.MapGet("/api/dashboard", async (bool? refresh, MetadataHealthAnalysisService
     if (!File.Exists(databasePath)) return Results.Problem($"找不到数据库：{databasePath}", statusCode: 503);
     if (refresh == true) healthService.Invalidate();
     MetadataHealthSummary health = await healthService.GetAsync(token);
-    return Results.Ok(await ProductReader.ReadDashboardAsync(databasePath, bridgeUrl, health));
+    return Results.Ok(await ProductReader.ReadDashboardAsync(databasePath, bridgeUrl, health, token));
 });
 
 app.MapGet("/api/search", async (string? q, int? limit) => File.Exists(databasePath)

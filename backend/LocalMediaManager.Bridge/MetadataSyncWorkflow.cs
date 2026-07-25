@@ -20,7 +20,9 @@ public sealed record SyncMovie(long Id, string Code, string? Title, string? Desc
     int DurationSeconds, string? PrimaryFile, string? NfoPath);
 public sealed record SavedImage(string Type, string Path, string SourceUrl, long Size, bool Created,
     int Width = 0, int Height = 0, string? ContentType = null, string? FileHash = null,
-    string Ownership = "Provider", bool IsDerived = false);
+    string Ownership = "Provider", bool IsDerived = false, string? SourceProvider = null);
+public sealed record ImageDownloadFailure(string Type, Exception Error);
+public sealed record ImageDownloadBatchResult(IReadOnlyList<SavedImage> Images, IReadOnlyList<ImageDownloadFailure> Failures);
 public sealed record PreparedFiles(IReadOnlyList<SavedImage> Images, string? NfoPath, IReadOnlyList<string> CreatedPaths);
 public sealed record ImageDownloadOptions(string? Cookie = null, string? Referer = null, string? RestrictedHost = null);
 
@@ -51,8 +53,24 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
         IReadOnlyList<MetadataImage> images, int timeoutSeconds, bool overwriteExisting, CancellationToken cancellationToken,
         ImageDownloadOptions? options = null)
     {
+        ImageDownloadBatchResult result = await DownloadCoreAsync(pathResolver, movie, images, timeoutSeconds,
+            overwriteExisting, cancellationToken, options, continueOnError: false);
+        return result.Images;
+    }
+
+    public Task<ImageDownloadBatchResult> DownloadBatchAsync(MediaStoragePathResolver pathResolver, MediaStorageMovie movie,
+        IReadOnlyList<MetadataImage> images, int timeoutSeconds, bool overwriteExisting, CancellationToken cancellationToken,
+        ImageDownloadOptions? options = null) =>
+        DownloadCoreAsync(pathResolver, movie, images, timeoutSeconds, overwriteExisting, cancellationToken, options,
+            continueOnError: true);
+
+    private async Task<ImageDownloadBatchResult> DownloadCoreAsync(MediaStoragePathResolver pathResolver, MediaStorageMovie movie,
+        IReadOnlyList<MetadataImage> images, int timeoutSeconds, bool overwriteExisting, CancellationToken cancellationToken,
+        ImageDownloadOptions? options, bool continueOnError)
+    {
         var saved = new List<SavedImage>();
-        if (images.Count == 0) return saved;
+        var failures = new List<ImageDownloadFailure>();
+        if (images.Count == 0) return new(saved, failures);
         using HttpClient client = clients.CreateClient("MetadataImages");
         client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.Clear();
@@ -64,61 +82,65 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
             foreach (MetadataImage image in images) {
                 cancellationToken.ThrowIfCancellationRequested();
                 string normalizedType = MediaStoragePathResolver.NormalizeResourceType(image.Type);
-                if (normalizedType == "Preview") previewIndex++;
-                int? index = normalizedType == "Preview" ? previewIndex : null;
-                MediaStorageResourcePath targetPath = await pathResolver.ResolveForMovieAsync(movie, normalizedType, ".jpg", index, null, cancellationToken);
-                string targetDirectory = Path.GetDirectoryName(targetPath.FullPath)!;
-                string baseName = Path.GetFileNameWithoutExtension(targetPath.FullPath);
-                string? existing = FindExisting(targetDirectory, baseName);
-                if (existing is not null && !overwriteExisting) {
-                    ImageValidationResult current = await ImageFileValidator.ValidateAsync(existing, null, cancellationToken);
-                    if (current.Valid) {
-                        saved.Add(new(normalizedType, existing, image.Url, current.FileSize, false, current.Width,
-                            current.Height, current.ContentType, current.Sha256, "Legacy"));
-                        continue;
+                try {
+                    if (normalizedType == "Preview") previewIndex++;
+                    int? index = normalizedType == "Preview" ? previewIndex : null;
+                    MediaStorageResourcePath targetPath = await pathResolver.ResolveForMovieAsync(movie, normalizedType, ".jpg", index, null, cancellationToken);
+                    string targetDirectory = Path.GetDirectoryName(targetPath.FullPath)!;
+                    string baseName = Path.GetFileNameWithoutExtension(targetPath.FullPath);
+                    string? existing = FindExisting(targetDirectory, baseName);
+                    if (existing is not null && !overwriteExisting) {
+                        ImageValidationResult current = await ImageFileValidator.ValidateAsync(existing, null, cancellationToken);
+                        if (current.Valid) {
+                            saved.Add(new(normalizedType, existing, image.Url, current.FileSize, false, current.Width,
+                                current.Height, current.ContentType, current.Sha256, "Legacy", false, image.Provider));
+                            continue;
+                        }
+                        throw new InvalidDataException($"已有图片损坏但受到保护，未覆盖：{existing}");
                     }
-                    throw new InvalidDataException($"已有图片损坏但受到保护，未覆盖：{existing}");
-                }
 
-                string temporary = Path.Combine(temporaryRoot, Guid.NewGuid().ToString("N") + ".part");
-                using var request = new HttpRequestMessage(HttpMethod.Get, image.Url);
-                ApplyOptions(request, options);
-                using HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-                response.EnsureSuccessStatusCode();
-                string? declaredType = response.Content.Headers.ContentType?.MediaType;
-                if (response.Content.Headers.ContentLength is > MaximumDownloadBytes)
-                    throw new InvalidDataException("远程图片超过 64 MB 安全限制。");
-                await using (Stream source = await response.Content.ReadAsStreamAsync(cancellationToken))
-                await using (FileStream destination = new(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                    await CopyWithLimitAsync(source, destination, cancellationToken);
-                ImageValidationResult validation = await ImageFileValidator.ValidateAsync(temporary, declaredType, cancellationToken);
-                if (!validation.Valid) throw new InvalidDataException(validation.Error ?? "图片校验失败。");
-                string target = (await pathResolver.ResolveForMovieAsync(movie, normalizedType, Extension(validation.ContentType), index, null, cancellationToken)).FullPath;
-                pathResolver.EnsureDirectoryForWrite(target);
-                if (existing is not null && !string.Equals(existing, target, StringComparison.OrdinalIgnoreCase) && File.Exists(existing))
-                    File.Delete(existing);
-                if (File.Exists(target)) {
-                    if (overwriteExisting) {
-                        File.Move(temporary, target, true);
-                        saved.Add(new(normalizedType, target, image.Url, validation.FileSize, true, validation.Width,
-                            validation.Height, validation.ContentType, validation.Sha256));
+                    string temporary = Path.Combine(temporaryRoot, Guid.NewGuid().ToString("N") + ".part");
+                    using var request = new HttpRequestMessage(HttpMethod.Get, image.Url);
+                    ApplyOptions(request, options);
+                    using HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                    response.EnsureSuccessStatusCode();
+                    string? declaredType = response.Content.Headers.ContentType?.MediaType;
+                    if (response.Content.Headers.ContentLength is > MaximumDownloadBytes)
+                        throw new InvalidDataException("远程图片超过 64 MB 安全限制。");
+                    await using (Stream source = await response.Content.ReadAsStreamAsync(cancellationToken))
+                    await using (FileStream destination = new(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                        await CopyWithLimitAsync(source, destination, cancellationToken);
+                    ImageValidationResult validation = await ImageFileValidator.ValidateAsync(temporary, declaredType, cancellationToken);
+                    if (!validation.Valid) throw new InvalidDataException(validation.Error ?? "图片校验失败。");
+                    string target = (await pathResolver.ResolveForMovieAsync(movie, normalizedType, Extension(validation.ContentType), index, null, cancellationToken)).FullPath;
+                    pathResolver.EnsureDirectoryForWrite(target);
+                    if (existing is not null && !string.Equals(existing, target, StringComparison.OrdinalIgnoreCase) && File.Exists(existing))
+                        File.Delete(existing);
+                    if (File.Exists(target)) {
+                        if (overwriteExisting) {
+                            File.Move(temporary, target, true);
+                            saved.Add(new(normalizedType, target, image.Url, validation.FileSize, true, validation.Width,
+                                validation.Height, validation.ContentType, validation.Sha256, "Provider", false, image.Provider));
+                            continue;
+                        }
+                        File.Delete(temporary);
+                        ImageValidationResult concurrent = await ImageFileValidator.ValidateAsync(target, null, cancellationToken);
+                        if (!concurrent.Valid) throw new InvalidDataException($"目标图片冲突且无效，未覆盖：{target}");
+                        saved.Add(new(normalizedType, target, image.Url, concurrent.FileSize, false, concurrent.Width,
+                            concurrent.Height, concurrent.ContentType, concurrent.Sha256, "Legacy", false, image.Provider));
                         continue;
                     }
-                    File.Delete(temporary);
-                    ImageValidationResult concurrent = await ImageFileValidator.ValidateAsync(target, null, cancellationToken);
-                    if (!concurrent.Valid) throw new InvalidDataException($"目标图片冲突且无效，未覆盖：{target}");
-                    saved.Add(new(normalizedType, target, image.Url, concurrent.FileSize, false, concurrent.Width,
-                        concurrent.Height, concurrent.ContentType, concurrent.Sha256, "Legacy"));
-                    continue;
+                    File.Move(temporary, target, false);
+                    saved.Add(new(normalizedType, target, image.Url, validation.FileSize, true, validation.Width,
+                        validation.Height, validation.ContentType, validation.Sha256, "Provider", false, image.Provider));
+                } catch (Exception error) when (continueOnError && error is not OperationCanceledException) {
+                    failures.Add(new(normalizedType, error));
                 }
-                File.Move(temporary, target, false);
-                saved.Add(new(normalizedType, target, image.Url, validation.FileSize, true, validation.Width,
-                    validation.Height, validation.ContentType, validation.Sha256));
             }
         } finally {
             try { if (Directory.Exists(temporaryRoot)) Directory.Delete(temporaryRoot, true); } catch { }
         }
-        return saved;
+        return new(saved, failures);
     }
 
     private static void ApplyOptions(HttpRequestMessage request, ImageDownloadOptions? options) {
@@ -223,18 +245,23 @@ public sealed class MetadataWriteService(string databasePath)
             long id = await EnsureNamedAsync(connection, transaction, "Series", metadata.Series);
             await ExecuteAsync(connection, transaction, "INSERT OR IGNORE INTO MovieSeries(MovieId,SeriesId,SortOrder) VALUES($movie,$id,0)", ("$movie", movie.Id), ("$id", id));
         }
-        foreach (SavedImage image in files.Images.Where(value => value.Created))
+        foreach (SavedImage image in files.Images)
             await ExecuteAsync(connection, transaction, """
-                INSERT OR IGNORE INTO Images(MovieId,ActorId,ImageType,FilePath,SourceUrl,Width,Height,FileSize,FileHash,
+                INSERT INTO Images(MovieId,ActorId,ImageType,FilePath,SourceUrl,Width,Height,FileSize,FileHash,
                     IsPrimary,SourceProvider,DownloadedAt,CreatedAt,UpdatedAt,Ownership,IsLocked,IsDerived,ContentType,ValidationStatus,ValidatedAt)
-                VALUES($movie,NULL,$type,$path,$url,$width,$height,$size,$hash,$primary,$provider,$at,$at,$at,
-                    $ownership,0,$derived,$content,'Valid',$at)
+                SELECT $movie,NULL,$type,$path,$url,$width,$height,$size,$hash,$primary,$provider,$at,$at,$at,
+                    $ownership,0,$derived,$content,'Valid',$at
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM Images
+                     WHERE MovieId=$movie AND ActorId IS NULL AND ImageType=$type
+                       AND lower(FilePath)=lower($path))
                 """, ("$movie", movie.Id), ("$type", image.Type), ("$path", image.Path), ("$url", image.SourceUrl),
                 ("$width", image.Width), ("$height", image.Height), ("$size", image.Size), ("$hash", image.FileHash),
-                ("$primary", image.Type == "Poster" ? 1 : 0), ("$provider", metadata.Provider),
+                ("$primary", image.Type == "Poster" ? 1 : 0), ("$provider", image.SourceProvider ?? metadata.Provider),
                 ("$ownership", image.Ownership), ("$derived", image.IsDerived ? 1 : 0),
                 ("$content", image.ContentType), ("$at", Now()));
         string applied = JsonSerializer.Serialize(new { metadata.Provider, metadata.ExternalId, metadata.Code, metadata.Title, metadata.OriginalTitle, metadata.Rating,
+            metadata.Confidence, metadata.FieldSources, metadata.RawResponseHash,
             ImagesDownloaded = files.Images.Count(value => value.Created), ImagesPreserved = files.Images.Count(value => !value.Created),
             Genres = metadata.Genres.Count, Actors = metadata.Actors.Count, Director = string.IsNullOrWhiteSpace(metadata.Director) ? 0 : 1,
             AddedFields = addedFields, NonDestructive = !overwrite });
@@ -386,7 +413,7 @@ public sealed class MetadataSyncExecutor(
         await using var connection = await OpenAsync();
         string? status = await ScalarTextAsync(connection, "SELECT Status FROM Tasks WHERE Id=$id AND TaskType='Sync'", ("$id", taskId));
         if (status is null) throw new KeyNotFoundException("同步任务不存在。");
-        if (status is not ("Failed" or "Cancelled")) throw new InvalidOperationException("只有失败或已取消的同步任务可以重试。");
+        if (status is not ("Failed" or "Cancelled" or "NoResult" or "Blocked")) throw new InvalidOperationException("只有失败、无结果、被阻断或已取消的同步任务可以重试。");
         await ExecuteAsync(connection, "UPDATE Tasks SET Status='Retrying',Stage='Retrying',RetryCount=RetryCount+1,ErrorMessage=NULL,CompletedAt=NULL,CancellationRequested=0,UpdatedAt=$at WHERE Id=$id", ("$at", Now()), ("$id", taskId));
         await logs.WriteAsync(taskId, "Info", "同步任务已进入重试队列。");
         return new(taskId, "Retrying", "同步任务已进入重试队列。");
@@ -399,9 +426,9 @@ public sealed class MetadataSyncExecutor(
              WHERE f.MovieId=$id AND l.LibraryType='Local'
             """, ("$id", movieId)) > 0)
             throw new InvalidOperationException("普通媒体库影片不执行番号刮削或 Provider 元数据同步。");
-        if (await ScalarLongAsync(connection, "SELECT COUNT(*) FROM MediaFiles WHERE MovieId=$id AND IsPrimary=1 AND MediaType='Video' AND COALESCE(ExistsState,'')<>'Missing'", ("$id", movieId)) == 0)
-            throw new InvalidOperationException("当前影片文件不存在，不能对 Missing 记录重新同步。请切换到文件存在的影片记录后再同步。");
-        long existing = await ScalarLongAsync(connection, "SELECT COALESCE(MAX(Id),0) FROM Tasks WHERE TaskType='Sync' AND CurrentMovieId=$movie AND Status NOT IN ('Completed','CompletedWithErrors','Failed','Cancelled')", ("$movie", movieId));
+        if (await ScalarLongAsync(connection, "SELECT COUNT(*) FROM MediaFiles WHERE MovieId=$id AND IsPrimary=1 AND MediaType='Video'", ("$id", movieId)) == 0)
+            throw new InvalidOperationException("当前影片没有主媒体关联，不能创建同步任务。");
+        long existing = await ScalarLongAsync(connection, "SELECT COALESCE(MAX(Id),0) FROM Tasks WHERE TaskType='Sync' AND CurrentMovieId=$movie AND Status NOT IN ('Completed','CompletedWithErrors','CompletedWithWarnings','NoResult','Blocked','Failed','Cancelled')", ("$movie", movieId));
         if (existing > 0) return new(existing, "Pending", "该影片已有同步任务。");
         long id = await InsertIdAsync(connection, """
             INSERT INTO Tasks(TaskType,Status,Stage,Provider,Progress,TotalItems,CompletedItems,PayloadJson,CreatedAt,UpdatedAt,CurrentMovieId)
@@ -484,9 +511,11 @@ public sealed class MetadataSyncExecutor(
             HashSet<string>? targets = await ReadTargetFieldsAsync(taskId, cancellationToken);
             MovieNumberExtractionResult? extraction = movieNumberExtractor?.Extract(movie.Code);
             string? normalizedCode = extraction?.NormalizedNumber ?? NormalizeSyncCode(movie.Code);
-            if (extraction is not null && extraction.Confidence < movieNumberExtractor!.MinimumAutoSyncConfidence)
-                throw new InvalidOperationException($"番号识别置信度 {extraction.Confidence:0.00} 低于自动同步阈值 {movieNumberExtractor.MinimumAutoSyncConfidence:0.00}。");
-            if (string.IsNullOrWhiteSpace(normalizedCode)) throw new InvalidOperationException("影片没有可用于同步的番号。");
+            if (!string.IsNullOrWhiteSpace(extraction?.NormalizedNumber)
+                && extraction.Confidence < movieNumberExtractor!.MinimumAutoSyncConfidence)
+                throw new MetadataProviderBlockedException($"番号识别置信度 {extraction.Confidence:0.00} 低于自动同步阈值 {movieNumberExtractor.MinimumAutoSyncConfidence:0.00}。");
+            if (string.IsNullOrWhiteSpace(normalizedCode))
+                throw new MetadataProviderBlockedException("影片没有可用于同步的番号。");
             movie = movie with { Code = normalizedCode };
             if (extraction is not null)
                 await logs.WriteAsync(taskId, "Info", $"[Movie Number] Original={extraction.OriginalFileName}; Matched={extraction.MatchedRule}; Detected={extraction.DetectedNumber}; Normalized={extraction.NormalizedNumber}; Confidence={extraction.Confidence:0.00}; PartIndex={extraction.PartIndex?.ToString() ?? "None"}", cancellationToken);
@@ -496,13 +525,17 @@ public sealed class MetadataSyncExecutor(
             settings = settings with {
                 PreferredSource = await ReadSourceAsync(taskId, cancellationToken),
                 CurrentMoviePath = movie.PrimaryFile,
+                RequestedFields = targets,
                 ProviderLog = (source, message, token) => logs.WriteAsync(taskId, "Info", $"[{source}] {message}", token),
                 ProviderDebugLog = (source, message, token) => logs.WriteAsync(taskId, "Debug", $"[{source}] {message}", token),
+                ProviderFailure = diagnostics.ReportRuntimeFailureAsync,
+                ProviderSuccess = diagnostics.ReportRuntimeSuccessAsync,
             };
+            settings = await diagnostics.FilterMovieProvidersAsync(settings, cancellationToken);
             await StageAsync(taskId, "FetchingMetadata", 22, $"{settings.PreferredSource ?? "自动数据源"} 搜索：{movie.Code}", cancellationToken);
             IReadOnlyList<MetadataSearchResult> results = await provider.SearchAsync(movie.Code, settings, cancellationToken);
             await logs.WriteAsync(taskId, "Info", $"Provider Search Results: {results.Count} candidate(s).", cancellationToken);
-            if (results.Count == 0) throw new InvalidOperationException($"{settings.PreferredSource ?? "元数据源"} 未找到 {movie.Code} 的结果。");
+            if (results.Count == 0) throw new MetadataNoResultException($"{settings.PreferredSource ?? "元数据源"} 未找到 {movie.Code} 的结果。");
             ProviderMetadata? metadata = null;
             var attemptErrors = new List<string>();
             foreach (MetadataSearchResult selected in results) {
@@ -515,7 +548,8 @@ public sealed class MetadataSyncExecutor(
                         await logs.WriteAsync(taskId, "Warning", $"{selected.Provider} 返回结果缺少可用元数据，继续尝试下一个候选。", cancellationToken);
                         continue;
                     }
-                    if (!Comparable(candidate.Code).Equals(Comparable(movie.Code), StringComparison.OrdinalIgnoreCase)) {
+                    if (!(movieNumberExtractor?.AreEquivalent(movie.Code, candidate.Code)
+                        ?? Comparable(candidate.Code).Equals(Comparable(movie.Code), StringComparison.OrdinalIgnoreCase))) {
                         attemptErrors.Add($"{selected.Provider}: expected {movie.Code}, got {candidate.Code}");
                         await logs.WriteAsync(taskId, "Warning", $"{selected.Provider} 结果番号不匹配：期望 {movie.Code}，实际 {candidate.Code}，继续尝试下一个候选。", cancellationToken);
                         continue;
@@ -528,7 +562,7 @@ public sealed class MetadataSyncExecutor(
                 }
             }
             if (metadata is null)
-                throw new InvalidOperationException($"{settings.PreferredSource ?? "元数据源"} 未找到 {movie.Code} 的可用详情。Attempts: {string.Join(" | ", attemptErrors)}");
+                throw new MetadataNoResultException($"{settings.PreferredSource ?? "元数据源"} 未找到 {movie.Code} 的可用详情。Attempts: {string.Join(" | ", attemptErrors)}");
             if (targets is not null) {
                 metadata = RestrictToTargets(metadata, movie, targets);
                 await logs.WriteAsync(taskId, "Info", $"[Repair Target] {string.Join(",", targets.Order())}", cancellationToken);
@@ -542,9 +576,16 @@ public sealed class MetadataSyncExecutor(
                 await StageAsync(taskId, "DownloadingImages", 48, $"下载图片（{metadata.Images.Count} 项）", cancellationToken);
                 ImageDownloadOptions? imageOptions = JavBusImageOptions(settings.JavBus);
                 try {
-                    savedImages = await images.DownloadAsync(pathResolver, new(movie.Id, movie.Code, movie.Title),
+                    ImageDownloadBatchResult download = await images.DownloadBatchAsync(pathResolver, new(movie.Id, movie.Code, movie.Title),
                         await provider.GetImagesAsync(metadata, cancellationToken), settings.TimeoutSeconds(metadata.Provider), overwrite, cancellationToken, imageOptions);
+                    savedImages = download.Images;
                     createdPaths.AddRange(savedImages.Where(value => value.Created).Select(value => value.Path));
+                    if (download.Failures.Count > 0) {
+                        string imageFailureSummary = string.Join(", ", download.Failures.GroupBy(value => value.Type, StringComparer.OrdinalIgnoreCase)
+                            .Select(group => $"{group.Key} {group.Count()} 项"));
+                        partialFailures.Add($"部分图片写入失败: {imageFailureSummary}");
+                        await logs.WriteAsync(taskId, "Warning", $"[Image Write] Partial failure; continuing with valid images: {imageFailureSummary}", cancellationToken);
+                    }
                 } catch (Exception error) when (error is not OperationCanceledException) {
                     partialFailures.Add($"图片写入失败: {error.Message}");
                     await logs.WriteAsync(taskId, "Warning", $"[Image Write] Failed; metadata merge will continue: {error.Message}", cancellationToken);
@@ -581,7 +622,13 @@ public sealed class MetadataSyncExecutor(
             await CompleteAsync(taskId, summary, partialFailures, cancellationToken);
         } catch (OperationCanceledException) {
             await SafeDeleteAsync(createdPaths);
-            await MarkCancelledAsync(taskId);
+            await MarkInterruptedAsync(taskId);
+        } catch (MetadataProviderBlockedException error) {
+            await SafeDeleteAsync(createdPaths);
+            await FinishWithoutWriteAsync(taskId, "Blocked", "同步被 Provider 可用性检查阻断", error.Message);
+        } catch (MetadataNoResultException error) {
+            await SafeDeleteAsync(createdPaths);
+            await FinishWithoutWriteAsync(taskId, "NoResult", "Provider 没有返回匹配结果", error.Message);
         } catch (Exception error) {
             await SafeDeleteAsync(createdPaths);
             await FailAsync(taskId, error);
@@ -611,12 +658,11 @@ public sealed class MetadataSyncExecutor(
     private async Task<SyncMovie> ReadMovieAsync(long taskId,CancellationToken token) {
         await using var c=await OpenAsync(); await using var x=c.CreateCommand(); x.CommandText="""
             SELECT m.Id,COALESCE(m.Code,''),m.Title,m.Description,m.ReleaseDate,m.DurationSeconds,m.NfoPath,
-                   (SELECT FilePath FROM MediaFiles WHERE MovieId=m.Id AND IsPrimary=1 AND MediaType='Video' AND COALESCE(ExistsState,'')<>'Missing' ORDER BY Id LIMIT 1)
+                   (SELECT FilePath FROM MediaFiles WHERE MovieId=m.Id AND IsPrimary=1 AND MediaType='Video' ORDER BY Id LIMIT 1)
             FROM Tasks t JOIN Movies m ON m.Id=COALESCE(t.CurrentMovieId,json_extract(t.PayloadJson,'$.MovieId')) WHERE t.Id=$task
             """; x.Parameters.AddWithValue("$task",taskId); await using var r=await x.ExecuteReaderAsync(token);
         if(!await r.ReadAsync(token))throw new KeyNotFoundException("同步任务关联的影片不存在。");
-        if (r.IsDBNull(7)) throw new InvalidOperationException("当前影片文件不存在，不能对 Missing 记录重新同步。请切换到文件存在的影片记录后再同步。");
-        return new(r.GetInt64(0),r.GetString(1),r.IsDBNull(2)?null:r.GetString(2),r.IsDBNull(3)?null:r.GetString(3),r.IsDBNull(4)?null:r.GetString(4),r.GetInt32(5),r.GetString(7),r.IsDBNull(6)?null:r.GetString(6));
+        return new(r.GetInt64(0),r.GetString(1),r.IsDBNull(2)?null:r.GetString(2),r.IsDBNull(3)?null:r.GetString(3),r.IsDBNull(4)?null:r.GetString(4),r.GetInt32(5),r.IsDBNull(7)?null:r.GetString(7),r.IsDBNull(6)?null:r.GetString(6));
     }
     private async Task<bool> ReadOverwriteAsync(long taskId,CancellationToken token) {
         await using var c=await OpenAsync(); string? payload=await ScalarTextAsync(c,"SELECT PayloadJson FROM Tasks WHERE Id=$id",("$id",taskId));
@@ -654,10 +700,10 @@ public sealed class MetadataSyncExecutor(
         catch(JsonException) { return null; }
     }
     private async Task<MetadataProviderContext> ReadProviderContextAsync(CancellationToken token) =>
-        await diagnostics.FilterMovieProvidersAsync(new(await settingsService.ReadMetaTubeAsync(), await settingsService.ReadJavBusAsync(), null,
+        new(await settingsService.ReadMetaTubeAsync(), await settingsService.ReadJavBusAsync(), null,
             await settingsService.ReadDmmAsync(), await settingsService.ReadJavDbAsync(), await settingsService.ReadNetworkAsync()) {
             MdcNg = await settingsService.ReadMdcNgAsync(),
-        }, token);
+        };
     private static ImageDownloadOptions? JavBusImageOptions(JavBusSettingsDto settings) {
         if (string.IsNullOrWhiteSpace(settings.Cookie)
             || !Uri.TryCreate(settings.BaseUrl, UriKind.Absolute, out Uri? uri)) return null;
@@ -673,9 +719,18 @@ public sealed class MetadataSyncExecutor(
     private static string? NormalizeSource(string? value) => value?.Trim().ToLowerInvariant() switch { "javbus" => "JavBus", "metatube" => "MetaTube", "mdc-ng" or "mdcng" => "MDC-NG", _ => null };
     private async Task StageAsync(long id,string stage,double progress,string message,CancellationToken token){await EnsureRunnableAsync(id,token);await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Status=$stage,Stage=$stage,Progress=$progress,UpdatedAt=$at WHERE Id=$id",("$stage",stage),("$progress",progress),("$at",Now()),("$id",id));await logs.WriteAsync(id,"Info",message,token);}
     private async Task EnsureRunnableAsync(long id,CancellationToken token){while(true){token.ThrowIfCancellationRequested();await using var c=await OpenAsync();string? s=await ScalarTextAsync(c,"SELECT Status FROM Tasks WHERE Id=$id",("$id",id));if(s=="Cancelled")throw new OperationCanceledException(token);if(s!="Paused")return;await Task.Delay(250,token);}}
-    private async Task CompleteAsync(long id,string summary,IReadOnlyList<string> partialFailures,CancellationToken token){string status=partialFailures.Count==0?"Completed":"CompletedWithErrors";string resultSummary=partialFailures.Count==0?"元数据同步完成":"元数据已获取并写入数据库，但部分文件写入失败";string? error=partialFailures.Count==0?null:string.Join(" | ",partialFailures);await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Status=$status,Stage=$status,Progress=100,CompletedItems=1,ResultJson=$result,ResultSummary=$summary,ErrorMessage=$error,CompletedAt=$at,UpdatedAt=$at WHERE Id=$id",("$status",status),("$result",summary),("$summary",resultSummary),("$error",error),("$at",Now()),("$id",id));await logs.WriteAsync(id,partialFailures.Count==0?"Info":"Warning",partialFailures.Count==0?"元数据、图片与 NFO 工作流已完成。":$"[Final] CompletedWithErrors: Database Merge succeeded; {error}",token);}
+    private async Task CompleteAsync(long id,string summary,IReadOnlyList<string> partialFailures,CancellationToken token){string status=partialFailures.Count==0?"Completed":"CompletedWithWarnings";string resultSummary=partialFailures.Count==0?"元数据同步完成":"元数据已获取并写入数据库，但部分文件步骤已跳过或失败";string? error=partialFailures.Count==0?null:string.Join(" | ",partialFailures);await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Status=$status,Stage=$status,Progress=100,CompletedItems=1,ResultJson=$result,ResultSummary=$summary,ErrorMessage=$error,CompletedAt=$at,UpdatedAt=$at WHERE Id=$id",("$status",status),("$result",summary),("$summary",resultSummary),("$error",error),("$at",Now()),("$id",id));await logs.WriteAsync(id,partialFailures.Count==0?"Info":"Warning",partialFailures.Count==0?"元数据、图片与 NFO 工作流已完成。":$"[Final] CompletedWithWarnings: Database Merge succeeded; {error}",token);}
+    private async Task FinishWithoutWriteAsync(long id,string status,string summary,string reason){await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Status=$status,Stage=$status,Progress=100,CompletedItems=0,ResultSummary=$summary,ErrorMessage=$reason,CompletedAt=$at,UpdatedAt=$at WHERE Id=$id",("$status",status),("$summary",summary),("$reason",reason),("$at",Now()),("$id",id));await logs.WriteAsync(id,status=="Blocked"?"Warning":"Info",$"[Final] {status}: {reason}");}
     private async Task FailAsync(long id,Exception error){try{await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Status='Failed',Stage='Failed',ErrorMessage=$error,ResultSummary='同步失败，已有有效数据未被覆盖',CompletedAt=$at,UpdatedAt=$at WHERE Id=$id",("$error",error.Message),("$at",Now()),("$id",id));await logs.WriteAsync(id,"Error",error.Message);}catch(Exception e){Console.Error.WriteLine($"Could not persist sync failure {id}: {e}");}}
-    private async Task MarkCancelledAsync(long id){try{await using var c=await OpenAsync();await ExecuteAsync(c,"UPDATE Tasks SET Status='Cancelled',Stage='Cancelled',ResultSummary='用户取消',CompletedAt=$at,UpdatedAt=$at WHERE Id=$id",("$at",Now()),("$id",id));}catch(Exception e){Console.Error.WriteLine(e);}}
+    private async Task MarkInterruptedAsync(long id){try{await using var c=await OpenAsync();string active=string.Join(',',ActiveStates.Select((_,index)=>"$state"+index));await using var x=c.CreateCommand();x.CommandText=$"""
+        UPDATE Tasks
+           SET Status=CASE WHEN Status='Cancelled' AND CancellationRequested=1 THEN 'Cancelled' ELSE 'Retrying' END,
+               Stage=CASE WHEN Status='Cancelled' AND CancellationRequested=1 THEN 'Cancelled' ELSE 'Retrying' END,
+               ResultSummary=CASE WHEN Status='Cancelled' AND CancellationRequested=1 THEN '用户取消' ELSE '同步中断，等待继续' END,
+               CompletedAt=CASE WHEN Status='Cancelled' AND CancellationRequested=1 THEN $at ELSE NULL END,
+               UpdatedAt=$at
+         WHERE Id=$id AND (Status='Cancelled' OR Status IN ({active}))
+        """;x.Parameters.AddWithValue("$at",Now());x.Parameters.AddWithValue("$id",id);for(int index=0;index<ActiveStates.Length;index++)x.Parameters.AddWithValue("$state"+index,ActiveStates[index]);await x.ExecuteNonQueryAsync();}catch(Exception e){Console.Error.WriteLine(e);}}
     private async Task UpdateTaskAsync(long id,string status,string stage,double? progress,string? error,bool cancel){await using var c=await OpenAsync();if(await ScalarLongAsync(c,"SELECT COUNT(*) FROM Tasks WHERE Id=$id AND TaskType='Sync'",("$id",id))==0)throw new KeyNotFoundException("同步任务不存在。");await ExecuteAsync(c,"UPDATE Tasks SET Status=$status,Stage=$stage,Progress=COALESCE($progress,Progress),ErrorMessage=$error,CancellationRequested=$cancel,UpdatedAt=$at WHERE Id=$id",("$status",status),("$stage",stage),("$progress",progress),("$error",error),("$cancel",cancel?1:0),("$at",Now()),("$id",id));}
     private async Task<SqliteConnection> OpenAsync(){var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=databasePath,Mode=SqliteOpenMode.ReadWrite}.ToString());await c.OpenAsync();await ExecuteAsync(c,"PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");return c;}
     private static async Task SafeDeleteAsync(IEnumerable<string> paths){foreach(string p in paths.Reverse())try{if(File.Exists(p))File.Delete(p);}catch{await Task.Yield();}}
@@ -694,7 +749,7 @@ public sealed class TaskCommandService(string databasePath, LibraryWorkflowServi
     ImageGenerationTaskService imageGeneration, SafeDeleteWorkflowService safeDelete,
     ActorProfileCompleteTaskService actorProfileComplete)
 {
-    private static readonly HashSet<string> TerminalStatuses = new(StringComparer.OrdinalIgnoreCase) { "Completed", "CompletedWithErrors", "Failed", "Cancelled" };
+    private static readonly HashSet<string> TerminalStatuses = new(StringComparer.OrdinalIgnoreCase) { "Completed", "CompletedWithErrors", "CompletedWithWarnings", "NoResult", "Blocked", "Failed", "Cancelled" };
     private static bool IsImageGeneration(string type) => type is "Poster" or "Preview" or "Screenshot" or "GIF";
     private static bool IsDelete(string type) => type is "DeleteMetadata" or "DeleteMedia";
     public async Task<TaskMutationResult> PauseAsync(long id)=>(await TypeAsync(id)) switch { "Sync"=>await sync.PauseAsync(id), "ImageCacheRebuild"=>await imageCache.PauseAsync(id), "Organizer"=>await organizer.PauseAsync(id), "ActorProfileComplete"=>await actorProfileComplete.PauseAsync(id), var type when IsImageGeneration(type)=>await imageGeneration.PauseAsync(id), var type when IsDelete(type)=>await safeDelete.PauseAsync(id), _=>await libraries.PauseTaskAsync(id) };
@@ -717,8 +772,8 @@ public sealed class TaskCommandService(string databasePath, LibraryWorkflowServi
     {
         string normalized = string.IsNullOrWhiteSpace(status) ? "terminal" : status.Trim();
         string[] statuses = normalized.ToLowerInvariant() switch {
-            "terminal" => ["Completed", "CompletedWithErrors", "Failed", "Cancelled"],
-            "all-tasks" => ["Completed", "CompletedWithErrors", "Failed", "Cancelled"],
+            "terminal" => ["Completed", "CompletedWithErrors", "CompletedWithWarnings", "NoResult", "Blocked", "Failed", "Cancelled"],
+            "all-tasks" => ["Completed", "CompletedWithErrors", "CompletedWithWarnings", "NoResult", "Blocked", "Failed", "Cancelled"],
             "completed" => ["Completed"],
             "failed" => ["Failed"],
             "cancelled" or "canceled" => ["Cancelled"],

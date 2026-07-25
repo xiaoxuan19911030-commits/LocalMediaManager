@@ -103,6 +103,31 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task BatchDownloadKeepsValidImagesWhenOneCandidateFails()
+    {
+        byte[] png = CreatePng(48, 72, SKColors.CornflowerBlue);
+        var service = new ImageDownloadService(new FakeHttpClientFactory(request =>
+            request.RequestUri!.AbsolutePath.EndsWith("blocked", StringComparison.Ordinal)
+                ? new(HttpStatusCode.Forbidden)
+                : new(HttpStatusCode.OK) {
+                    Content = new ByteArrayContent(png) { Headers = { ContentType = new("image/png") } }
+                }));
+        await using (SqliteConnection connection = await Open())
+            await InsertMovie(connection, 10, "TEST-010", "Test Title");
+
+        ImageDownloadBatchResult result = await service.DownloadBatchAsync(Resolver(), new(10, "TEST-010", "Test Title"),
+            [new("Poster", "https://img.example/blocked"), new("Poster", "https://fallback.example/poster")],
+            10, false, CancellationToken.None);
+
+        Assert.Single(result.Images);
+        Assert.True(result.Images[0].Created);
+        Assert.Equal("https://fallback.example/poster", result.Images[0].SourceUrl);
+        Assert.Single(result.Failures);
+        Assert.Equal("Poster", result.Failures[0].Type);
+        Assert.IsType<HttpRequestException>(result.Failures[0].Error);
+    }
+
+    [Fact]
     public async Task GeneratedCardReplacementWritesToWallCropsDirectory()
     {
         string source = Path.Combine(root, "manual-crop.png");

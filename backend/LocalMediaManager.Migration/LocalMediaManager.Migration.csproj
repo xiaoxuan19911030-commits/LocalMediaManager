@@ -11,5 +11,6 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="migrations\*.sql" CopyToOutputDirectory="PreserveNewest" />
+    <InternalsVisibleTo Include="LocalMediaManager.Bridge.Tests" />
   </ItemGroup>
 </Project>

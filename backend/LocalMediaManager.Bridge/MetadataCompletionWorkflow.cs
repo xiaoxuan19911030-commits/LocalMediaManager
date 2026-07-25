@@ -171,7 +171,8 @@ public interface IMetadataCompletionProviderClient
 public sealed class MetadataCompletionProviderClient(
     MdcNgProvider mdcNg,
     MetaTubeProvider metaTube,
-    JavBusProvider javBus) : IMetadataCompletionProviderClient
+    JavBusProvider javBus,
+    IMovieNumberExtractor movieNumberExtractor) : IMetadataCompletionProviderClient
 {
     public async Task<ProviderMetadata?> GetMetadataAsync(
         string provider,
@@ -194,7 +195,7 @@ public sealed class MetadataCompletionProviderClient(
         foreach (MetadataSearchResult result in results.Take(3)) {
             ProviderMetadata? metadata = await source.GetMetadataAsync(result, scoped, cancellationToken);
             if (metadata is null) continue;
-            if (JavBusCode.Normalize(metadata.Code).Equals(JavBusCode.Normalize(code), StringComparison.OrdinalIgnoreCase))
+            if (movieNumberExtractor.AreEquivalent(code, metadata.Code))
                 return metadata;
         }
         return null;

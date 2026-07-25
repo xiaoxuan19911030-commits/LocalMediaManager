@@ -48,7 +48,7 @@ export interface ProviderNetworkSettings {
 }
 
 export interface ProviderConnectionResult { success: boolean; provider: string; message: string; elapsedMilliseconds: number }
-export interface ProviderDiagnosticResult { provider: string; reachable: boolean; scope: string; recommendation: string; message: string; testedAt: string; elapsedMilliseconds: number }
+export interface ProviderDiagnosticResult { provider: string; reachable: boolean; scope: string; recommendation: string; message: string; testedAt: string; elapsedMilliseconds: number; status: 'Available' | 'Partial' | 'Unavailable' | 'AuthenticationRequired' | 'RateLimited' | 'PathMappingMissing' | 'ConfigurationError'; lastSuccessfulAt?: string }
 export interface NfoSettings { exportPolicy: 'SkipExisting' | 'SeparateFile'; outputDirectory: string; fillEmptyOnly: boolean; includeImages: boolean }
 export interface PlaybackSettings { playerPath: string; useSystemDefault: boolean }
 export interface RatingRetentionSettings { enabled: boolean }

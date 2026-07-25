@@ -25,8 +25,13 @@ public sealed class MovieNumberExtractorTests
         ["SONE454.mp4", "SONE-454", "StandardCompact", null],
         ["SONE-454-CD1.mp4", "SONE-454", "CdPart", 1],
         ["FC2PPV1234567.mp4", "FC2-PPV-1234567", "Fc2Ppv", null],
+        ["FC2-1202075.mp4", "FC2-PPV-1202075", "Fc2Ppv", null],
         ["1pondo-123456_789.mp4", "1PONDO-123456_789", "OnePondo", null],
         ["259LUXU1234.mp4", "259LUXU-1234", "Luxu", null],
+        ["390JAC-234.mp4", "390JAC-234", "NumericStudioSeparated", null],
+        ["390jac234.mp4", "390JAC-234", "NumericStudioCompact", null],
+        ["SEG-1274153949.mp4", "SEG-1274153949", "StandardSeparated", null],
+        ["2.me@390JAC-234.mp4", "390JAC-234", "NumericStudioSeparated", null],
         ["CARIB-123456-789.mp4", "CARIB-123456-789", "Caribbean", null],
         ["HEYDOUGA-1234-567.mp4", "HEYDOUGA-1234-567", "Heydouga", null],
         ["WAAA-448+五星+娇小可爱清纯+持续输出+高颜值+小坂七香.mp4", "WAAA-448", "StandardSeparated", null],
@@ -85,6 +90,21 @@ public sealed class MovieNumberExtractorTests
         } finally {
             if (File.Exists(temporaryRules)) File.Delete(temporaryRules);
         }
+    }
+
+    [Theory]
+    [InlineData("259LUXU-752", "LUXU-752")]
+    [InlineData("224DTSL-055", "DTSL-055")]
+    [InlineData("FC2-PPV-4054910", "FC2-4054910")]
+    public void ComparesProviderAliasesFromRuleLibrary(string expected, string actual)
+    {
+        Assert.True(Create().AreEquivalent(expected, actual));
+    }
+
+    [Fact]
+    public void ProviderAliasComparisonDoesNotIgnoreDifferentSequenceNumbers()
+    {
+        Assert.False(Create().AreEquivalent("259LUXU-752", "259LUXU-1752"));
     }
 
     private static MovieNumberExtractor Create() => new(FindRuleFile());

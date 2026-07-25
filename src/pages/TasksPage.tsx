@@ -67,7 +67,7 @@ type CleanupStatus = 'completed' | 'failed' | 'cancelled' | 'terminal' | 'all-ta
 interface TaskTypeOption { value: string; label: string; types: string[] }
 
 const activeStates = ['Pending', 'Preparing', 'FetchingMetadata', 'DownloadingImages', 'WritingMetadata', 'WritingNfo', 'Retrying', 'Running', 'Paused']
-const terminalStates = ['Completed', 'CompletedWithErrors', 'Failed', 'Cancelled']
+const terminalStates = ['Completed', 'CompletedWithErrors', 'CompletedWithWarnings', 'NoResult', 'Blocked', 'Failed', 'Cancelled']
 
 const preferredTypeOptions: TaskTypeOption[] = [
   { value: 'all', label: '全部类型', types: [] },
@@ -116,7 +116,7 @@ export default function TasksPage() {
   const visibleTerminal = useMemo(() => visible.filter(item => terminalStates.includes(item.status)), [visible])
   const active = tasks?.filter(item => activeStates.includes(item.status)).length ?? 0
   const completed = tasks?.filter(item => item.status === 'Completed').length ?? 0
-  const warning = tasks?.filter(item => item.status === 'CompletedWithErrors').length ?? 0
+  const warning = tasks?.filter(item => ['CompletedWithErrors', 'CompletedWithWarnings', 'NoResult', 'Blocked'].includes(item.status)).length ?? 0
   const failed = tasks?.filter(item => item.status === 'Failed').length ?? 0
 
   useEffect(() => {
@@ -249,7 +249,7 @@ export default function TasksPage() {
 
 function TaskCard({ task, busy, onMutate, onCancel, onDelete, onLogs }: { task: TaskItem; busy?: number; onMutate: (task: TaskItem, action: 'pause' | 'resume' | 'retry') => void; onCancel: () => void; onDelete: () => void; onLogs: () => void }) {
   const complete = task.status === 'Completed'
-  const completedWithErrors = task.status === 'CompletedWithErrors'
+  const completedWithErrors = ['CompletedWithErrors', 'CompletedWithWarnings', 'NoResult', 'Blocked'].includes(task.status)
   const failedTask = task.status === 'Failed'
   const terminalCompletion = complete || completedWithErrors
   const progress = terminalCompletion ? 100 : Math.max(0, Math.min(100, task.progress))
@@ -258,7 +258,7 @@ function TaskCard({ task, busy, onMutate, onCancel, onDelete, onLogs }: { task: 
   const canPause = ['Scan', 'Sync', 'Screenshot', 'GIF', 'Organizer', 'DeleteMetadata', 'DeleteMedia'].includes(task.type) && activeStates.includes(task.status) && task.status !== 'Paused'
   const canResume = ['Scan', 'Sync', 'Screenshot', 'GIF', 'Organizer', 'DeleteMetadata', 'DeleteMedia'].includes(task.type) && task.status === 'Paused'
   const canCancel = activeStates.includes(task.status)
-  const canRetry = ['Scan', 'Sync', 'Screenshot', 'GIF', 'Organizer', 'DeleteMetadata', 'DeleteMedia'].includes(task.type) && ['Failed', 'Cancelled'].includes(task.status)
+  const canRetry = ['Scan', 'Sync', 'Screenshot', 'GIF', 'Organizer', 'DeleteMetadata', 'DeleteMedia'].includes(task.type) && ['Failed', 'Cancelled', 'NoResult', 'Blocked'].includes(task.status)
   const canDelete = terminalStates.includes(task.status)
   return <Card sx={{ p: 2 }}><Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '160px 115px minmax(160px,1fr) minmax(170px,1.1fr) 155px auto' }, gap: 2, alignItems: 'center' }}>
     <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}><Icon color={complete ? 'success' : completedWithErrors ? 'warning' : failedTask ? 'error' : 'primary'}/><Typography sx={{ fontWeight: 750 }}>{labelForType(task.type)}</Typography></Box>
@@ -274,14 +274,14 @@ function TaskCard({ task, busy, onMutate, onCancel, onDelete, onLogs }: { task: 
       {canDelete && <Tooltip title="删除记录"><span><IconButton size="small" aria-label="删除任务记录" color="error" disabled={busy === task.id} onClick={onDelete}><DeleteOutlineRoundedIcon/></IconButton></span></Tooltip>}
       <Tooltip title="查看日志"><IconButton size="small" aria-label="查看任务日志" onClick={onLogs}><ListAltRoundedIcon/></IconButton></Tooltip>
     </Stack>
-  </Box>{task.resultSummary && !task.errorMessage && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>{task.resultSummary}</Typography>}{task.errorMessage && <Alert severity="error" sx={{ mt: 1.5 }}>{task.errorMessage}</Alert>}</Card>
+  </Box>{task.resultSummary && !task.errorMessage && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>{task.resultSummary}</Typography>}{task.errorMessage && <Alert severity={failedTask ? 'error' : 'warning'} sx={{ mt: 1.5 }}>{task.errorMessage}</Alert>}</Card>
 }
 
 function matchesStatus(task: TaskItem, filter: StatusFilter) {
   if (filter === 'all') return true
   if (filter === 'active') return activeStates.includes(task.status)
   if (filter === 'completed') return task.status === 'Completed'
-  if (filter === 'warning') return task.status === 'CompletedWithErrors'
+  if (filter === 'warning') return ['CompletedWithErrors', 'CompletedWithWarnings', 'NoResult', 'Blocked'].includes(task.status)
   if (filter === 'failed') return task.status === 'Failed'
   return task.status === 'Cancelled'
 }

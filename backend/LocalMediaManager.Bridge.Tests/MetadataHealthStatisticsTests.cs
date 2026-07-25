@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using LocalMediaManager.Bridge;
 using Microsoft.Data.Sqlite;
@@ -154,6 +155,75 @@ public sealed class MetadataHealthStatisticsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RemoteRegisteredResourceDefersInventoryWithoutBlockingInitialSnapshot()
+    {
+        Scenario scenario = await CreateScenarioAsync();
+        await AddCompleteMetadataAsync(scenario);
+        await InsertImageAsync(scenario.Database, "Preview", $@"\\localhost\lmm-health-{Guid.NewGuid():N}\preview.jpg");
+        var service = CreateService(scenario);
+        Stopwatch timer = Stopwatch.StartNew();
+
+        MetadataHealthSummary quick = await service.GetAsync().WaitAsync(TimeSpan.FromSeconds(2));
+        timer.Stop();
+
+        Assert.True(timer.Elapsed < TimeSpan.FromSeconds(2));
+        Assert.False(quick.Coverage.ResourceInventoryComplete);
+        Assert.Equal(1, quick.CompleteMovies);
+        service.Cancel();
+        Assert.False((await WaitForAnalysisAsync(service)).Running);
+    }
+
+    [Fact]
+    public async Task DashboardSkipsRemoteCacheAndRecentCardFileProbes()
+    {
+        Scenario scenario = await CreateScenarioAsync();
+        await AddCompleteMetadataAsync(scenario);
+        string remote = $@"\\localhost\lmm-health-{Guid.NewGuid():N}\missing.jpg";
+        await InsertImageAsync(scenario.Database, "Preview", remote);
+        await ExecuteAsync(scenario.Database, """
+            INSERT INTO ImageCacheEntries(MovieId,SourceImagePath,CachePath,CacheKind,CreatedAt)
+            VALUES(1,$path,$path,'CardThumbnail',$at)
+            """, ("$path", remote), ("$at", Now));
+        var healthService = CreateService(scenario);
+        MetadataHealthSummary health = await healthService.GetAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        Stopwatch timer = Stopwatch.StartNew();
+
+        DashboardDto dashboard = await ProductReader.ReadDashboardAsync(scenario.Database, "http://localhost", health, timeout.Token);
+        timer.Stop();
+
+        Assert.True(timer.Elapsed < TimeSpan.FromSeconds(2));
+        Assert.Equal(0, dashboard.Maintenance.CacheProblems);
+        healthService.Cancel();
+        Assert.False((await WaitForAnalysisAsync(healthService)).Running);
+    }
+
+    [Fact]
+    public async Task SettingsLoadRemainsResponsiveAfterDeferredInventoryStarts()
+    {
+        Scenario scenario = await CreateScenarioAsync();
+        await AddCompleteMetadataAsync(scenario);
+        await InsertImageAsync(scenario.Database, "Preview", $@"\\localhost\lmm-health-{Guid.NewGuid():N}\preview.jpg");
+        var health = CreateService(scenario);
+        MetadataHealthSummary quick = await health.GetAsync();
+        var coordinator = new SettingsSaveCoordinator(
+            scenario.Database,
+            scenario.Root,
+            Path.Combine(scenario.Root, "missing-legacy.db"),
+            new MetadataProviderSettingsService(scenario.Database),
+            new NfoService(scenario.Database, new MediaStoragePathResolver(scenario.Database, scenario.Root)),
+            new PlaybackSettingsService(scenario.Database, Path.Combine(scenario.Root, "missing-legacy.db")),
+            new RatingHistoryService(scenario.Database));
+
+        UnifiedSettingsDto settings = await coordinator.ReadAsync().WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.False(quick.Coverage.ResourceInventoryComplete);
+        Assert.NotNull(settings.MediaStorage);
+        health.Cancel();
+        Assert.False((await WaitForAnalysisAsync(health)).Running);
+    }
+
+    [Fact]
     public async Task BrokenActorRelationDoesNotCountAsCoverage()
     {
         Scenario scenario = await CreateScenarioAsync();
@@ -278,7 +348,7 @@ public sealed class MetadataHealthStatisticsTests : IAsyncLifetime
         await connection.OpenAsync();
         foreach (string file in new[] {
             "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0005_MetadataSyncWorkflow.sql",
-            "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0012_MediaStorageSettings.sql", "0015_LibraryTypesAndLocalMedia.sql",
+            "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0009_PlaybackSettings.sql", "0012_MediaStorageSettings.sql", "0015_LibraryTypesAndLocalMedia.sql",
         }) {
             await using SqliteCommand migration = connection.CreateCommand();
             migration.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));

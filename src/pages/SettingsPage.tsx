@@ -456,6 +456,8 @@ function PluginsSection({ snapshot, mdcNg, setMdcNg, metaTube, setMetaTube, prov
         message: result.message,
         testedAt: new Date().toISOString(),
         elapsedMilliseconds: result.elapsedMilliseconds,
+        status: result.success ? (result.provider === 'MDC-NG' ? 'Partial' : 'Available') : 'Unavailable',
+        lastSuccessfulAt: result.success ? new Date().toISOString() : undefined,
       }])
       setNotice(result.message)
     }).catch((reason: Error) => setDiagnosticsError(reason.message))
@@ -714,16 +716,16 @@ function ProviderDiagnosticSection({ title, description, providers, diagnostics,
 }
 
 function ProviderDiagnosticCard({ provider, result, busy }: { provider: string; result?: ProviderDiagnosticResult; busy: boolean }) {
-  const reachable = result?.reachable
-  const status = !result && busy ? '检测中' : reachable ? '可达' : result ? '不可达' : '待检测'
+  const status = !result && busy ? '检测中' : result ? providerReadinessLabel(result.status) : '待检测'
   const recommendation = result?.recommendation || '启动后自动检测；同步前会按检测结果过滤来源。'
   const message = result?.message || '尚未返回检测结果。'
+  const tone = result?.status === 'Available' ? 'success' : result?.status === 'Partial' ? 'warning' : result ? 'error' : 'neutral'
   return <Card variant="outlined" sx={{ borderRadius: 2.5 }}>
     <CardContent>
       <Stack spacing={1.1}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
           <Typography sx={{ fontWeight: 900 }}>{provider}</Typography>
-          <StatusBadge tone={reachable ? 'success' : result ? 'error' : 'neutral'} label={status}/>
+          <StatusBadge tone={tone} label={status}/>
         </Stack>
         <Typography variant="body2" color="text.secondary">影响范围 <Box component="span" sx={{ fontFamily: 'monospace' }}>{result?.scope || '—'}</Box></Typography>
         <Typography variant="body2" color="text.secondary">建议动作　{recommendation}</Typography>
@@ -1066,6 +1068,10 @@ function MdcPathMappingsSection({ value, onChange }: { value: MdcNgSettings; onC
       </Alert>}
     </Stack>
   </SurfaceSection>
+}
+
+function providerReadinessLabel(value: ProviderDiagnosticResult['status']) {
+  return ({ Available: '可用', Partial: '部分可用', Unavailable: '不可用', AuthenticationRequired: '需要认证', RateLimited: '已限速', PathMappingMissing: '缺少路径映射', ConfigurationError: '配置错误' } as const)[value] ?? value
 }
 
 function AboutSection({ overview, health, system, setSystem, updateResult, checkUpdates }: {

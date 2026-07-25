@@ -32,7 +32,7 @@ public static class ProviderNetworkDiagnostics
         if (skipDirectTcp) {
             lines.Add(proxyUri is null
                 ? "Direct TCP skipped because manual proxy is configured"
-                : $"Direct TCP skipped because system proxy is configured ({proxyUri})");
+                : "Direct TCP skipped because system proxy is configured");
         } else {
             IPAddress[] addresses;
             try {

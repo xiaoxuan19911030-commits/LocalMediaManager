@@ -25,7 +25,7 @@ export function MaintenanceStatusBadge({ severity, label }: { severity?: string;
 }
 
 export function TaskStatusBadge({ status }: { status: string }) {
-  const tone: StatusTone = status === 'Completed' ? 'success' : status === 'CompletedWithErrors' ? 'warning' : status === 'Failed' ? 'error' : status === 'Cancelled' ? 'neutral' : 'info'
+  const tone: StatusTone = status === 'Completed' ? 'success' : ['CompletedWithErrors', 'CompletedWithWarnings', 'NoResult', 'Blocked'].includes(status) ? 'warning' : status === 'Failed' ? 'error' : status === 'Cancelled' ? 'neutral' : 'info'
   const labels: Record<string, string> = {
     Pending: '等待中',
     Preparing: '准备中',
@@ -38,6 +38,9 @@ export function TaskStatusBadge({ status }: { status: string }) {
     Paused: '已暂停',
     Completed: '已完成',
     CompletedWithErrors: '部分错误',
+    CompletedWithWarnings: '部分完成',
+    NoResult: '无结果',
+    Blocked: '被阻断',
     Failed: '失败',
     Cancelled: '已取消',
     Info: 'Info',

@@ -45,11 +45,11 @@ internal static class DatabaseUpgradeRunner
             string name = Path.GetFileNameWithoutExtension(file);
             if (!int.TryParse(name.Split('_', 2)[0], out int version)) continue;
             string sql = await File.ReadAllTextAsync(file);
-            string checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sql))).ToLowerInvariant();
+            string checksum = MigrationChecksum.Canonical(sql);
             if (existing.TryGetValue(version, out string? recordedChecksum)) {
                 // Versions 1-13 predate checksum enforcement and their source snapshots have historical drift.
                 // Never rewrite those records; enforce immutability for 0014 and every subsequent migration.
-                if (version >= 14 && !recordedChecksum.Equals(checksum, StringComparison.OrdinalIgnoreCase))
+                if (version >= 14 && !MigrationChecksum.Matches(recordedChecksum, sql))
                     throw new InvalidDataException($"Migration checksum mismatch: version={version}, name={name}.");
                 continue;
             }
@@ -98,6 +98,23 @@ internal static class DatabaseUpgradeRunner
         while (await reader.ReadAsync()) count++;
         return count;
     }
+}
+
+internal static class MigrationChecksum
+{
+    internal static string Canonical(string sql) => Hash(NormalizeLineEndings(sql));
+
+    internal static bool Matches(string recordedChecksum, string sql)
+    {
+        string normalized = NormalizeLineEndings(sql);
+        return recordedChecksum.Equals(Hash(normalized), StringComparison.OrdinalIgnoreCase)
+            || recordedChecksum.Equals(Hash(normalized.Replace("\n", "\r\n")), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeLineEndings(string sql) => sql.Replace("\r\n", "\n").Replace('\r', '\n');
+
+    private static string Hash(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 }
 
 internal sealed record DatabaseUpgradeReport(

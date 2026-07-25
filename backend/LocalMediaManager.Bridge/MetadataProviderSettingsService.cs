@@ -47,8 +47,11 @@ public sealed record MetadataProviderContext(MetaTubeSettingsDto MetaTube, JavBu
 {
     public MdcNgSettingsDto MdcNg { get; init; } = SettingsDefaults.MdcNg;
     public string? CurrentMoviePath { get; init; }
+    public IReadOnlySet<string>? RequestedFields { get; init; }
     public Func<string, string, CancellationToken, Task>? ProviderLog { get; init; }
     public Func<string, string, CancellationToken, Task>? ProviderDebugLog { get; init; }
+    public Func<string, Exception, CancellationToken, Task>? ProviderFailure { get; init; }
+    public Func<string, CancellationToken, Task>? ProviderSuccess { get; init; }
     public ProviderNetworkSettingsDto NetworkSettings => Network ?? ProviderNetworkSettingsDto.Default;
 
     public int TimeoutSeconds(string provider) =>

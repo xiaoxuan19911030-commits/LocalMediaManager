@@ -17,6 +17,7 @@ public interface IMovieNumberExtractor
 {
     double MinimumAutoSyncConfidence { get; }
     MovieNumberExtractionResult Extract(string fileName);
+    bool AreEquivalent(string expected, string actual);
 }
 
 public sealed class MovieNumberExtractor : IMovieNumberExtractor
@@ -26,6 +27,7 @@ public sealed class MovieNumberExtractor : IMovieNumberExtractor
     private readonly IReadOnlyList<CompiledTextRule> noise;
     private readonly IReadOnlyList<CompiledTextRule> suffixes;
     private readonly IReadOnlyList<CompiledTextRule> parts;
+    private readonly IReadOnlyList<CompiledTextRule> comparisonAliases;
 
     public MovieNumberExtractor(string ruleFilePath)
     {
@@ -40,9 +42,22 @@ public sealed class MovieNumberExtractor : IMovieNumberExtractor
         noise = rules.NoiseRules.Select(rule => new CompiledTextRule(rule.Id, Compile(rule.Pattern), rule.Replacement)).ToArray();
         suffixes = rules.SuffixRules.Select(rule => new CompiledTextRule(rule.Id, Compile(rule.Pattern), string.Empty)).ToArray();
         parts = rules.PartRules.Select(rule => new CompiledTextRule(rule.Id, Compile(rule.Pattern), string.Empty)).ToArray();
+        comparisonAliases = (rules.ComparisonAliasRules ?? []).Select(rule =>
+            new CompiledTextRule(rule.Id, Compile(rule.Pattern), rule.Replacement)).ToArray();
     }
 
     public double MinimumAutoSyncConfidence => rules.MinimumAutoSyncConfidence;
+
+    public bool AreEquivalent(string expected, string actual)
+    {
+        string left = JavBusCode.Normalize(expected);
+        string right = JavBusCode.Normalize(actual);
+        foreach (CompiledTextRule rule in comparisonAliases) {
+            left = rule.Regex.Replace(left, rule.Replacement);
+            right = rule.Regex.Replace(right, rule.Replacement);
+        }
+        return left.Equals(right, StringComparison.OrdinalIgnoreCase);
+    }
 
     public MovieNumberExtractionResult Extract(string fileName)
     {
@@ -105,7 +120,8 @@ public sealed class MovieNumberExtractor : IMovieNumberExtractor
         if (value.MinimumAutoSyncConfidence is < 0 or > 1) throw new InvalidOperationException("番号识别自动同步阈值无效。");
         if (value.CandidateRules.Count == 0) throw new InvalidOperationException("番号识别规则库没有候选规则。");
         IEnumerable<string> ids = value.NoiseRules.Select(x => x.Id).Concat(value.CandidateRules.Select(x => x.Id))
-            .Concat(value.SuffixRules.Select(x => x.Id)).Concat(value.PartRules.Select(x => x.Id));
+            .Concat(value.SuffixRules.Select(x => x.Id)).Concat(value.PartRules.Select(x => x.Id))
+            .Concat((value.ComparisonAliasRules ?? []).Select(x => x.Id));
         string? duplicate = ids.GroupBy(x => x, StringComparer.OrdinalIgnoreCase).FirstOrDefault(x => x.Count() > 1)?.Key;
         if (duplicate is not null) throw new InvalidOperationException($"番号识别规则 ID 重复：{duplicate}");
     }
@@ -120,7 +136,8 @@ public sealed record MovieNumberRuleSet(
     IReadOnlyList<MovieNumberTextRule> NoiseRules,
     IReadOnlyList<MovieNumberCandidateRule> CandidateRules,
     IReadOnlyList<MovieNumberTextRule> SuffixRules,
-    IReadOnlyList<MovieNumberTextRule> PartRules);
+    IReadOnlyList<MovieNumberTextRule> PartRules,
+    IReadOnlyList<MovieNumberTextRule>? ComparisonAliasRules = null);
 public sealed record MovieNumberTextRule(string Id, string Pattern, string Replacement = "");
 public sealed record MovieNumberCandidateRule(string Id, int Priority, string Pattern, string Replacement, double Confidence);
 
