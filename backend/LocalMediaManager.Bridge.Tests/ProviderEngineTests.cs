@@ -71,10 +71,13 @@ public sealed class ProviderEngineTests
         var manager = new ProviderManager([provider], cacheTtl: TimeSpan.FromMinutes(1), clock: () => now);
 
         await manager.ExecuteAsync("MetaTube", "ABW-001", Context(), false, CancellationToken.None);
+        Assert.Equal(1, manager.CacheEntryCount);
+        Assert.Equal(1, manager.HistoryEntryCount);
         now = now.AddMinutes(2);
         await manager.ExecuteAsync("MetaTube", "ABW-001", Context(), false, CancellationToken.None);
         Assert.Equal(2, provider.SearchCalls);
         Assert.Equal(1, manager.ClearCache());
+        Assert.Equal(0, manager.CacheEntryCount);
     }
 
     [Fact]

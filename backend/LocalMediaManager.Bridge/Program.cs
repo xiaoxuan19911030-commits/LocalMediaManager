@@ -616,6 +616,12 @@ app.MapPost("/api/organizer/duplicates/preview-delete", async (DuplicateDeletePl
 app.MapPost("/api/organizer/duplicates/execute-delete", async (DuplicateDeleteExecuteRequest command, DuplicateOrganizerWorkflowService organizer, CancellationToken token) =>
     Results.Ok(await organizer.ExecuteAsync(command, token)));
 
+if (Environment.GetEnvironmentVariable("LMM_VALIDATION_DIAGNOSTICS") == "1")
+{
+    app.MapPost("/api/validation/runtime-snapshot", (bool? fullGc, bool? clearSqlitePools, ProviderManager providers, JavBusProvider javBus) =>
+        Results.Ok(BridgeRuntimeDiagnostics.Capture(fullGc == true, clearSqlitePools == true, providers, javBus)));
+}
+
 app.MapGet("/api/actors/{actorId:long}/image", async (long actorId, ImageAssetService images, CancellationToken token) => {
     ImageAssetContent? content = await images.ResolveActorAsync(actorId, token);
     return content is null ? Results.NotFound() : Results.File(content.Path, content.ContentType, enableRangeProcessing: true);

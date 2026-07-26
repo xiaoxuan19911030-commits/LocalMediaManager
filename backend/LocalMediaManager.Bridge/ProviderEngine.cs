@@ -335,6 +335,9 @@ public sealed class ProviderManager
 
     public IReadOnlyList<ProviderPlaygroundResult> Recent(int limit = 20) => history.Reverse().Take(Math.Clamp(limit, 1, 100)).ToArray();
 
+    internal int CacheEntryCount => cache.Count;
+    internal int HistoryEntryCount => history.Count;
+
     public int ClearCache()
     {
         int count = cache.Count;

@@ -976,6 +976,7 @@ public sealed class JavBusProvider(IHttpClientFactory clients) : IMetadataProvid
     private readonly ConcurrentDictionary<string, CachedPage> pageCache = new(StringComparer.OrdinalIgnoreCase);
     public const string DefaultBaseUrl = "https://www.javbus.com/";
     public string Name => "JavBus";
+    internal int PageCacheEntryCount => pageCache.Count;
 
     public async Task<IReadOnlyList<MetadataSearchResult>> SearchAsync(string code, MetadataProviderContext context, CancellationToken cancellationToken)
     {
