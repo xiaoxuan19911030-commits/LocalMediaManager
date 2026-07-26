@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.Data.Sqlite;
 
 namespace LocalMediaManager.Bridge;
@@ -24,7 +25,10 @@ public sealed record BridgeRuntimeMemorySnapshot(
     int Generation2Collections,
     int ProviderCacheEntries,
     int ProviderHistoryEntries,
-    int JavBusPageCacheEntries);
+    int JavBusPageCacheEntries,
+    IReadOnlyList<BridgeVirtualMemorySummary> VirtualMemorySummaries);
+
+public sealed record BridgeVirtualMemorySummary(string Type, long CommittedBytes, int RegionCount);
 
 public static class BridgeRuntimeDiagnostics
 {
@@ -68,6 +72,52 @@ public static class BridgeRuntimeDiagnostics
             GC.CollectionCount(2),
             providers.CacheEntryCount,
             providers.HistoryEntryCount,
-            javBus.PageCacheEntryCount);
+            javBus.PageCacheEntryCount,
+            ReadVirtualMemorySummaries());
     }
+
+    private static IReadOnlyList<BridgeVirtualMemorySummary> ReadVirtualMemorySummaries()
+    {
+        if (!OperatingSystem.IsWindows()) return [];
+        const uint memCommit = 0x1000;
+        var summaries = new Dictionary<uint, (long Bytes, int Regions)>();
+        nint address = 0;
+        nuint informationSize = (nuint)Marshal.SizeOf<MemoryBasicInformation>();
+        while (true) {
+            nuint result = VirtualQuery((IntPtr)address, out MemoryBasicInformation information, informationSize);
+            if (result == 0 || information.RegionSize == 0) break;
+            if (information.State == memCommit) {
+                summaries.TryGetValue(information.Type, out (long Bytes, int Regions) current);
+                long bytes = information.RegionSize > long.MaxValue ? long.MaxValue : (long)information.RegionSize;
+                summaries[information.Type] = (checked(current.Bytes + bytes), current.Regions + 1);
+            }
+            nint next = address + (nint)information.RegionSize;
+            if (next <= address) break;
+            address = next;
+        }
+        return summaries.OrderBy(pair => pair.Key).Select(pair => new BridgeVirtualMemorySummary(MemoryTypeName(pair.Key), pair.Value.Bytes, pair.Value.Regions)).ToArray();
+    }
+
+    private static string MemoryTypeName(uint type) => type switch {
+        0x00020000 => "Private",
+        0x00040000 => "Mapped",
+        0x01000000 => "Image",
+        _ => "Other",
+    };
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MemoryBasicInformation
+    {
+        public IntPtr BaseAddress;
+        public IntPtr AllocationBase;
+        public uint AllocationProtect;
+        public ushort PartitionId;
+        public nuint RegionSize;
+        public uint State;
+        public uint Protect;
+        public uint Type;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern nuint VirtualQuery(IntPtr address, out MemoryBasicInformation buffer, nuint length);
 }
