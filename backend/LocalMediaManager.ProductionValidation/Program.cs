@@ -17,6 +17,7 @@ return command switch {
     "run" => await RunAsync(args),
     "audit" => await AuditAsync(args),
     "reverify" => await ReverifyAsync(args),
+    "coverage" => await CoverageAsync(args),
     _ => Usage(),
 };
 
@@ -27,7 +28,107 @@ int Usage()
     Console.Error.WriteLine("  run <validation-root> <repo-root> <20|50|100> [port] [run-label]");
     Console.Error.WriteLine("  audit <database> <manifest>");
     Console.Error.WriteLine("  reverify <baseline-db> <run-root> <manifest>");
+    Console.Error.WriteLine("  coverage <database> <repo-root> <output-root>");
     return 2;
+}
+
+async Task<int> CoverageAsync(string[] input)
+{
+    if (input.Length != 4) return Usage();
+    string database = Path.GetFullPath(input[1]);
+    string repo = Path.GetFullPath(input[2]);
+    string outputRoot = Path.GetFullPath(input[3]);
+    Directory.CreateDirectory(outputRoot);
+    var extractor = new MovieNumberExtractor(Path.Combine(repo, "backend", "LocalMediaManager.Bridge", "movie-number-rules.json"));
+    var rows = new List<CoverageRow>();
+    await using SqliteConnection connection = await OpenAsync(database, true);
+    await using SqliteCommand command = connection.CreateCommand();
+    command.CommandText = """
+        SELECT m.Id,trim(COALESCE(m.Code,'')),COALESCE(f.FileName,''),COALESCE(f.FilePath,''),
+               COALESCE((SELECT t.Status FROM Tasks t WHERE t.TaskType='Sync' AND t.CurrentMovieId=m.Id ORDER BY t.Id DESC LIMIT 1),''),
+               EXISTS(
+                   SELECT 1 FROM MetadataSyncSnapshots s
+                   WHERE s.MovieId=m.Id AND s.AppliedJson IS NOT NULL AND s.AppliedJson LIKE '%MetaTube/%'),
+               EXISTS(
+                   SELECT 1 FROM Tasks t JOIN TaskLogs tl ON tl.TaskId=t.Id
+                   WHERE t.TaskType='Sync' AND t.CurrentMovieId=m.Id
+                     AND tl.Message='[MetaTube] 结束：已参与合并'),
+               EXISTS(
+                   SELECT 1 FROM MetadataSyncSnapshots s
+                   WHERE s.MovieId=m.Id AND s.AppliedJson IS NOT NULL AND s.AppliedJson LIKE '%JavBus/%'),
+               EXISTS(
+                   SELECT 1 FROM Tasks t JOIN TaskLogs tl ON tl.TaskId=t.Id
+                   WHERE t.TaskType='Sync' AND t.CurrentMovieId=m.Id
+                     AND tl.Message='[JavBus] 结束：已参与合并')
+          FROM Movies m
+          JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video'
+          JOIN Libraries l ON l.Id=f.LibraryId AND l.LibraryType='Standard' AND l.IsEnabled=1
+         WHERE COALESCE(f.ExistsState,'')<>'Missing'
+         ORDER BY m.Id
+        """;
+    await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+    while (await reader.ReadAsync()) {
+        long movieId = reader.GetInt64(0);
+        string code = reader.GetString(1);
+        string fileName = reader.GetString(2);
+        string filePath = reader.GetString(3);
+        string latestStatus = reader.GetString(4);
+        bool metaTube = reader.GetInt64(5) == 1 || reader.GetInt64(6) == 1;
+        bool javBus = reader.GetInt64(7) == 1 || reader.GetInt64(8) == 1;
+        MovieNumberExtractionResult extraction = extractor.Extract(fileName);
+        bool validNumber = !string.IsNullOrWhiteSpace(extraction.NormalizedNumber)
+            && extraction.Confidence >= extractor.MinimumAutoSyncConfidence
+            && extractor.AreEquivalent(code, extraction.NormalizedNumber);
+        bool nonStandard = fileName.Contains("国产", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("國產", StringComparison.OrdinalIgnoreCase);
+        string classification;
+        string reason;
+        if (nonStandard) {
+            classification = "NonStandard";
+            reason = "Filename contains an explicit domestic-content marker outside the current JAV Provider capability.";
+        }
+        else if (!validNumber) {
+            classification = "Unknown";
+            reason = "Number is missing, low-confidence, or inconsistent with the current file name.";
+        }
+        else if (metaTube) {
+            classification = "MetaTubeCovered";
+            reason = "A prior applied snapshot or task log records a MetaTube contribution.";
+        }
+        else if (javBus) {
+            classification = "JavBusCovered";
+            reason = "A prior applied snapshot or task log records a JavBus contribution.";
+        }
+        else if (latestStatus.Equals("NoResult", StringComparison.OrdinalIgnoreCase)) {
+            classification = "ProviderCoverageGap";
+            reason = "The latest real synchronization task ended as NoResult for a valid Standard number.";
+        }
+        else {
+            classification = "Unknown";
+            reason = "No read-only historical Provider evidence is available; no network request was made.";
+        }
+        rows.Add(new(movieId, code, fileName, filePath, classification, metaTube, javBus,
+            latestStatus, extraction.Confidence, extraction.NormalizedNumber ?? "", reason));
+    }
+
+    var summary = new CoverageSummary(rows.Count,
+        rows.Count(value => value.MetaTubeEvidence),
+        rows.Count(value => value.JavBusSupplementEvidence),
+        rows.Count(value => value.Classification == "ProviderCoverageGap"),
+        rows.Count(value => value.Classification == "NonStandard"),
+        rows.Count(value => value.Classification == "Unknown"),
+        DateTimeOffset.Now.ToString("O"), "ReadOnlyHistoricalEvidence");
+    await WriteJsonAsync(Path.Combine(outputRoot, "coverage-summary.json"), summary);
+    await WriteJsonAsync(Path.Combine(outputRoot, "coverage-matrix.json"), rows);
+    var csv = new StringBuilder("MovieId,Code,FileName,FilePath,Classification,MetaTubeEvidence,JavBusSupplementEvidence,LatestSyncStatus,Confidence,NormalizedNumber,Reason\r\n");
+    foreach (CoverageRow row in rows) csv.AppendLine(string.Join(',', new[] {
+        row.MovieId.ToString(CultureInfo.InvariantCulture), row.Code, row.FileName, row.FilePath, row.Classification,
+        row.MetaTubeEvidence.ToString(), row.JavBusSupplementEvidence.ToString(), row.LatestSyncStatus,
+        row.Confidence.ToString("0.00", CultureInfo.InvariantCulture), row.NormalizedNumber, row.Reason,
+    }.Select(Csv)));
+    await File.WriteAllTextAsync(Path.Combine(outputRoot, "coverage-matrix.csv"), csv.ToString(), new UTF8Encoding(false));
+    Console.WriteLine(JsonSerializer.Serialize(summary, jsonOptions));
+    return 0;
 }
 
 async Task<int> ReverifyAsync(string[] input)
@@ -446,7 +547,9 @@ async Task<BatchVerification> VerifyBatchAsync(string baseline, string database,
     int metaTubeCalls = logs.Count(value => value.Message.Equals("[MetaTube] 开始", StringComparison.OrdinalIgnoreCase));
     int javBusCalls = logs.Count(value => value.Message.Equals("[JavBus] 开始", StringComparison.OrdinalIgnoreCase));
     int challenges = logs.Count(value => value.Message.Contains("ChallengePage", StringComparison.OrdinalIgnoreCase) || value.Message.Contains("driver-verify", StringComparison.OrdinalIgnoreCase));
-    int rateLimits = logs.Count(value => value.Message.Contains("429", StringComparison.OrdinalIgnoreCase) || value.Message.Contains("RateLimit", StringComparison.OrdinalIgnoreCase));
+    int rateLimits = logs.Count(value => value.Message.Contains("HTTP 429", StringComparison.OrdinalIgnoreCase)
+        || value.Message.Contains("RateLimited", StringComparison.OrdinalIgnoreCase)
+        || value.Message.Contains("rate limit", StringComparison.OrdinalIgnoreCase));
     bool passed = completed + warnings >= Math.Ceiling(tasks.Count * 0.95)
         && failed <= 1 && protectedChanges == 0 && duplicateActors == 0 && duplicateGenres == 0
         && duplicateMovieActors == 0 && duplicateMovieGenres == 0
@@ -680,6 +783,7 @@ string HashFile(string path)
     return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
 }
 string StableOrder(long id, string code) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{seed}:{id}:{code}"))).ToLowerInvariant();
+string Csv(string value) => $"\"{(value ?? string.Empty).Replace("\"", "\"\"")}\"";
 bool Terminal(string status) => status is "Completed" or "CompletedWithWarnings" or "NoResult" or "Blocked" or "Failed" or "Cancelled";
 double Percentile(double[] sorted, double percentile) => sorted.Length == 0 ? 0 : sorted[(int)Math.Ceiling(percentile * sorted.Length) - 1];
 string RenderBatchSummary(int size, string database, BatchVerification result) => $"""
@@ -721,6 +825,11 @@ sealed record MovieSnapshot(long MovieId, string Code, string Title, string Desc
 sealed record TaskRow(long TaskId, long MovieId, string Provider, string Status, string Stage, int RetryCount,
     string Error, string Summary, string StartedAt, string CompletedAt, double ElapsedMilliseconds);
 sealed record TaskLogRow(long TaskId, string Level, string Message, string CreatedAt);
+sealed record CoverageRow(long MovieId, string Code, string FileName, string FilePath, string Classification,
+    bool MetaTubeEvidence, bool JavBusSupplementEvidence, string LatestSyncStatus, double Confidence,
+    string NormalizedNumber, string Reason);
+sealed record CoverageSummary(int TotalStandard, int MetaTubeCovered, int JavBusSupplemented,
+    int ProviderCoverageGap, int NonStandard, int Unknown, string GeneratedAt, string Mode);
 sealed record BatchVerification(bool Passed, int Total, int Completed, int CompletedWithWarnings, int NoResult,
     int Blocked, int Failed, int Cancelled, int MetadataSuccess, int Poster, int Fanart, int Preview, int Nfo,
     int ProtectedDataChanges, long DuplicateActors, long DuplicateGenres, long DuplicateMovieActors,
