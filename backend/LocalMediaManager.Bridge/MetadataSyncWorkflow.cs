@@ -21,7 +21,12 @@ public sealed record SyncMovie(long Id, string Code, string? Title, string? Desc
 public sealed record SavedImage(string Type, string Path, string SourceUrl, long Size, bool Created,
     int Width = 0, int Height = 0, string? ContentType = null, string? FileHash = null,
     string Ownership = "Provider", bool IsDerived = false, string? SourceProvider = null);
-public sealed record ImageDownloadFailure(string Type, Exception Error);
+public sealed record ImageDownloadFailure(
+    string Type,
+    string Provider,
+    string Url,
+    bool RefererApplied,
+    Exception Error);
 public sealed record ImageDownloadBatchResult(IReadOnlyList<SavedImage> Images, IReadOnlyList<ImageDownloadFailure> Failures);
 public sealed record PreparedFiles(IReadOnlyList<SavedImage> Images, string? NfoPath, IReadOnlyList<string> CreatedPaths);
 public sealed record ImageDownloadOptions(string? Cookie = null, string? Referer = null, string? RestrictedHost = null);
@@ -134,7 +139,9 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
                     saved.Add(new(normalizedType, target, image.Url, validation.FileSize, true, validation.Width,
                         validation.Height, validation.ContentType, validation.Sha256, "Provider", false, image.Provider));
                 } catch (Exception error) when (continueOnError && error is not OperationCanceledException) {
-                    failures.Add(new(normalizedType, error));
+                    failures.Add(new(normalizedType, image.Provider ?? "Unknown", image.Url,
+                        options is not null && AppliesTo(Uri.TryCreate(image.Url, UriKind.Absolute, out Uri? failedUri) ? failedUri : null, options.RestrictedHost)
+                            && !string.IsNullOrWhiteSpace(options.Referer), error));
                 }
             }
         } finally {
@@ -176,6 +183,18 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
             if (total > MaximumDownloadBytes) throw new InvalidDataException("远程图片超过 64 MB 安全限制。");
             await destination.WriteAsync(buffer.AsMemory(0, read), token);
         }
+    }
+
+    internal static string FormatFailureEvidence(ImageDownloadFailure failure)
+    {
+        string host = Uri.TryCreate(failure.Url, UriKind.Absolute, out Uri? uri) ? uri.Host : "invalid-url";
+        string status = failure.Error is HttpRequestException http && http.StatusCode is not null
+            ? ((int)http.StatusCode.Value).ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : "Unavailable";
+        return $"[Image Resource] Type={failure.Type}; Provider={failure.Provider}; Host={host}; HTTP={status}; "
+            + $"ContentType=Unavailable; ContentLength=Unavailable; Referer={(failure.RefererApplied ? "Applied" : "NotApplied")}; "
+            + "UserAgent=LocalMediaManager/0.7.6; Retry=0; Result=Failed; "
+            + $"Error={failure.Error.GetType().Name}: {failure.Error.Message}";
     }
 }
 
@@ -584,6 +603,8 @@ public sealed class MetadataSyncExecutor(
                     savedImages = download.Images;
                     createdPaths.AddRange(savedImages.Where(value => value.Created).Select(value => value.Path));
                     if (download.Failures.Count > 0) {
+                        foreach (ImageDownloadFailure failure in download.Failures)
+                            await logs.WriteAsync(taskId, "Warning", ImageDownloadService.FormatFailureEvidence(failure), cancellationToken);
                         string imageFailureSummary = string.Join(", ", download.Failures.GroupBy(value => value.Type, StringComparer.OrdinalIgnoreCase)
                             .Select(group => $"{group.Key} {group.Count()} 项"));
                         partialFailures.Add($"部分图片写入失败: {imageFailureSummary}");
