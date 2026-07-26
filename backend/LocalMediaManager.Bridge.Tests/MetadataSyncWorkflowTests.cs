@@ -447,6 +447,16 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
+    public void JavBusMirrorNormalizationRejectsConcatenatedUrls()
+    {
+        JavBusSettingsDto clean = MetadataProviderSettingsService.NormalizeJavBus(new(
+            true, 2, "https://www.javbus.com/", 30, 1, "", true, true,
+            ["https://valid.example/", "https://one.example/，https://two.example/"]));
+
+        Assert.Equal(["https://valid.example/"], clean.MirrorUrls);
+    }
+
+    [Fact]
     public async Task JavBusNormalizesCodeAndParsesMovieHtml()
     {
         string html = JavBusHtml();

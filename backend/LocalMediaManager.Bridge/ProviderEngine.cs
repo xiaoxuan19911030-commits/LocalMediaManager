@@ -290,7 +290,7 @@ public sealed class ProviderManager
             foreach (MetadataSearchResult result in results.Take(3)) {
                 ProviderMetadata? candidate = await sdk.GetDetailAsync(result, scoped, cancellationToken);
                 if (candidate is null) continue;
-                if (movieNumberExtractor is null || movieNumberExtractor.AreEquivalent(normalized, candidate.Code)) { metadata = candidate; break; }
+                if (movieNumberExtractor is null || movieNumberExtractor.AreEquivalent(normalized, candidate.Code, candidate.ExternalId)) { metadata = candidate; break; }
             }
             stage.Stop();
             traces.Add(new("Parser", metadata is null ? "NoMatch" : "Completed", stage.ElapsedMilliseconds));

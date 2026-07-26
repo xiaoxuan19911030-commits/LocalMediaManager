@@ -17,7 +17,7 @@ public interface IMovieNumberExtractor
 {
     double MinimumAutoSyncConfidence { get; }
     MovieNumberExtractionResult Extract(string fileName);
-    bool AreEquivalent(string expected, string actual);
+    bool AreEquivalent(string expected, string actual, string? providerExternalId = null);
 }
 
 public sealed class MovieNumberExtractor : IMovieNumberExtractor
@@ -48,16 +48,32 @@ public sealed class MovieNumberExtractor : IMovieNumberExtractor
 
     public double MinimumAutoSyncConfidence => rules.MinimumAutoSyncConfidence;
 
-    public bool AreEquivalent(string expected, string actual)
+    public bool AreEquivalent(string expected, string actual, string? providerExternalId = null)
     {
-        string left = JavBusCode.Normalize(expected);
-        string right = JavBusCode.Normalize(actual);
-        foreach (CompiledTextRule rule in comparisonAliases) {
-            left = rule.Regex.Replace(left, rule.Replacement);
-            right = rule.Regex.Replace(right, rule.Replacement);
-        }
-        return left.Equals(right, StringComparison.OrdinalIgnoreCase);
+        string left = ComparisonCode(expected);
+        string right = ComparisonCode(actual);
+        if (left.Equals(right, StringComparison.OrdinalIgnoreCase)) return true;
+
+        // Some providers keep a numeric studio prefix in their external ID but omit it
+        // from the canonical number field. Require the exact external ID as corroboration.
+        if (string.IsNullOrWhiteSpace(providerExternalId)
+            || !Comparable(expected).Equals(Comparable(providerExternalId), StringComparison.OrdinalIgnoreCase))
+            return false;
+        Match prefixed = Regex.Match(left, @"^\d{2,4}(?<canonical>[A-Z]{2,12}-\d{1,12})$",
+            RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(250));
+        return prefixed.Success
+            && prefixed.Groups["canonical"].Value.Equals(right, StringComparison.OrdinalIgnoreCase);
     }
+
+    private string ComparisonCode(string value)
+    {
+        string normalized = JavBusCode.Normalize(value);
+        foreach (CompiledTextRule rule in comparisonAliases)
+            normalized = rule.Regex.Replace(normalized, rule.Replacement);
+        return normalized;
+    }
+
+    private static string Comparable(string value) => Regex.Replace(value ?? "", @"[-_\s]", "").Trim();
 
     public MovieNumberExtractionResult Extract(string fileName)
     {

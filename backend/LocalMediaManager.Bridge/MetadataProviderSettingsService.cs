@@ -349,7 +349,10 @@ public sealed class MetadataProviderSettingsService(string databasePath)
     private static string NormalizeBaseUrl(string value) => value.Trim().TrimEnd('/') + "/";
     private static IReadOnlyList<string> NormalizeUrlList(IEnumerable<string> values) =>
         values.Select(value => (value ?? "").Trim()).Where(value => !string.IsNullOrWhiteSpace(value))
-            .Select(value => Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) && uri.Scheme is "http" or "https" ? NormalizeBaseUrl(uri.ToString()) : "")
+            .Select(value => Uri.TryCreate(value, UriKind.Absolute, out Uri? uri)
+                && uri.Scheme is "http" or "https"
+                && !uri.PathAndQuery.Contains("://", StringComparison.OrdinalIgnoreCase)
+                ? NormalizeBaseUrl(uri.ToString()) : "")
             .Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).Take(8).ToArray();
     private static IReadOnlyList<string> UrlList(IReadOnlyDictionary<string, string> values, string key, IReadOnlyList<string>? fallback)
     {

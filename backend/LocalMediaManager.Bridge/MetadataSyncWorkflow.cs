@@ -551,7 +551,7 @@ public sealed class MetadataSyncExecutor(
                         await logs.WriteAsync(taskId, "Warning", $"{selected.Provider} 返回结果缺少可用元数据，继续尝试下一个候选。", cancellationToken);
                         continue;
                     }
-                    if (!(movieNumberExtractor?.AreEquivalent(movie.Code, candidate.Code)
+                    if (!(movieNumberExtractor?.AreEquivalent(movie.Code, candidate.Code, candidate.ExternalId)
                         ?? Comparable(candidate.Code).Equals(Comparable(movie.Code), StringComparison.OrdinalIgnoreCase))) {
                         attemptErrors.Add($"{selected.Provider}: expected {movie.Code}, got {candidate.Code}");
                         await logs.WriteAsync(taskId, "Warning", $"{selected.Provider} 结果番号不匹配：期望 {movie.Code}，实际 {candidate.Code}，继续尝试下一个候选。", cancellationToken);

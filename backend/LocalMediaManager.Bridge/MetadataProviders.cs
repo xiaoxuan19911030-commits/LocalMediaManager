@@ -767,7 +767,7 @@ public sealed class CompositeMetadataProvider(MdcNgProvider mdcNg, MetaTubeProvi
                         await LogAsync(settings, sourceName, "详情为空，继续下一候选", cancellationToken);
                         continue;
                     }
-                    if (!(movieNumberExtractor?.AreEquivalent(code, candidate.Code)
+                    if (!(movieNumberExtractor?.AreEquivalent(code, candidate.Code, candidate.ExternalId)
                         ?? JavBusCode.Normalize(candidate.Code).Equals(JavBusCode.Normalize(code), StringComparison.OrdinalIgnoreCase))) {
                         await LogAsync(settings, sourceName, $"番号不匹配：期望 {code}，实际 {candidate.Code}", cancellationToken);
                         continue;

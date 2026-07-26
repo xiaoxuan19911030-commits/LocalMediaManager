@@ -74,6 +74,15 @@ async Task<int> AuditAsync(string[] input)
     }
     var result = new {
         database,
+        sampleContext = await GroupsAsync($"""
+            SELECT m.Id,COALESCE(m.Code,''),COALESCE(f.FileName,''),COALESCE(f.FilePath,''),
+                   COALESCE(l.Name,''),COALESCE(l.LibraryType,'Standard')
+              FROM Movies m
+              LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video'
+              LEFT JOIN Libraries l ON l.Id=f.LibraryId
+             WHERE m.Id IN ({ids})
+             ORDER BY m.Id
+            """),
         duplicateActors = await GroupsAsync("SELECT NormalizedName,COUNT(*) FROM Actors WHERE trim(COALESCE(NormalizedName,''))<>'' GROUP BY NormalizedName HAVING COUNT(*)>1 ORDER BY NormalizedName"),
         duplicateGenres = await GroupsAsync("SELECT NormalizedName,COUNT(*) FROM Genres WHERE trim(COALESCE(NormalizedName,''))<>'' GROUP BY NormalizedName HAVING COUNT(*)>1 ORDER BY NormalizedName"),
         selectedDuplicateMovieActors = await GroupsAsync($"SELECT MovieId,ActorId,RoleName,COUNT(*) FROM MovieActors WHERE MovieId IN ({ids}) GROUP BY MovieId,ActorId,RoleName HAVING COUNT(*)>1"),

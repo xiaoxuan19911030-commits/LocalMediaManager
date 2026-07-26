@@ -107,6 +107,17 @@ public sealed class MovieNumberExtractorTests
         Assert.False(Create().AreEquivalent("259LUXU-752", "259LUXU-1752"));
     }
 
+    [Fact]
+    public void AcceptsNumericStudioPrefixOmissionOnlyWithExactProviderExternalId()
+    {
+        MovieNumberExtractor extractor = Create();
+
+        Assert.True(extractor.AreEquivalent("777YMYM-030", "YMYM-030", "777ymym-030"));
+        Assert.False(extractor.AreEquivalent("777YMYM-030", "YMYM-030"));
+        Assert.False(extractor.AreEquivalent("MD-0221", "BMD-221", "57bmd221"));
+        Assert.False(extractor.AreEquivalent("MD-0221", "UMD-221", "125umd221"));
+    }
+
     private static MovieNumberExtractor Create() => new(FindRuleFile());
 
     private static string FindRuleFile()

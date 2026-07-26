@@ -188,7 +188,7 @@ public sealed class MetadataCompletionProviderClient(
         foreach (MetadataSearchResult result in results.Take(3)) {
             ProviderMetadata? metadata = await source.GetDetailAsync(result, scoped, cancellationToken);
             if (metadata is null) continue;
-            if (movieNumberExtractor.AreEquivalent(code, metadata.Code))
+            if (movieNumberExtractor.AreEquivalent(code, metadata.Code, metadata.ExternalId))
                 return metadata;
         }
         return null;
