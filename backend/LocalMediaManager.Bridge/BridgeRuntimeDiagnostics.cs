@@ -26,14 +26,28 @@ public sealed record BridgeRuntimeMemorySnapshot(
     int ProviderCacheEntries,
     int ProviderHistoryEntries,
     int JavBusPageCacheEntries,
-    IReadOnlyList<BridgeVirtualMemorySummary> VirtualMemorySummaries);
+    IReadOnlyList<BridgeVirtualMemorySummary> VirtualMemorySummaries,
+    BridgeNativeHeapSnapshot? NativeHeap);
 
 public sealed record BridgeVirtualMemorySummary(string Type, long CommittedBytes, int RegionCount);
+public sealed record BridgeNativeHeapSnapshot(
+    int HeapCount,
+    bool WalkSucceeded,
+    long BusyEntries,
+    long FreeEntries,
+    long BusyBytes,
+    long FreeBytes,
+    long LargestBusyBlock,
+    long LargestFreeBlock,
+    bool Complete,
+    int? ErrorCode,
+    string? InterruptedAt);
 
 public static class BridgeRuntimeDiagnostics
 {
     // This method is only invoked by the validation-only HTTP endpoint.
-    public static BridgeRuntimeMemorySnapshot Capture(bool fullGcRequested, bool clearSqlitePools, ProviderManager providers, JavBusProvider javBus)
+    public static BridgeRuntimeMemorySnapshot Capture(bool fullGcRequested, bool clearSqlitePools, bool includeNativeHeap,
+        ProviderManager providers, JavBusProvider javBus)
     {
         if (clearSqlitePools) SqliteConnection.ClearAllPools();
         if (fullGcRequested)
@@ -73,7 +87,8 @@ public static class BridgeRuntimeDiagnostics
             providers.CacheEntryCount,
             providers.HistoryEntryCount,
             javBus.PageCacheEntryCount,
-            ReadVirtualMemorySummaries());
+            ReadVirtualMemorySummaries(),
+            includeNativeHeap ? ReadNativeHeapSnapshot() : null);
     }
 
     private static IReadOnlyList<BridgeVirtualMemorySummary> ReadVirtualMemorySummaries()
@@ -105,6 +120,61 @@ public static class BridgeRuntimeDiagnostics
         _ => "Other",
     };
 
+    private static BridgeNativeHeapSnapshot? ReadNativeHeapSnapshot()
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        uint heapCount = GetProcessHeaps(0, null);
+        if (heapCount == 0)
+        {
+            int error = Marshal.GetLastWin32Error();
+            return new(0, false, 0, 0, 0, 0, 0, 0, false, error, "GetProcessHeaps");
+        }
+        var heaps = new IntPtr[heapCount];
+        uint read = GetProcessHeaps(heapCount, heaps);
+        if (read == 0)
+        {
+            int error = Marshal.GetLastWin32Error();
+            return new(0, false, 0, 0, 0, 0, 0, 0, false, error, "GetProcessHeaps");
+        }
+
+        long busyBytes = 0;
+        long freeBytes = 0;
+        long busyEntries = 0;
+        long freeEntries = 0;
+        long largestBusyBlock = 0;
+        long largestFreeBlock = 0;
+        int heapIndex = 0;
+        foreach (IntPtr heap in heaps.Take((int)Math.Min(read, (uint)heaps.Length))) {
+            ProcessHeapEntry entry = default;
+            long entryIndex = 0;
+            while (HeapWalk(heap, ref entry)) {
+                entryIndex++;
+                long bytes = entry.DataSize;
+                if ((entry.Flags & 0x0004) != 0)
+                {
+                    busyBytes = SaturatingAdd(busyBytes, bytes);
+                    busyEntries = SaturatingAdd(busyEntries, 1);
+                    largestBusyBlock = Math.Max(largestBusyBlock, bytes);
+                }
+                else if ((entry.Flags & 0x0002) != 0)
+                {
+                    freeBytes = SaturatingAdd(freeBytes, bytes);
+                    freeEntries = SaturatingAdd(freeEntries, 1);
+                    largestFreeBlock = Math.Max(largestFreeBlock, bytes);
+                }
+            }
+            int error = Marshal.GetLastWin32Error();
+            if (error is not 0 and not 259)
+                return new((int)read, false, busyEntries, freeEntries, busyBytes, freeBytes,
+                    largestBusyBlock, largestFreeBlock, false, error, $"heap={heapIndex}; entry={entryIndex}");
+            heapIndex++;
+        }
+        return new((int)read, true, busyEntries, freeEntries, busyBytes, freeBytes,
+            largestBusyBlock, largestFreeBlock, true, null, null);
+    }
+
+    private static long SaturatingAdd(long left, long right) => left > long.MaxValue - right ? long.MaxValue : left + right;
+
     [StructLayout(LayoutKind.Sequential)]
     private struct MemoryBasicInformation
     {
@@ -118,6 +188,35 @@ public static class BridgeRuntimeDiagnostics
         public uint Type;
     }
 
+    // PROCESS_HEAP_ENTRY has a pointer-sized first field followed by a 32-bit cbData.
+    // Keep the trailing union so HeapWalk receives the native structure's full size.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ProcessHeapEntry
+    {
+        public IntPtr Data;
+        public uint DataSize;
+        public byte Overhead;
+        public byte RegionIndex;
+        public ushort Flags;
+        public ProcessHeapEntryUnion Union;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct ProcessHeapEntryUnion
+    {
+        [FieldOffset(0)] public IntPtr BlockHandle;
+        [FieldOffset(0)] public uint RegionCommittedSize;
+        [FieldOffset(4)] public uint RegionUncommittedSize;
+        [FieldOffset(8)] public IntPtr RegionFirstBlock;
+        [FieldOffset(16)] public IntPtr RegionLastBlock;
+    }
+
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern nuint VirtualQuery(IntPtr address, out MemoryBasicInformation buffer, nuint length);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint GetProcessHeaps(uint numberOfHeaps, [Out] IntPtr[]? processHeaps);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool HeapWalk(IntPtr heap, ref ProcessHeapEntry entry);
 }
