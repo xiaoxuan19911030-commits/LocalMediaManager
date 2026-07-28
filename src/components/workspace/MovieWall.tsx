@@ -422,7 +422,7 @@ export function MovieWall({
   </Stack>
 
   return <WorkspacePage title={title} description={description?.(total)} stats={stats} filters={filters} activeFilterCount={activeFilterCount} loading={loading} error={error}>
-    <Box sx={{ position: 'relative', pb: total > pageSize ? { xs: 9, md: 10 } : 0, pr: total > pageSize ? { lg: 13 } : 0 }}>
+    <Box sx={{ position: 'relative', pb: total > pageSize ? { xs: 9, md: 10 } : 0 }}>
       <MovieResultContainer items={items} total={total} display={movieWallDisplay} view={view} selectable={selectable} selectedIds={selectedIds} onSelect={onSelect} onRatingClick={onRatingClick ?? saveRating} onContextMenu={onContextMenu} onPlay={movieActions.playMovie} onOpen={openMovie} emptyTitle={emptyTitle} emptyDescription={emptyDescription}/>
     </Box>
     {total > pageSize && <FloatingPagination page={page} totalPages={totalPages} onPageChange={goToPage} focusSignal={pageInputFocusSignal}/>}
