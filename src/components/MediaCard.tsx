@@ -3,11 +3,12 @@ import NewReleasesRoundedIcon from '@mui/icons-material/NewReleasesRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import { Box, Card, CardContent, Checkbox, Chip, IconButton, Rating, Tooltip, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { SmartImage } from '@/components/SmartImage'
-import { movieWallColumnCount } from '@/components/workspace/movieWallGrid'
-import { defaultMovieWallDisplay, movieWallAspectRatio, movieWallMinWidth, type MovieWallDisplaySettings } from '@/components/workspace/movieWallDisplay'
+import { movieWallGridTemplate } from '@/components/workspace/movieWallGrid'
+import { defaultMovieWallDisplay, movieWallAspectRatio, type MovieWallDisplaySettings } from '@/components/workspace/movieWallDisplay'
 import type { MediaItem } from '@/types/media'
+import { bridge } from '@/services/bridge'
 
 const isRecent = (value: string) => {
   if (!value) return false
@@ -16,34 +17,13 @@ const isRecent = (value: string) => {
 }
 
 export function MediaCardGrid({ children, display = defaultMovieWallDisplay }: { children: ReactNode; display?: MovieWallDisplaySettings }) {
-  const minWidth = movieWallMinWidth[display.posterOrientation][display.posterSize]
-  const gridRef = useRef<HTMLDivElement>(null)
-  const [columnCount, setColumnCount] = useState(1)
-
-  useLayoutEffect(() => {
-    const grid = gridRef.current
-    if (!grid) return
-    let frame = 0
-    const updateColumns = () => {
-      window.cancelAnimationFrame(frame)
-      frame = window.requestAnimationFrame(() => {
-        const gap = Number.parseFloat(window.getComputedStyle(grid).columnGap) || 0
-        const next = movieWallColumnCount(grid.getBoundingClientRect().width, minWidth, gap)
-        setColumnCount((current) => current === next ? current : next)
-      })
-    }
-    const observer = new ResizeObserver(updateColumns)
-    observer.observe(grid)
-    updateColumns()
-    return () => { window.cancelAnimationFrame(frame); observer.disconnect() }
-  }, [minWidth])
-
   return <Box sx={{
     display: 'grid',
-    gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
+    gridTemplateColumns: movieWallGridTemplate(display.posterOrientation, display.posterSize),
     gap: { xs: 1.25, md: 1.5 },
     minWidth: 0,
-  }} ref={gridRef}>{children}</Box>
+    width: '100%',
+  }}>{children}</Box>
 }
 
 export function MediaCard({ item, display = defaultMovieWallDisplay, onPlay, onOpen, selected, onSelect, onRatingClick, onContextMenu }: { item: MediaItem; display?: MovieWallDisplaySettings; onPlay: (item: MediaItem) => void; onOpen?: (item: MediaItem) => void; selected?: boolean; onSelect?: (item: MediaItem, selected: boolean) => void; onRatingClick?: (item: MediaItem, value: number | null) => void; onContextMenu?: (event: MouseEvent, item: MediaItem) => void }) {
