@@ -11,7 +11,7 @@ export default function SearchPage() {
   const initialSearch = params.get('q') || ''
 
   return <MovieWall key={initialSearch} title="搜索" description={(total) => total ? `共 ${total} 部匹配影片。` : '通过 Smart Search 与统一 FilterBar 组合筛选影片。'}
-    stateKey={`lmm.movieWall.search.${initialSearch || 'empty'}`} initialSearch={initialSearch} pageSize={24}
+    stateKey={`lmm.movieWall.search.${initialSearch || 'empty'}`} initialSearch={initialSearch} pageSize={48}
     emptyTitle={initialSearch ? '没有匹配影片' : '搜索你的媒体库'}
     emptyDescription={initialSearch ? '尝试减少筛选条件或使用更短的关键词。' : '输入关键词，或直接选择评分、元数据状态、图片状态和媒体库条件。'}
     childrenAfterResults={(context) => <RelatedSection query={context.query}/>}/>

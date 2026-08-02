@@ -183,7 +183,7 @@ public static class ProductReader
                        COALESCE(f.FilePath,''),COALESCE(s.UserRating,0),COALESCE(s.IsFavorite,0),
                        COALESCE(m.ReleaseDate,''),COALESCE(m.ImportedAt,m.CreatedAt,''),
                        EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id),
-                       {MetadataColumnsSql(hasDirectors, hasNfoDocuments)}
+                       {MetadataColumnsSql(hasDirectors, hasNfoDocuments, allowNetworkAccess: false)}
                   FROM Movies m
                   LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video'
                   LEFT JOIN UserMovieState s ON s.MovieId=m.Id
@@ -538,7 +538,8 @@ public static class ProductReader
         AddYearCondition(conditions, parameters, parsed.Year);
         if (metadata == "complete") conditions.Add("m.IsScraped=1"); else if (metadata == "missing") conditions.Add("m.IsScraped=0");
         AddMetadataStatusCondition(conditions, metadataStatus, hasDirectors, hasNfoDocuments);
-        if (fileStatus == "missing") conditions.Add("f.ExistsState='Missing'"); else conditions.Add("f.ExistsState<>'Missing'");
+        if (fileStatus == "missing") conditions.Add("f.ExistsState='Missing'");
+        else if (fileStatus != "include-missing") conditions.Add("f.ExistsState<>'Missing'");
         if (libraryId.HasValue) { conditions.Add("f.LibraryId=$library"); parameters.Add(("$library", libraryId.Value)); }
         string order = sort switch { "code" => "m.Code COLLATE NOCASE,m.Id", "rating" => "s.UserRating DESC,m.Id DESC", "release" => "m.ReleaseDate DESC,m.Id DESC", _ => "m.ImportedAt DESC,m.Id DESC" };
         return new(conditions.Count == 0 ? "1=1" : string.Join(" AND ", conditions), parameters, order);
@@ -922,7 +923,7 @@ public static class ProductReader
         await using var command=connection.CreateCommand();
         command.CommandText=$"""
             SELECT m.Id,COALESCE(NULLIF(m.Code,''),NULLIF(m.Title,''),CAST(m.Id AS TEXT)),COALESCE(m.Title,''),COALESCE(f.FilePath,''),
-                   COALESCE(s.UserRating,0),COALESCE(s.IsFavorite,0),COALESCE(m.ReleaseDate,''),COALESCE(m.ImportedAt,m.CreatedAt,''),EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id),
+                   COALESCE(s.UserRating,0),COALESCE(s.IsFavorite,0),COALESCE(m.ReleaseDate,''),COALESCE(m.ImportedAt,m.CreatedAt,''),EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND i.FilePath IS NOT NULL),
                    {metadataColumns}
               FROM Movies m LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video' LEFT JOIN UserMovieState s ON s.MovieId=m.Id
              WHERE f.ExistsState<>'Missing' AND {(playedOnly ? "COALESCE(s.PlayCount,0)>0" : "1=1")} ORDER BY {orderBy} LIMIT $limit
@@ -936,7 +937,8 @@ public static class ProductReader
         string cardImageSource = await ReadImageSourceSettingAsync(connection, "movieWall.wallImageSource", "poster");
         string metadataColumns = MetadataColumnsSql(
             await HasDirectorsAsync(connection),
-            await TableExistsAsync(connection, "NfoDocuments"));
+            await TableExistsAsync(connection, "NfoDocuments"),
+            allowNetworkAccess: false);
         await using var count = connection.CreateCommand();
         count.CommandText = $"SELECT COUNT(DISTINCT m.Id) FROM Movies m LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video' LEFT JOIN UserMovieState s ON s.MovieId=m.Id WHERE {condition}";
         foreach (var parameter in parameters) count.Parameters.AddWithValue(parameter.Name, parameter.Value);
@@ -944,7 +946,7 @@ public static class ProductReader
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
             SELECT m.Id,COALESCE(NULLIF(m.Code,''),NULLIF(m.Title,''),CAST(m.Id AS TEXT)),COALESCE(m.Title,''),COALESCE(f.FilePath,''),
-                   COALESCE(s.UserRating,0),COALESCE(s.IsFavorite,0),COALESCE(m.ReleaseDate,''),COALESCE(m.ImportedAt,m.CreatedAt,''),EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id),
+                   COALESCE(s.UserRating,0),COALESCE(s.IsFavorite,0),COALESCE(m.ReleaseDate,''),COALESCE(m.ImportedAt,m.CreatedAt,''),EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND i.FilePath IS NOT NULL),
                    {metadataColumns}
               FROM Movies m LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video' LEFT JOIN UserMovieState s ON s.MovieId=m.Id
              WHERE {condition} GROUP BY m.Id ORDER BY {FilePresenceOrderSql()},{orderBy} LIMIT $limit OFFSET $offset
@@ -963,7 +965,7 @@ public static class ProductReader
         foreach (var parameter in parameters) count.Parameters.AddWithValue(parameter.Name, parameter.Value);
         return Convert.ToInt64(await count.ExecuteScalarAsync() ?? 0L);
     }
-    private static MediaCardDto Card(SqliteDataReader reader,string bridgeUrl,string imageSource)=>new(reader.GetInt64(0),reader.GetString(1),reader.GetString(2),reader.GetString(3),reader.GetDouble(4),reader.GetInt64(5)==1,reader.GetString(6),reader.GetString(7),reader.GetInt64(8)==1?$"{bridgeUrl}/api/images/{reader.GetInt64(0)}/primary?variant=thumbnail&source={imageSource}":null,MetadataStatusFromReader(reader,9));
+    private static MediaCardDto Card(SqliteDataReader reader,string bridgeUrl,string imageSource)=>new(reader.GetInt64(0),reader.GetString(1),reader.GetString(2),reader.GetString(3),reader.GetDouble(4),reader.GetInt64(5)==1,reader.GetString(6),reader.GetString(7),reader.GetInt64(8)==1?$"{bridgeUrl}/api/images/{reader.GetInt64(0)}/primary?variant=thumbnail&source={imageSource}&v=wall-thumbnail-v4":null,MetadataStatusFromReader(reader,9));
     private static async Task<IReadOnlyList<SearchEntityDto>> ReadEntitiesAsync(SqliteConnection connection,string table,string relation,string key,string like,int limit){
         await using var command=connection.CreateCommand();command.CommandText=$"SELECT e.Id,e.Name,COUNT(r.MovieId) FROM {table} e LEFT JOIN {relation} r ON r.{key}=e.Id WHERE e.Name LIKE $like ESCAPE '\\' GROUP BY e.Id ORDER BY COUNT(r.MovieId) DESC,e.Name LIMIT $limit";command.Parameters.AddWithValue("$like",like);command.Parameters.AddWithValue("$limit",limit);
         var result=new List<SearchEntityDto>();await using var reader=await command.ExecuteReaderAsync();while(await reader.ReadAsync())result.Add(new(reader.GetInt64(0),reader.GetString(1),reader.GetInt64(2)));return result;

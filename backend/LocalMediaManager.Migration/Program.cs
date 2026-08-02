@@ -1,7 +1,7 @@
 using Microsoft.Data.Sqlite;
 using System.Text.Json;
 
-string dataRoot = Environment.GetEnvironmentVariable("LMM_NEXT_DATA_ROOT") ?? @"D:\Local Media Manager Next Data";
+string dataRoot = Environment.GetEnvironmentVariable("LMM_NEXT_DATA_ROOT") ?? @"D:\自用软件\部署安装目录\本地媒体管理器\数据";
 string legacyRoot = Environment.GetEnvironmentVariable("LMM_LEGACY_ROOT") ?? dataRoot;
 string userRoot = Path.Combine(legacyRoot, "data", Environment.UserName);
 string businessDb = Environment.GetEnvironmentVariable("LMM_LEGACY_DATABASE_PATH") ?? Path.Combine(userRoot, "app_datas.sqlite");

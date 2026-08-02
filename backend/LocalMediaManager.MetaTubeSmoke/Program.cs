@@ -4,310 +4,612 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
-using SkiaSharp;
 
+const string BridgeUrl = "http://127.0.0.1:47841";
 string repo = Path.GetFullPath(args.ElementAtOrDefault(0) ?? Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
-string sourceDatabase = Path.GetFullPath(args.ElementAtOrDefault(1) ?? @"D:\Local Media Manager Next Data\data\LocalMediaManager.db");
-string runRoot = Path.GetFullPath(args.ElementAtOrDefault(2) ?? Path.Combine(@"D:\Local Media Manager Next Smoke", "0.7.0-sync-" + DateTime.Now.ToString("yyyyMMdd-HHmmss")));
-int sampleCount = Math.Clamp(int.TryParse(args.ElementAtOrDefault(3), out int requested) ? requested : 10, 3, 100);
-bool offlineMedia = string.Equals(args.ElementAtOrDefault(4), "offline", StringComparison.OrdinalIgnoreCase);
-string[] requestedCodes = (args.ElementAtOrDefault(5) ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+string sourceDatabase = Path.GetFullPath(args.ElementAtOrDefault(1) ?? @"D:\自用软件\部署安装目录\本地媒体管理器\数据\data\LocalMediaManager.db");
+string runRoot = Path.GetFullPath(args.ElementAtOrDefault(2) ?? Path.Combine(@"D:\自用软件\测试目录\本地媒体管理器\smoke", "0.7.7-metatube-stage2-" + DateTime.Now.ToString("yyyyMMdd-HHmmss")));
+string[] codes = (args.ElementAtOrDefault(3) ?? "ABF-087,ABF-120,ABF-131,ABF-219,ABF-327")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+if (codes.Length != 5) throw new ArgumentException("Stage 2 requires exactly five movie codes.");
+
 string database = Path.Combine(runRoot, "data", "LocalMediaManager.db");
-string mediaRoot = Path.Combine(runRoot, "media");
-string imageRoot = Path.Combine(runRoot, "images");
-string nfoRoot = Path.Combine(runRoot, "nfo");
-string logRoot = Path.Combine(runRoot, "logs");
+string imageRoot = Path.Combine(runRoot, "MediaStorage");
 string evidenceRoot = Path.Combine(runRoot, "evidence");
-string bridgeUrl = "http://127.0.0.1:47841";
-string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
+string logRoot = Path.Combine(runRoot, "logs");
 Directory.CreateDirectory(Path.GetDirectoryName(database)!);
-Directory.CreateDirectory(mediaRoot); Directory.CreateDirectory(imageRoot); Directory.CreateDirectory(nfoRoot);
-Directory.CreateDirectory(logRoot); Directory.CreateDirectory(evidenceRoot);
+Directory.CreateDirectory(imageRoot);
+Directory.CreateDirectory(evidenceRoot);
+Directory.CreateDirectory(logRoot);
 
 await BackupDatabaseAsync(sourceDatabase, database);
-await UpgradeAsync(database, Path.Combine(repo, "backend", "LocalMediaManager.Migration", "migrations"));
-List<Sample> samples = await PrepareSamplesAsync(database, mediaRoot, imageRoot, nfoRoot, sampleCount, offlineMedia, requestedCodes);
-List<Snapshot> before = await SnapshotAsync(database, samples);
+List<Sample> samples = await FindSamplesAsync(database, codes);
+List<MovieSnapshot> sourceSnapshots = await SnapshotAsync(database, samples);
+await WriteJsonAsync(Path.Combine(evidenceRoot, "source-protected-snapshot.json"), sourceSnapshots);
+
+await ConfigureIsolatedDatabaseAsync(database, imageRoot, samples);
+await ClearProviderMetadataAsync(database, samples);
+List<MovieSnapshot> before = await SnapshotAsync(database, samples);
 await WriteJsonAsync(Path.Combine(evidenceRoot, "before.json"), before);
 
 string bridgeDll = Path.Combine(repo, "backend", "LocalMediaManager.Bridge", "bin", "Release", "net8.0", "LocalMediaManager.Bridge.dll");
-if (!File.Exists(bridgeDll)) throw new FileNotFoundException("Release Bridge 尚未构建。", bridgeDll);
-using Process bridge = StartBridge(bridgeDll, database, imageRoot, bridgeUrl, token, logRoot);
+if (!File.Exists(bridgeDll)) throw new FileNotFoundException("Release Bridge is not built.", bridgeDll);
+string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
+using Process bridge = StartBridge(bridgeDll, database, imageRoot, token, logRoot);
 try {
-    using var client = new HttpClient { BaseAddress = new Uri(bridgeUrl), Timeout = TimeSpan.FromMinutes(2) };
+    using var client = new HttpClient { BaseAddress = new Uri(BridgeUrl), Timeout = TimeSpan.FromMinutes(5) };
     client.DefaultRequestHeaders.Add("X-LMM-Session", token);
     await WaitForBridgeAsync(client, bridge);
-    ProviderProbe[] probes = await ProbeProvidersAsync(client);
-    await WriteJsonAsync(Path.Combine(evidenceRoot, "provider-network-probe.json"), probes);
+
+    JsonElement metaTubeProbe = await PostJsonAsync(client, "/api/settings/providers/metatube/test", new {
+        enabled = true, baseUrl = "http://127.0.0.1:8080/", timeoutSeconds = 60,
+        downloadImages = true, writeNfo = true, autoExecute = true, nonDestructive = true,
+    });
+    await WriteJsonAsync(Path.Combine(evidenceRoot, "metatube-connection.json"), metaTubeProbe);
+
+    var playground = new List<JsonElement>();
+    foreach (Sample sample in samples) {
+        playground.Add(await PostJsonAsync(client, "/api/developer/providers/test", new {
+            provider = "MetaTube", code = sample.Code, bypassCache = true,
+        }));
+    }
+    await WriteJsonAsync(Path.Combine(evidenceRoot, "provider-results.json"), playground);
+
+    JsonElement healthBefore = await GetJsonAsync(client, "/api/metadata/health");
+    var detailBefore = new List<JsonElement>();
+    foreach (Sample sample in samples) detailBefore.Add(await GetJsonAsync(client, $"/api/videos/{sample.Id}"));
+    await WriteJsonAsync(Path.Combine(evidenceRoot, "metadata-health-before.json"), healthBefore);
+    await WriteJsonAsync(Path.Combine(evidenceRoot, "detail-api-before.json"), detailBefore);
 
     var taskIds = new List<long>();
     foreach (Sample sample in samples) {
-        using HttpResponseMessage response = await client.PostAsync($"/api/videos/{sample.Id}/sync", null);
+        using HttpResponseMessage response = await client.PostAsync($"/api/videos/{sample.Id}/sync?source=metatube", null);
         response.EnsureSuccessStatusCode();
         using JsonDocument payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         taskIds.Add(payload.RootElement.GetProperty("taskId").GetInt64());
     }
-
-    // Exercise task controls on isolated data before allowing the batch to settle.
-    if (taskIds.Count >= 2) {
-        await PostAsync(client, $"/api/tasks/{taskIds[0]}/pause");
-        await PostAsync(client, $"/api/tasks/{taskIds[0]}/resume");
-        await PostAsync(client, $"/api/tasks/{taskIds[1]}/cancel");
-        await PostAsync(client, $"/api/tasks/{taskIds[1]}/retry");
-    }
-
     await WaitForTasksAsync(database, taskIds, TimeSpan.FromMinutes(45));
-    List<Snapshot> after = await SnapshotAsync(database, samples);
-    List<TaskEvidence> tasks = await ReadTasksAsync(database, taskIds);
-    await WriteJsonAsync(Path.Combine(evidenceRoot, "after.json"), after);
-    await WriteJsonAsync(Path.Combine(evidenceRoot, "tasks.json"), tasks);
-    await WriteJsonAsync(Path.Combine(evidenceRoot, "task-logs.json"), await ReadTaskLogsAsync(database, taskIds));
-    ProviderStats[] providerStats = await ReadProviderStatsAsync(database, taskIds);
-    await WriteJsonAsync(Path.Combine(evidenceRoot, "provider-stats.json"), providerStats);
 
-    string integrity = await ScalarTextAsync(database, "PRAGMA integrity_check") ?? "unknown";
+    JsonElement healthAfter = await GetJsonAsync(client, "/api/metadata/health");
+    var detailAfter = new List<JsonElement>();
+    var imageApiAfter = new List<JsonElement>();
+    foreach (Sample sample in samples) {
+        detailAfter.Add(await GetJsonAsync(client, $"/api/videos/{sample.Id}"));
+        imageApiAfter.Add(await GetJsonAsync(client, $"/api/videos/{sample.Id}/images"));
+    }
+    List<MovieSnapshot> after = await SnapshotAsync(database, samples);
+    List<TaskEvidence> tasks = await ReadTasksAsync(database, taskIds);
+    List<TaskLog> taskLogs = await ReadTaskLogsAsync(database, taskIds);
+    await WriteJsonAsync(Path.Combine(evidenceRoot, "after.json"), after);
+    await WriteJsonAsync(Path.Combine(evidenceRoot, "metadata-health-after.json"), healthAfter);
+    await WriteJsonAsync(Path.Combine(evidenceRoot, "detail-api-after.json"), detailAfter);
+    await WriteJsonAsync(Path.Combine(evidenceRoot, "image-api-after.json"), imageApiAfter);
+    await WriteJsonAsync(Path.Combine(evidenceRoot, "tasks-and-sync-history.json"), tasks);
+    await WriteJsonAsync(Path.Combine(evidenceRoot, "task-logs.json"), taskLogs);
+
+    string integrity = await ScalarTextFromPathAsync(database, "PRAGMA integrity_check") ?? "unknown";
     long foreignKeys = await ScalarLongFromPathAsync(database, "SELECT COUNT(*) FROM pragma_foreign_key_check");
-    long temporaryFiles = Directory.EnumerateFiles(imageRoot, "*", SearchOption.AllDirectories).Count(path => path.Contains(".lmm-temp", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".part", StringComparison.OrdinalIgnoreCase));
-    int protectedUsers = before.Zip(after).Count(pair => pair.First.Favorite == pair.Second.Favorite && pair.First.UserRating == pair.Second.UserRating && pair.First.Notes == pair.Second.Notes && pair.First.UserTags.SequenceEqual(pair.Second.UserTags));
-    int protectedImages = samples.Count(sample => sample.ProtectedImageHash is not null && File.Exists(sample.ProtectedImagePath) && Hash(sample.ProtectedImagePath!) == sample.ProtectedImageHash);
-    int protectedNfos = samples.Count(sample => sample.ProtectedNfoText is not null && File.Exists(sample.ProtectedNfoPath) && File.ReadAllText(sample.ProtectedNfoPath!) == sample.ProtectedNfoText);
-    int completed = tasks.Count(task => task.Status == "Completed");
-    int completedWithWarnings = tasks.Count(task => task.Status == "CompletedWithWarnings");
-    int failed = tasks.Count(task => task.Status == "Failed");
-    int noResult = tasks.Count(task => task.Status == "NoResult");
-    int blocked = tasks.Count(task => task.Status == "Blocked");
-    int providerMismatch = tasks.Count(task => task.Error.Contains("番号不匹配", StringComparison.OrdinalIgnoreCase));
-    int networkFailures = tasks.Count(task => task.Error.Contains("连续请求", StringComparison.OrdinalIgnoreCase));
-    int cancelled = tasks.Count(task => task.Status == "Cancelled");
-    int imagesAdded = after.Sum(value => value.ImageCount) - before.Sum(value => value.ImageCount);
-    int nfosAdded = after.Sum(value => value.NfoCount) - before.Sum(value => value.NfoCount);
-    int nfoFilesCreated = Directory.Exists(Path.Combine(imageRoot, "NFO"))
-        ? Directory.EnumerateFiles(Path.Combine(imageRoot, "NFO"), "*.nfo", SearchOption.AllDirectories).Count()
-        : 0;
-    string report = RenderReport(runRoot, sourceDatabase, samples, tasks, providerStats, completed, completedWithWarnings, failed, cancelled, noResult, blocked, providerMismatch, networkFailures, imagesAdded, nfosAdded, nfoFilesCreated,
-        protectedUsers, protectedImages, protectedNfos, temporaryFiles, integrity, foreignKeys);
-    await File.WriteAllTextAsync(Path.Combine(runRoot, "0.7.5-SYNC-PROVIDER-SMOKE.md"), report, new UTF8Encoding(false));
+    Verification verification = Verify(sourceSnapshots, before, after, tasks, taskLogs, playground, integrity, foreignKeys);
+    await WriteJsonAsync(Path.Combine(evidenceRoot, "verification.json"), verification);
+    string report = RenderReport(runRoot, sourceDatabase, samples, before, after, tasks, healthBefore, healthAfter, verification);
+    string reportPath = Path.Combine(runRoot, "0.7.7-METATUBE-STAGE2.md");
+    await File.WriteAllTextAsync(reportPath, report, new UTF8Encoding(false));
     Console.WriteLine(report);
-    return integrity == "ok" && foreignKeys == 0 && temporaryFiles == 0 && protectedUsers == samples.Count ? 0 : 3;
+    Console.WriteLine($"REPORT_PATH={reportPath}");
+    Console.WriteLine($"ISOLATED_DATABASE={database}");
+    return verification.Passed ? 0 : 4;
 }
 finally {
-    if (!bridge.HasExited) { bridge.Kill(true); await bridge.WaitForExitAsync(); }
-}
-
-static async Task BackupDatabaseAsync(string source, string destination) {
-    if (!File.Exists(source)) throw new FileNotFoundException("找不到源数据库。", source);
-    await using var input = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource=source,Mode=SqliteOpenMode.ReadOnly,Cache=SqliteCacheMode.Private }.ToString());
-    await using var output = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource=destination,Mode=SqliteOpenMode.ReadWriteCreate,Cache=SqliteCacheMode.Private }.ToString());
-    await input.OpenAsync(); await output.OpenAsync(); input.BackupDatabase(output);
-}
-
-static async Task UpgradeAsync(string database, string migrationRoot) {
-    await using var connection = await OpenAsync(database, false);
-    long version = await ScalarLongAsync(connection, "SELECT CAST(Value AS INTEGER) FROM DatabaseMetadata WHERE Key='SchemaVersion'");
-    foreach (string file in Directory.EnumerateFiles(migrationRoot, "*.sql").Order()) {
-        int number = int.Parse(Path.GetFileName(file)[..4]); if (number <= version) continue;
-        if (await MigrationRecordedAsync(connection, number)) continue;
-        if (number == 14 && await ColumnExistsAsync(connection, "Actors", "HeightCm")) continue;
-        await using var command = connection.CreateCommand(); command.CommandText = await File.ReadAllTextAsync(file); await command.ExecuteNonQueryAsync();
+    if (!bridge.HasExited) {
+        bridge.Kill(true);
+        await bridge.WaitForExitAsync();
     }
 }
-static async Task<bool> MigrationRecordedAsync(SqliteConnection connection,int version){if(!await TableExistsAsync(connection,"SchemaMigrations"))return false;await using var x=connection.CreateCommand();x.CommandText="SELECT COUNT(*) FROM SchemaMigrations WHERE Version=$version";x.Parameters.AddWithValue("$version",version);return Convert.ToInt64(await x.ExecuteScalarAsync()??0L)>0;}
-static async Task<bool> ColumnExistsAsync(SqliteConnection connection,string table,string column){await using var x=connection.CreateCommand();x.CommandText=$"PRAGMA table_info({table})";await using var r=await x.ExecuteReaderAsync();while(await r.ReadAsync())if(string.Equals(r.GetString(1),column,StringComparison.OrdinalIgnoreCase))return true;return false;}
-static async Task<bool> TableExistsAsync(SqliteConnection connection,string table){await using var x=connection.CreateCommand();x.CommandText="SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$table";x.Parameters.AddWithValue("$table",table);return Convert.ToInt64(await x.ExecuteScalarAsync()??0L)>0;}
 
-static async Task<List<Sample>> PrepareSamplesAsync(string database, string mediaRoot, string imageRoot, string nfoRoot, int count,
-    bool offlineMedia, IReadOnlyList<string> requestedCodes) {
-    await using var connection = await OpenAsync(database, false);
-    await ExecuteAsync(connection, """
-        INSERT INTO AppSettings(Key,ValueJson,ValueType,UpdatedAt) VALUES
-        ('metadata.metatube.enabled','true','boolean',$at),
-        ('metadata.metatube.baseUrl','\"http://127.0.0.1:8080/\"','string',$at),
-        ('metadata.metatube.timeoutSeconds','60','integer',$at),
-        ('metadata.metatube.downloadImages','true','boolean',$at),
-        ('metadata.metatube.writeNfo','true','boolean',$at),
-        ('metadata.metatube.autoExecute','true','boolean',$at),
-        ('metadata.mdcNg.enabled','false','boolean',$at),
-        ('metadata.javbus.enabled','true','boolean',$at),
-        ('metadata.javbus.priority','2','integer',$at),
-        ('metadata.javbus.baseUrl','\"https://www.javbus.com/\"','string',$at),
-        ('metadata.javbus.timeoutSeconds','45','integer',$at),
-        ('metadata.javbus.retryCount','1','integer',$at),
-        ('metadata.javbus.cookie','\"\"','secret',$at),
-        ('metadata.javbus.downloadImages','true','boolean',$at),
-        ('metadata.dmm.enabled','false','boolean',$at),
-        ('metadata.javdb.enabled','false','boolean',$at),
-        ('mediaStorage.rootPath',$imageRoot,'string',$at),
-        ('mediaStorage.directory.posters','\"Posters\"','string',$at),
-        ('mediaStorage.directory.thumbnails','\"Thumbnails\"','string',$at),
-        ('mediaStorage.directory.fanart','\"Fanart\"','string',$at),
-        ('mediaStorage.directory.previews','\"Previews\"','string',$at),
-        ('mediaStorage.directory.screenshots','\"Screenshots\"','string',$at),
-        ('mediaStorage.directory.wallCrops','\"WallCrops\"','string',$at),
-        ('mediaStorage.directory.gif','\"Gif\"','string',$at),
-        ('mediaStorage.directory.nfo','\"Nfo\"','string',$at),
-        ('nfo.export.outputDirectory',$nfo,'string',$at)
-        ON CONFLICT(Key) DO UPDATE SET ValueJson=excluded.ValueJson,ValueType=excluded.ValueType,UpdatedAt=excluded.UpdatedAt
-        """, ("$at", DateTimeOffset.UtcNow.ToString("O")), ("$nfo", JsonSerializer.Serialize(nfoRoot)), ("$imageRoot", JsonSerializer.Serialize(imageRoot)));
+static async Task BackupDatabaseAsync(string source, string destination)
+{
+    if (!File.Exists(source)) throw new FileNotFoundException("Source database was not found.", source);
+    await using var input = new SqliteConnection(new SqliteConnectionStringBuilder {
+        DataSource = source, Mode = SqliteOpenMode.ReadOnly, Cache = SqliteCacheMode.Private,
+    }.ToString());
+    await using var output = new SqliteConnection(new SqliteConnectionStringBuilder {
+        DataSource = destination, Mode = SqliteOpenMode.ReadWriteCreate, Cache = SqliteCacheMode.Private,
+    }.ToString());
+    await input.OpenAsync();
+    await output.OpenAsync();
+    input.BackupDatabase(output);
+}
+
+static async Task<List<Sample>> FindSamplesAsync(string database, IReadOnlyList<string> codes)
+{
     var samples = new List<Sample>();
-    if (requestedCodes.Count > 0) {
-        foreach (string requestedCode in requestedCodes.Take(count)) {
-            await using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT m.Id,trim(m.Code),
-                  COALESCE((SELECT IsFavorite FROM UserMovieState WHERE MovieId=m.Id),0),
-                  COALESCE((SELECT HasUserRating FROM UserMovieState WHERE MovieId=m.Id),0),
-                  (SELECT COUNT(*) FROM MovieTags WHERE MovieId=m.Id),
-                  (SELECT COUNT(*) FROM MovieActors WHERE MovieId=m.Id)
-                FROM Movies m
-                WHERE upper(trim(m.Code))=upper($code)
-                  AND EXISTS(SELECT 1 FROM MediaFiles f JOIN Libraries l ON l.Id=f.LibraryId
-                              WHERE f.MovieId=m.Id AND l.LibraryType='Standard')
-                ORDER BY m.Id DESC LIMIT 1
-                """;
-            command.Parameters.AddWithValue("$code", requestedCode);
-            await using var reader = await command.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
-                samples.Add(new(reader.GetInt64(0), reader.GetString(1), reader.GetInt64(2)==1, reader.GetInt64(3)==1, reader.GetInt32(4), reader.GetInt32(5)));
-        }
-    }
-    else await using (var command = connection.CreateCommand()) {
+    await using var connection = await OpenAsync(database, true);
+    foreach (string code in codes) {
+        await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT m.Id,trim(m.Code),
-              COALESCE((SELECT IsFavorite FROM UserMovieState WHERE MovieId=m.Id),0),
-              COALESCE((SELECT HasUserRating FROM UserMovieState WHERE MovieId=m.Id),0),
-              (SELECT COUNT(*) FROM MovieTags WHERE MovieId=m.Id),
-              (SELECT COUNT(*) FROM MovieActors WHERE MovieId=m.Id)
-            FROM Movies m WHERE trim(COALESCE(m.Code,''))<>''
-              AND EXISTS(SELECT 1 FROM MediaFiles f JOIN Libraries l ON l.Id=f.LibraryId
-                          WHERE f.MovieId=m.Id AND l.LibraryType='Standard')
-            ORDER BY 3 DESC,4 DESC,5 DESC,6 DESC,m.Id LIMIT $count
+            SELECT m.Id,trim(m.Code)
+              FROM Movies m
+             WHERE upper(trim(m.Code))=upper($code)
+               AND EXISTS(
+                   SELECT 1 FROM MediaFiles f
+                   JOIN Libraries l ON l.Id=f.LibraryId
+                  WHERE f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video'
+                    AND l.LibraryType='Standard')
+             ORDER BY m.Id DESC LIMIT 1
             """;
-        command.Parameters.AddWithValue("$count", count);
-        await using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync()) samples.Add(new(reader.GetInt64(0), reader.GetString(1), reader.GetInt64(2)==1, reader.GetInt64(3)==1, reader.GetInt32(4), reader.GetInt32(5)));
+        command.Parameters.AddWithValue("$code", code);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        if (!await reader.ReadAsync()) throw new InvalidOperationException($"Standard movie not found: {code}");
+        samples.Add(new(reader.GetInt64(0), reader.GetString(1)));
     }
-    if (samples.Count < count) throw new InvalidOperationException($"数据库中只有 {samples.Count} 部符合条件的 Standard 影片可用于烟测。");
-    for (int index=0; index<samples.Count; index++) {
-        Sample sample=samples[index]; string safe=Safe(sample.Code); string media=Path.Combine(mediaRoot,safe+".mp4");
-        await ResetProviderMetadataAsync(connection, sample.Id);
-        if (!offlineMedia) await File.WriteAllBytesAsync(media,[0,0,0,24,102,116,121,112,105,115,111,109]);
-        await ExecuteAsync(connection,"UPDATE MediaFiles SET FilePath=$path,NormalizedPath=$normalized,FileName=$name,ExistsState=$state WHERE Id=(SELECT Id FROM MediaFiles WHERE MovieId=$id AND IsPrimary=1 ORDER BY Id LIMIT 1)",( "$path",media),("$normalized",media.ToUpperInvariant()),("$name",Path.GetFileName(media)),("$state",offlineMedia?"Missing":"Present"),("$id",sample.Id));
-        if (index < 5) {
-            string image=Path.Combine(imageRoot,"BigPic",safe+".jpg"); Directory.CreateDirectory(Path.GetDirectoryName(image)!); WriteJpeg(image);
-            samples[index]=sample with { ProtectedImagePath=image,ProtectedImageHash=Hash(image) };
-        }
-        if (index is >=5 and <10) {
-            string nfo=Path.Combine(nfoRoot,safe+".nfo"); string text=$"<?xml version=\"1.0\" encoding=\"utf-8\"?><movie><title>User protected {safe}</title><id>{safe}</id></movie>"; await File.WriteAllTextAsync(nfo,text,new UTF8Encoding(false));
-            samples[index]=sample with { ProtectedNfoPath=nfo,ProtectedNfoText=text };
-        }
-    }
+    if (samples.Select(value => value.Id).Distinct().Count() != 5)
+        throw new InvalidOperationException("The five codes do not resolve to five distinct movies.");
     return samples;
 }
 
-static async Task ResetProviderMetadataAsync(SqliteConnection connection, long movieId)
+static async Task ConfigureIsolatedDatabaseAsync(string database, string imageRoot, IReadOnlyList<Sample> samples)
 {
-    await using var transaction = await connection.BeginTransactionAsync();
-    foreach (string relation in new[] { "MovieActors", "MovieGenres", "MovieSeries", "MovieStudios", "MovieDirectors" }) {
-        await using var command = connection.CreateCommand();
-        command.Transaction = (SqliteTransaction)transaction;
-        command.CommandText = $"DELETE FROM {relation} WHERE MovieId=$id";
-        command.Parameters.AddWithValue("$id", movieId);
-        await command.ExecuteNonQueryAsync();
+    await using var connection = await OpenAsync(database, false);
+    string now = DateTimeOffset.UtcNow.ToString("O");
+    var values = new Dictionary<string, (string Value, string Type)> {
+        ["metadata.metatube.enabled"] = ("true", "boolean"),
+        ["metadata.metatube.baseUrl"] = (JsonSerializer.Serialize("http://127.0.0.1:8080/"), "string"),
+        ["metadata.metatube.timeoutSeconds"] = ("60", "integer"),
+        ["metadata.metatube.downloadImages"] = ("true", "boolean"),
+        ["metadata.metatube.writeNfo"] = ("true", "boolean"),
+        ["metadata.metatube.autoExecute"] = ("true", "boolean"),
+        ["metadata.mdcNg.enabled"] = ("false", "boolean"),
+        ["metadata.javbus.enabled"] = ("false", "boolean"),
+        ["metadata.dmm.enabled"] = ("false", "boolean"),
+        ["metadata.javdb.enabled"] = ("false", "boolean"),
+        ["mediaStorage.rootPath"] = (JsonSerializer.Serialize(imageRoot), "string"),
+        ["mediaStorage.directory.posters"] = (JsonSerializer.Serialize("Posters"), "string"),
+        ["mediaStorage.directory.thumbnails"] = (JsonSerializer.Serialize("Thumbnails"), "string"),
+        ["mediaStorage.directory.fanart"] = (JsonSerializer.Serialize("Fanart"), "string"),
+        ["mediaStorage.directory.previews"] = (JsonSerializer.Serialize("Previews"), "string"),
+        ["mediaStorage.directory.screenshots"] = (JsonSerializer.Serialize("Screenshots"), "string"),
+        ["mediaStorage.directory.wallCrops"] = (JsonSerializer.Serialize("WallCrops"), "string"),
+        ["mediaStorage.directory.gif"] = (JsonSerializer.Serialize("Gif"), "string"),
+        ["mediaStorage.directory.nfo"] = (JsonSerializer.Serialize("Nfo"), "string"),
+        ["nfo.export.outputDirectory"] = (JsonSerializer.Serialize(Path.Combine(imageRoot, "Nfo")), "string"),
+        ["nfo.export.policy"] = (JsonSerializer.Serialize("SkipExisting"), "string"),
+    };
+    foreach ((string key, (string value, string type)) in values) {
+        await ExecuteAsync(connection, """
+            INSERT INTO AppSettings(Key,ValueJson,ValueType,UpdatedAt) VALUES($key,$value,$type,$at)
+            ON CONFLICT(Key) DO UPDATE SET ValueJson=excluded.ValueJson,ValueType=excluded.ValueType,UpdatedAt=excluded.UpdatedAt
+            """, ("$key", key), ("$value", value), ("$type", type), ("$at", now));
     }
-    await ExecuteTransactionAsync(connection, transaction, "DELETE FROM ExternalIds WHERE EntityType='Movie' AND EntityId=$id", ("$id", movieId));
-    await ExecuteTransactionAsync(connection, transaction, "DELETE FROM Images WHERE MovieId=$id AND COALESCE(IsLocked,0)=0 AND COALESCE(Ownership,'Provider')<>'User'", ("$id", movieId));
-    await ExecuteTransactionAsync(connection, transaction, "DELETE FROM NfoDocuments WHERE MovieId=$id AND COALESCE(IsLocked,0)=0 AND COALESCE(Ownership,'Provider')<>'User'", ("$id", movieId));
-    await ExecuteTransactionAsync(connection, transaction, """
-        UPDATE Movies SET Title=Code,OriginalTitle=NULL,SortTitle=Code,Description=NULL,ReleaseDate=NULL,
-          DurationSeconds=0,ProviderRating=NULL,NfoPath=NULL,IsScraped=0,ScrapeStatus='pending',UpdatedAt=$at
-        WHERE Id=$id
-        """, ("$at", DateTimeOffset.UtcNow.ToString("O")), ("$id", movieId));
-    await transaction.CommitAsync();
+    string sampleIds = string.Join(',', samples.Select(value => value.Id));
+    await ExecuteAsync(connection, $"""
+        UPDATE MediaFiles SET ExistsState='Missing'
+         WHERE IsPrimary=1 AND MediaType='Video' AND MovieId NOT IN ({sampleIds})
+        """);
 }
 
-static Process StartBridge(string dll,string database,string imageRoot,string url,string token,string logRoot) {
-    var info=new ProcessStartInfo("dotnet",$"\"{dll}\"") { UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true,CreateNoWindow=true };
-    info.Environment["LMM_DATABASE_PATH"]=database;info.Environment["LMM_IMAGE_ROOT"]=imageRoot;info.Environment["LMM_BRIDGE_URL"]=url;info.Environment["LMM_BRIDGE_TOKEN"]=token;info.Environment["LMM_CONFIG_DATABASE_PATH"]=Path.Combine(logRoot,"no-legacy-config.db");
-    var process=Process.Start(info)??throw new InvalidOperationException("无法启动隔离 Bridge。");
-    _=PumpAsync(process.StandardOutput,Path.Combine(logRoot,"bridge-stdout.log"));_=PumpAsync(process.StandardError,Path.Combine(logRoot,"bridge-stderr.log"));return process;
-}
-static async Task PumpAsync(StreamReader reader,string path){await using var writer=new StreamWriter(path,false,new UTF8Encoding(false)){AutoFlush=true};while(await reader.ReadLineAsync() is string line)await writer.WriteLineAsync(line);}
-static async Task WaitForBridgeAsync(HttpClient client,Process process){for(int i=0;i<60;i++){if(process.HasExited)throw new InvalidOperationException($"Bridge 提前退出：{process.ExitCode}");try{using var response=await client.GetAsync("/health");if(response.IsSuccessStatusCode)return;}catch(HttpRequestException){}await Task.Delay(500);}throw new TimeoutException("Bridge 未在 30 秒内就绪。");}
-static async Task PostAsync(HttpClient client,string path){using var response=await client.PostAsync(path,null);response.EnsureSuccessStatusCode();}
-static async Task<ProviderProbe[]> ProbeProvidersAsync(HttpClient client)
+static async Task ClearProviderMetadataAsync(string database, IReadOnlyList<Sample> samples)
 {
-    var values = new List<ProviderProbe>();
-    var tests = new (string Name, string Path, object Body)[] {
-        ("MetaTube", "/api/settings/providers/metatube/test", new { enabled=true, baseUrl="http://127.0.0.1:8080/", timeoutSeconds=15, downloadImages=true, writeNfo=true, autoExecute=true, nonDestructive=true }),
-        ("JavBus", "/api/settings/providers/javbus/test", new { enabled=true, priority=2, baseUrl="https://www.javbus.com/", timeoutSeconds=20, retryCount=0, cookie="", downloadImages=true, fillMissingOnly=true }),
-        ("DMM", "/api/settings/providers/dmm/test", new { enabled=false, priority=3, baseUrl="https://www.dmm.co.jp/", timeoutSeconds=20, retryCount=0, cookie="", downloadImages=true, fillMissingOnly=true }),
-        ("JavDB", "/api/settings/providers/javdb/test", new { enabled=false, priority=4, baseUrl="https://javdb.com/", timeoutSeconds=20, retryCount=0, cookie="", downloadImages=true, fillMissingOnly=true }),
-        ("Minnano", "/api/settings/providers/minnano/test", new { enabled=false, priority=1, baseUrl="https://www.minnano-av.com/", timeoutSeconds=20, retryCount=0, cookie="", downloadImages=true, fillMissingOnly=true }),
-        ("Wikipedia JP", "/api/settings/providers/wikipedia-jp/test", new { enabled=false, priority=2, baseUrl="https://ja.wikipedia.org/", timeoutSeconds=20, retryCount=0, cookie="", downloadImages=false, fillMissingOnly=true }),
-    };
-    foreach ((string name, string path, object body) in tests) {
-        try {
-            using HttpResponseMessage response = await client.PostAsJsonAsync(path, body);
-            string json = await response.Content.ReadAsStringAsync();
-            if (!response.IsSuccessStatusCode) values.Add(new(name, false, 0, $"HTTP {(int)response.StatusCode}: {json}"));
-            else {
-                using JsonDocument document = JsonDocument.Parse(json);
-                JsonElement root = document.RootElement;
-                values.Add(new(name, root.GetProperty("success").GetBoolean(), root.GetProperty("elapsedMilliseconds").GetInt64(), root.GetProperty("message").GetString() ?? ""));
-            }
-        } catch (Exception error) {
-            values.Add(new(name, false, 0, error.Message));
+    await using var connection = await OpenAsync(database, false);
+    foreach (Sample sample in samples) {
+        await using var transaction = await connection.BeginTransactionAsync();
+        foreach (string relation in new[] { "MovieActors", "MovieGenres", "MovieSeries", "MovieStudios", "MovieDirectors" }) {
+            if (!await TableExistsAsync(connection, relation, transaction)) continue;
+            await ExecuteTransactionAsync(connection, transaction, $"DELETE FROM {relation} WHERE MovieId=$id", ("$id", sample.Id));
         }
+        await ExecuteTransactionAsync(connection, transaction, "DELETE FROM ExternalIds WHERE EntityType='Movie' AND EntityId=$id", ("$id", sample.Id));
+        await ExecuteTransactionAsync(connection, transaction, """
+            DELETE FROM Images WHERE MovieId=$id
+             AND COALESCE(IsLocked,0)=0 AND COALESCE(Ownership,'Provider')<>'User'
+            """, ("$id", sample.Id));
+        if (await TableExistsAsync(connection, "NfoDocuments", transaction)) {
+            await ExecuteTransactionAsync(connection, transaction, """
+                DELETE FROM NfoDocuments WHERE MovieId=$id
+                 AND COALESCE(IsLocked,0)=0 AND COALESCE(Ownership,'Provider')<>'User'
+                """, ("$id", sample.Id));
+        }
+        await ExecuteTransactionAsync(connection, transaction, """
+            UPDATE Movies SET Title=Code,OriginalTitle=NULL,SortTitle=Code,Description=NULL,ReleaseDate=NULL,
+                   DurationSeconds=0,ProviderRating=NULL,NfoPath=NULL,IsScraped=0,ScrapeStatus='pending',UpdatedAt=$at
+             WHERE Id=$id
+            """, ("$at", DateTimeOffset.UtcNow.ToString("O")), ("$id", sample.Id));
+        await transaction.CommitAsync();
     }
+}
+
+static Process StartBridge(string dll, string database, string imageRoot, string token, string logRoot)
+{
+    var info = new ProcessStartInfo("dotnet", $"\"{dll}\"") {
+        UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
+    };
+    info.Environment["LMM_DATABASE_PATH"] = database;
+    info.Environment["LMM_IMAGE_ROOT"] = imageRoot;
+    info.Environment["LMM_DATA_ROOT"] = Path.GetDirectoryName(Path.GetDirectoryName(database)!)!;
+    info.Environment["LMM_CONFIG_DATABASE_PATH"] = Path.Combine(logRoot, "isolated-config.sqlite");
+    info.Environment["LMM_BRIDGE_URL"] = BridgeUrl;
+    info.Environment["LMM_BRIDGE_TOKEN"] = token;
+    Process process = Process.Start(info) ?? throw new InvalidOperationException("Could not start the isolated Bridge.");
+    _ = PumpAsync(process.StandardOutput, Path.Combine(logRoot, "bridge-stdout.log"));
+    _ = PumpAsync(process.StandardError, Path.Combine(logRoot, "bridge-stderr.log"));
+    return process;
+}
+
+static async Task PumpAsync(StreamReader reader, string path)
+{
+    await using var writer = new StreamWriter(path, false, new UTF8Encoding(false)) { AutoFlush = true };
+    while (await reader.ReadLineAsync() is string line) await writer.WriteLineAsync(line);
+}
+
+static async Task WaitForBridgeAsync(HttpClient client, Process process)
+{
+    for (int attempt = 0; attempt < 120; attempt++) {
+        if (process.HasExited) throw new InvalidOperationException($"Bridge exited early with code {process.ExitCode}.");
+        try {
+            using HttpResponseMessage response = await client.GetAsync("/health");
+            if (response.IsSuccessStatusCode) return;
+        } catch (HttpRequestException) { }
+        await Task.Delay(500);
+    }
+    throw new TimeoutException("The isolated Bridge did not become healthy in 60 seconds.");
+}
+
+static async Task<JsonElement> PostJsonAsync(HttpClient client, string path, object body)
+{
+    using HttpResponseMessage response = await client.PostAsJsonAsync(path, body);
+    string content = await response.Content.ReadAsStringAsync();
+    if (!response.IsSuccessStatusCode) throw new HttpRequestException($"POST {path}: HTTP {(int)response.StatusCode}: {content}");
+    using JsonDocument document = JsonDocument.Parse(content);
+    return document.RootElement.Clone();
+}
+
+static async Task<JsonElement> GetJsonAsync(HttpClient client, string path)
+{
+    using HttpResponseMessage response = await client.GetAsync(path);
+    string content = await response.Content.ReadAsStringAsync();
+    if (!response.IsSuccessStatusCode) throw new HttpRequestException($"GET {path}: HTTP {(int)response.StatusCode}: {content}");
+    using JsonDocument document = JsonDocument.Parse(content);
+    return document.RootElement.Clone();
+}
+
+static async Task WaitForTasksAsync(string database, IReadOnlyList<long> taskIds, TimeSpan timeout)
+{
+    Stopwatch watch = Stopwatch.StartNew();
+    string ids = string.Join(',', taskIds);
+    while (watch.Elapsed < timeout) {
+        await using var connection = await OpenAsync(database, true);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM Tasks WHERE Id IN ({ids}) AND Status NOT IN ('Completed','CompletedWithWarnings','NoResult','Blocked','Failed','Cancelled')";
+        if (Convert.ToInt64(await command.ExecuteScalarAsync() ?? 0L) == 0) return;
+        await Task.Delay(1000);
+    }
+    throw new TimeoutException("The five MetaTube tasks did not finish within 45 minutes.");
+}
+
+static async Task<List<MovieSnapshot>> SnapshotAsync(string database, IReadOnlyList<Sample> samples)
+{
+    var result = new List<MovieSnapshot>();
+    await using var connection = await OpenAsync(database, true);
+    foreach (Sample sample in samples) {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT m.Id,COALESCE(m.Code,''),COALESCE(m.Title,''),COALESCE(m.OriginalTitle,''),
+                   COALESCE(m.Description,''),COALESCE(m.ReleaseDate,''),COALESCE(m.DurationSeconds,0),
+                   m.ProviderRating,COALESCE(m.IsScraped,0),COALESCE(m.ScrapeStatus,''),COALESCE(m.NfoPath,''),
+                   COALESCE(s.IsFavorite,0),COALESCE(s.UserRating,0),COALESCE(s.HasUserRating,0),
+                   COALESCE(s.PlayCount,0),COALESCE(s.LastPlayedAt,''),COALESCE(s.LastPositionSeconds,0),COALESCE(s.Notes,'')
+              FROM Movies m LEFT JOIN UserMovieState s ON s.MovieId=m.Id WHERE m.Id=$id
+            """;
+        command.Parameters.AddWithValue("$id", sample.Id);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        if (!await reader.ReadAsync()) throw new InvalidOperationException($"Movie disappeared: {sample.Id}");
+        var core = new MovieCore(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
+            reader.GetString(4), reader.GetString(5), reader.GetInt64(6), reader.IsDBNull(7) ? null : reader.GetDouble(7),
+            reader.GetInt64(8) == 1, reader.GetString(9), reader.GetString(10));
+        var user = new UserProtection(reader.GetInt64(11) == 1, reader.GetDouble(12), reader.GetInt64(13) == 1,
+            reader.GetInt64(14), reader.GetString(15), reader.GetInt64(16), reader.GetString(17),
+            await ReadNamesAsync(connection, "Tags", "MovieTags", "TagId", sample.Id),
+            await ReadPlayHistoryAsync(connection, sample.Id));
+        RelationSnapshot relations = new(
+            await ReadNamesAsync(connection, "Actors", "MovieActors", "ActorId", sample.Id),
+            await ReadNamesAsync(connection, "Genres", "MovieGenres", "GenreId", sample.Id),
+            await ReadNamesAsync(connection, "Directors", "MovieDirectors", "DirectorId", sample.Id),
+            await ReadNamesAsync(connection, "Studios", "MovieStudios", "StudioId", sample.Id),
+            await ReadNamesAsync(connection, "Series", "MovieSeries", "SeriesId", sample.Id));
+        List<MediaFileSnapshot> mediaFiles = await ReadMediaFilesAsync(connection, sample.Id);
+        List<ImageSnapshot> images = await ReadImagesAsync(connection, sample.Id);
+        List<NfoSnapshot> nfos = await ReadNfosAsync(connection, sample.Id);
+        string[] externalIds = await ReadExternalIdsAsync(connection, sample.Id);
+        MovieHealth health = CalculateHealth(core, relations, images, nfos);
+        result.Add(new(sample.Id, sample.Code, core, user, relations, mediaFiles, images, nfos, externalIds, health));
+    }
+    return result;
+}
+
+static async Task<string[]> ReadNamesAsync(SqliteConnection connection, string table, string relation, string key, long movieId)
+{
+    if (!await TableExistsAsync(connection, table) || !await TableExistsAsync(connection, relation)) return [];
+    await using var command = connection.CreateCommand();
+    command.CommandText = $"SELECT e.Name FROM {table} e JOIN {relation} r ON r.{key}=e.Id WHERE r.MovieId=$id ORDER BY e.Name COLLATE NOCASE";
+    command.Parameters.AddWithValue("$id", movieId);
+    var values = new List<string>();
+    await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+    while (await reader.ReadAsync()) values.Add(reader.GetString(0));
     return values.ToArray();
 }
-static async Task WaitForTasksAsync(string database,IReadOnlyList<long> ids,TimeSpan timeout){var watch=Stopwatch.StartNew();while(watch.Elapsed<timeout){await using var c=await OpenAsync(database,true);await using var x=c.CreateCommand();x.CommandText=$"SELECT COUNT(*) FROM Tasks WHERE Id IN ({string.Join(',',ids)}) AND Status NOT IN ('Completed','CompletedWithWarnings','NoResult','Blocked','Failed','Cancelled')";if(Convert.ToInt64(await x.ExecuteScalarAsync()??0L)==0)return;await Task.Delay(1000);}throw new TimeoutException("MetaTube 批量任务未在时限内结束。");}
 
-static async Task<List<Snapshot>> SnapshotAsync(string database,IReadOnlyList<Sample> samples){var result=new List<Snapshot>();await using var c=await OpenAsync(database,true);foreach(Sample sample in samples){await using var x=c.CreateCommand();x.CommandText="""SELECT m.Id,m.Code,COALESCE(m.Title,''),COALESCE(m.Description,''),COALESCE(m.ReleaseDate,''),m.DurationSeconds,COALESCE(s.IsFavorite,0),CASE WHEN COALESCE(s.HasUserRating,0)=1 THEN s.UserRating END,COALESCE(s.Notes,''),(SELECT COUNT(*) FROM Images WHERE MovieId=m.Id),(SELECT COUNT(*) FROM NfoDocuments WHERE MovieId=m.Id),EXISTS(SELECT 1 FROM NfoDocuments WHERE MovieId=m.Id AND FilePath<>''),(SELECT COALESCE(json_group_array(t.Name),'[]') FROM Tags t JOIN MovieTags mt ON mt.TagId=t.Id WHERE mt.MovieId=m.Id AND t.Source='User'),(SELECT COUNT(*) FROM MovieActors WHERE MovieId=m.Id) FROM Movies m LEFT JOIN UserMovieState s ON s.MovieId=m.Id WHERE m.Id=$id""";x.Parameters.AddWithValue("$id",sample.Id);await using var r=await x.ExecuteReaderAsync();await r.ReadAsync();result.Add(new(r.GetInt64(0),r.GetString(1),r.GetString(2),r.GetString(3),r.GetString(4),r.GetInt32(5),r.GetInt64(6)==1,r.IsDBNull(7)?null:r.GetDouble(7),r.GetString(8),r.GetInt32(9),r.GetInt32(10),r.GetInt64(11)==1,JsonSerializer.Deserialize<string[]>(r.GetString(12))??[],r.GetInt32(13)));}return result;}
-static async Task<List<TaskEvidence>> ReadTasksAsync(string database,IReadOnlyList<long> ids){var list=new List<TaskEvidence>();await using var c=await OpenAsync(database,true);await using var x=c.CreateCommand();x.CommandText=$"SELECT Id,COALESCE(CurrentMovieId,0),Status,COALESCE(Stage,''),COALESCE(ErrorMessage,''),RetryCount,COALESCE(ResultJson,'') FROM Tasks WHERE Id IN ({string.Join(',',ids)}) ORDER BY Id";await using var r=await x.ExecuteReaderAsync();while(await r.ReadAsync())list.Add(new(r.GetInt64(0),r.GetInt64(1),r.GetString(2),r.GetString(3),r.GetString(4),r.GetInt32(5),r.GetString(6)));return list;}
-static async Task<List<object>> ReadTaskLogsAsync(string database,IReadOnlyList<long> ids){var list=new List<object>();await using var c=await OpenAsync(database,true);await using var x=c.CreateCommand();x.CommandText=$"SELECT TaskId,Level,Message,CreatedAt FROM TaskLogs WHERE TaskId IN ({string.Join(',',ids)}) ORDER BY Id";await using var r=await x.ExecuteReaderAsync();while(await r.ReadAsync())list.Add(new{taskId=r.GetInt64(0),level=r.GetString(1),message=r.GetString(2),createdAt=r.GetString(3)});return list;}
-static async Task<ProviderStats[]> ReadProviderStatsAsync(string database,IReadOnlyList<long> ids){var list=new List<ProviderStats>();await using var c=await OpenAsync(database,true);await using var x=c.CreateCommand();x.CommandText=$"SELECT COALESCE(Provider,'Unknown'),Status,COALESCE(ResultJson,'') FROM Tasks WHERE Id IN ({string.Join(',',ids)}) ORDER BY Id";await using var r=await x.ExecuteReaderAsync();while(await r.ReadAsync()){string json=r.GetString(2);list.Add(new(r.GetString(0),r.GetString(1),json.Contains("\"Title\":",StringComparison.OrdinalIgnoreCase),json.Contains("\"Actors\":",StringComparison.OrdinalIgnoreCase),json.Contains("\"Genres\":",StringComparison.OrdinalIgnoreCase),json.Contains("\"ImagesDownloaded\":",StringComparison.OrdinalIgnoreCase)));}return list.ToArray();}
-static string RenderReport(string root,string source,IReadOnlyList<Sample> samples,IReadOnlyList<TaskEvidence> tasks,IReadOnlyList<ProviderStats> providerStats,int completed,int completedWithWarnings,int failed,int cancelled,int noResult,int blocked,int providerMismatch,int networkFailures,int images,int nfos,int nfoFiles,int users,int protectedImages,int protectedNfos,long temporary,string integrity,long foreignKeys)=>$"""
-    # Local Media Manager 0.7.5 real sync provider smoke
+static async Task<List<PlayHistorySnapshot>> ReadPlayHistoryAsync(SqliteConnection connection, long movieId)
+{
+    var values = new List<PlayHistorySnapshot>();
+    await using var command = connection.CreateCommand();
+    command.CommandText = "SELECT Id,MovieId,MediaFileId,StartedAt,EndedAt,PositionSeconds,DurationSeconds,Completed,PlayerName,LegacyId FROM PlayHistory WHERE MovieId=$id ORDER BY Id";
+    command.Parameters.AddWithValue("$id", movieId);
+    await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+    while (await reader.ReadAsync()) values.Add(new(reader.GetInt64(0), reader.GetInt64(1), reader.IsDBNull(2) ? null : reader.GetInt64(2),
+        reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetInt64(5), reader.GetInt64(6),
+        reader.GetInt64(7) == 1, reader.IsDBNull(8) ? null : reader.GetString(8), reader.IsDBNull(9) ? null : reader.GetInt64(9)));
+    return values;
+}
 
-    - Executed: {DateTimeOffset.Now:O}
-    - Source database: `{Path.GetFileName(source)}` (opened read-only and copied with SQLite backup API)
-    - Isolated run: `{Path.GetFileName(root)}`
-    - Samples: {samples.Count}
-    - Completed: {completed}
-    - Completed with warnings: {completedWithWarnings}
-    - Failed: {failed}
-    - Cancelled: {cancelled}
-    - No result: {noResult}
-    - Blocked: {blocked}
-    - Provider code mismatch: {providerMismatch}
-    - Network/provider request failures: {networkFailures}
-    - Images registered: {images}
-    - NFO database records added: {nfos}
-    - NFO physical files created: {nfoFiles}
-    - User state/tag sets preserved: {users}/{samples.Count}
-    - Existing image files preserved: {protectedImages}/{samples.Count(s=>s.ProtectedImageHash is not null)}
-    - Existing user NFO preserved: {protectedNfos}/{samples.Count(s=>s.ProtectedNfoText is not null)}
-    - Temporary files remaining: {temporary}
-    - `integrity_check`: `{integrity}`
-    - `foreign_key_check` rows: {foreignKeys}
-    - Retried tasks: {tasks.Count(t=>t.RetryCount>0)}
-    - Provider success: {string.Join("; ", providerStats.GroupBy(s=>s.Provider).Select(g=>$"{g.Key}: {g.Count(x=>x.Status is "Completed" or "CompletedWithWarnings")}/{g.Count()}"))}
+static async Task<List<MediaFileSnapshot>> ReadMediaFilesAsync(SqliteConnection connection, long movieId)
+{
+    var values = new List<MediaFileSnapshot>();
+    await using var command = connection.CreateCommand();
+    command.CommandText = "SELECT Id,MovieId,LibraryId,FilePath,NormalizedPath,FileName,Extension,FileSize,MediaType,SourceType,IsPrimary,ExistsState,FileHash FROM MediaFiles WHERE MovieId=$id ORDER BY Id";
+    command.Parameters.AddWithValue("$id", movieId);
+    await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+    while (await reader.ReadAsync()) values.Add(new(reader.GetInt64(0), reader.GetInt64(1), reader.IsDBNull(2) ? null : reader.GetInt64(2),
+        reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetString(6),
+        reader.GetInt64(7), reader.GetString(8), reader.GetString(9), reader.GetInt64(10) == 1, reader.GetString(11),
+        reader.IsDBNull(12) ? null : reader.GetString(12)));
+    return values;
+}
 
-    Evidence: `evidence/before.json`, `evidence/after.json`, `evidence/tasks.json`, `evidence/task-logs.json`, `evidence/provider-stats.json`, and Bridge logs under `logs/`.
-    """;
-static async Task<SqliteConnection> OpenAsync(string path,bool readOnly){var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=path,Mode=readOnly?SqliteOpenMode.ReadOnly:SqliteOpenMode.ReadWrite,Cache=SqliteCacheMode.Private}.ToString());await c.OpenAsync();if(!readOnly)await ExecuteAsync(c,"PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");return c;}
-static async Task ExecuteAsync(SqliteConnection c,string sql,params(string,object?)[] p){await using var x=c.CreateCommand();x.CommandText=sql;foreach(var(n,v)in p)x.Parameters.AddWithValue(n,v??DBNull.Value);await x.ExecuteNonQueryAsync();}
-static async Task ExecuteTransactionAsync(SqliteConnection c,System.Data.Common.DbTransaction tx,string sql,params(string,object?)[] p){await using var x=c.CreateCommand();x.Transaction=(SqliteTransaction)tx;x.CommandText=sql;foreach(var(n,v)in p)x.Parameters.AddWithValue(n,v??DBNull.Value);await x.ExecuteNonQueryAsync();}
-static async Task<long> ScalarLongAsync(SqliteConnection c,string sql){await using var x=c.CreateCommand();x.CommandText=sql;return Convert.ToInt64(await x.ExecuteScalarAsync()??0L);}
-static async Task<long> ScalarLongFromPathAsync(string path,string sql){await using var c=await OpenAsync(path,true);return await ScalarLongAsync(c,sql);}
-static async Task<string?> ScalarTextAsync(string path,string sql){await using var c=await OpenAsync(path,true);await using var x=c.CreateCommand();x.CommandText=sql;return(await x.ExecuteScalarAsync())?.ToString();}
-static string Safe(string value)=>string.Concat(value.Select(ch=>Path.GetInvalidFileNameChars().Contains(ch)?'_':ch));
-static string Hash(string path){using var stream=File.OpenRead(path);return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();}
-static void WriteJpeg(string path){using var bitmap=new SKBitmap(320,480);using var canvas=new SKCanvas(bitmap);canvas.Clear(new SKColor(36,44,58));using var image=SKImage.FromBitmap(bitmap);using var data=image.Encode(SKEncodedImageFormat.Jpeg,88);using var stream=File.Create(path);data.SaveTo(stream);}
-static Task WriteJsonAsync(string path,object value)=>File.WriteAllTextAsync(path,JsonSerializer.Serialize(value,new JsonSerializerOptions{WriteIndented=true}),new UTF8Encoding(false));
-sealed record Sample(long Id,string Code,bool Favorite,bool HasRating,int TagCount,int ActorCount,string? ProtectedImagePath=null,string? ProtectedImageHash=null,string? ProtectedNfoPath=null,string? ProtectedNfoText=null);
-sealed record Snapshot(long Id,string Code,string Title,string Description,string ReleaseDate,int DurationSeconds,bool Favorite,double? UserRating,string Notes,int ImageCount,int NfoCount,bool NfoExists,string[] UserTags,int ActorCount);
-sealed record TaskEvidence(long Id,long MovieId,string Status,string Stage,string Error,int RetryCount,string ResultJson);
-sealed record ProviderStats(string Provider,string Status,bool TitleSignal,bool ActorSignal,bool GenreSignal,bool ImageSignal);
-sealed record ProviderProbe(string Provider,bool Success,long ElapsedMilliseconds,string Message);
+static async Task<List<ImageSnapshot>> ReadImagesAsync(SqliteConnection connection, long movieId)
+{
+    var values = new List<ImageSnapshot>();
+    await using var command = connection.CreateCommand();
+    command.CommandText = "SELECT Id,ImageType,COALESCE(FilePath,''),COALESCE(SourceUrl,''),COALESCE(SourceProvider,''),COALESCE(Ownership,''),COALESCE(IsLocked,0),COALESCE(IsPrimary,0),COALESCE(FileSize,0),COALESCE(FileHash,'') FROM Images WHERE MovieId=$id ORDER BY Id";
+    command.Parameters.AddWithValue("$id", movieId);
+    await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+    while (await reader.ReadAsync()) {
+        string path = reader.GetString(2);
+        values.Add(new(reader.GetInt64(0), reader.GetString(1), path, reader.GetString(3), reader.GetString(4), reader.GetString(5),
+            reader.GetInt64(6) == 1, reader.GetInt64(7) == 1, reader.GetInt64(8), reader.GetString(9),
+            File.Exists(path), File.Exists(path) ? Hash(path) : null));
+    }
+    return values;
+}
+
+static async Task<List<NfoSnapshot>> ReadNfosAsync(SqliteConnection connection, long movieId)
+{
+    if (!await TableExistsAsync(connection, "NfoDocuments")) return [];
+    var values = new List<NfoSnapshot>();
+    await using var command = connection.CreateCommand();
+    command.CommandText = "SELECT Id,FilePath,Ownership,IsLocked,COALESCE(SourceProvider,''),COALESCE(FileHash,'') FROM NfoDocuments WHERE MovieId=$id ORDER BY Id";
+    command.Parameters.AddWithValue("$id", movieId);
+    await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+    while (await reader.ReadAsync()) {
+        string path = reader.GetString(1);
+        values.Add(new(reader.GetInt64(0), path, reader.GetString(2), reader.GetInt64(3) == 1, reader.GetString(4),
+            reader.GetString(5), File.Exists(path), File.Exists(path) ? Hash(path) : null));
+    }
+    return values;
+}
+
+static async Task<string[]> ReadExternalIdsAsync(SqliteConnection connection, long movieId)
+{
+    await using var command = connection.CreateCommand();
+    command.CommandText = "SELECT Provider || ':' || ExternalId FROM ExternalIds WHERE EntityType='Movie' AND EntityId=$id ORDER BY Provider,ExternalId";
+    command.Parameters.AddWithValue("$id", movieId);
+    var values = new List<string>();
+    await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+    while (await reader.ReadAsync()) values.Add(reader.GetString(0));
+    return values.ToArray();
+}
+
+static MovieHealth CalculateHealth(MovieCore core, RelationSnapshot relations, IReadOnlyList<ImageSnapshot> images, IReadOnlyList<NfoSnapshot> nfos)
+{
+    bool poster = images.Any(value => value.Type.Equals("Poster", StringComparison.OrdinalIgnoreCase) && value.FileExists);
+    bool fanart = images.Any(value => (value.Type.Equals("Fanart", StringComparison.OrdinalIgnoreCase) || value.Type.Equals("BigPic", StringComparison.OrdinalIgnoreCase)) && value.FileExists);
+    bool preview = images.Any(value => (value.Type.Equals("Preview", StringComparison.OrdinalIgnoreCase) || value.Type.Equals("ExtraPic", StringComparison.OrdinalIgnoreCase)) && value.FileExists);
+    bool nfo = (!string.IsNullOrWhiteSpace(core.NfoPath) && File.Exists(core.NfoPath)) || nfos.Any(value => value.FileExists);
+    bool complete = !string.IsNullOrWhiteSpace(core.Code) && core.Code == core.Code.ToUpperInvariant()
+        && !string.IsNullOrWhiteSpace(core.Title) && !string.IsNullOrWhiteSpace(core.ReleaseDate)
+        && relations.Studios.Length > 0 && relations.Actors.Length > 0 && relations.Genres.Length > 0
+        && poster && fanart && nfo;
+    return new(!string.IsNullOrWhiteSpace(core.Code), !string.IsNullOrWhiteSpace(core.Title), !string.IsNullOrWhiteSpace(core.ReleaseDate),
+        relations.Studios.Length > 0, relations.Actors.Length > 0, relations.Genres.Length > 0, poster, fanart, preview, nfo, complete);
+}
+
+static async Task<List<TaskEvidence>> ReadTasksAsync(string database, IReadOnlyList<long> taskIds)
+{
+    string ids = string.Join(',', taskIds);
+    var values = new List<TaskEvidence>();
+    await using var connection = await OpenAsync(database, true);
+    await using var command = connection.CreateCommand();
+    command.CommandText = $"""
+        SELECT t.Id,COALESCE(t.CurrentMovieId,0),COALESCE(t.Provider,''),t.Status,COALESCE(t.Stage,''),
+               COALESCE(t.ErrorMessage,''),t.RetryCount,COALESCE(t.ResultJson,''),COALESCE(t.ResultSummary,''),
+               COALESCE(t.StartedAt,''),COALESCE(t.CompletedAt,''),
+               COALESCE(s.BeforeJson,''),COALESCE(s.AppliedJson,''),COALESCE(s.Provider,'')
+          FROM Tasks t LEFT JOIN MetadataSyncSnapshots s ON s.TaskId=t.Id
+         WHERE t.Id IN ({ids}) ORDER BY t.Id
+        """;
+    await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+    while (await reader.ReadAsync()) values.Add(new(reader.GetInt64(0), reader.GetInt64(1), reader.GetString(2), reader.GetString(3),
+        reader.GetString(4), reader.GetString(5), reader.GetInt32(6), reader.GetString(7), reader.GetString(8),
+        reader.GetString(9), reader.GetString(10), reader.GetString(11), reader.GetString(12), reader.GetString(13)));
+    return values;
+}
+
+static async Task<List<TaskLog>> ReadTaskLogsAsync(string database, IReadOnlyList<long> taskIds)
+{
+    string ids = string.Join(',', taskIds);
+    var values = new List<TaskLog>();
+    await using var connection = await OpenAsync(database, true);
+    await using var command = connection.CreateCommand();
+    command.CommandText = $"SELECT TaskId,Level,Message,CreatedAt FROM TaskLogs WHERE TaskId IN ({ids}) ORDER BY Id";
+    await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+    while (await reader.ReadAsync()) values.Add(new(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3)));
+    return values;
+}
+
+static Verification Verify(IReadOnlyList<MovieSnapshot> source, IReadOnlyList<MovieSnapshot> before,
+    IReadOnlyList<MovieSnapshot> after, IReadOnlyList<TaskEvidence> tasks, IReadOnlyList<TaskLog> logs,
+    IReadOnlyList<JsonElement> playground, string integrity, long foreignKeys)
+{
+    bool Protected(MovieSnapshot left, MovieSnapshot right) =>
+        JsonSerializer.Serialize(left.User) == JsonSerializer.Serialize(right.User)
+        && JsonSerializer.Serialize(left.MediaFiles) == JsonSerializer.Serialize(right.MediaFiles);
+    int sourceProtection = source.Zip(before).Count(pair => Protected(pair.First, pair.Second));
+    int afterProtection = before.Zip(after).Count(pair => Protected(pair.First, pair.Second));
+    int completed = tasks.Count(value => value.Status == "Completed");
+    int warnings = tasks.Count(value => value.Status == "CompletedWithWarnings");
+    int fullyPopulated = after.Count(value => value.Health.Complete && value.Health.Preview);
+    int registeredTypes = after.Count(value => new[] { "Poster", "Fanart", "Preview" }.All(type =>
+        value.Images.Any(image => image.Type.Equals(type, StringComparison.OrdinalIgnoreCase) && image.FileExists && image.FileSize > 0)));
+    int nfoFiles = after.Count(value => value.Health.Nfo);
+    int fieldSources = tasks.Count(value => value.AppliedJson.Contains("FieldSources", StringComparison.OrdinalIgnoreCase)
+        && value.AppliedJson.Contains("MetaTube/", StringComparison.OrdinalIgnoreCase));
+    bool onlyMetaTube = tasks.Count == 5 && tasks.All(value => value.Provider.Equals("FANZA", StringComparison.OrdinalIgnoreCase)
+        || value.SnapshotProvider.Equals("FANZA", StringComparison.OrdinalIgnoreCase))
+        && logs.All(value => !value.Message.Contains("[JavBus]", StringComparison.OrdinalIgnoreCase)
+            && !value.Message.Contains("[MDC-NG]", StringComparison.OrdinalIgnoreCase));
+    bool playgroundOk = playground.Count == 5 && playground.All(value =>
+        value.TryGetProperty("parserSucceeded", out JsonElement parsed) && parsed.GetBoolean()
+        && value.TryGetProperty("providerResult", out JsonElement providerResult) && providerResult.ValueKind == JsonValueKind.Object);
+    bool passed = sourceProtection == 5 && afterProtection == 5 && completed == 5 && warnings == 0
+        && fullyPopulated == 5 && registeredTypes == 5 && nfoFiles == 5 && fieldSources == 5
+        && onlyMetaTube && playgroundOk && integrity == "ok" && foreignKeys == 0;
+    return new(passed, sourceProtection, afterProtection, completed, warnings, fullyPopulated, registeredTypes,
+        nfoFiles, fieldSources, onlyMetaTube, playgroundOk, integrity, foreignKeys);
+}
+
+static string RenderReport(string root, string sourceDatabase, IReadOnlyList<Sample> samples,
+    IReadOnlyList<MovieSnapshot> before, IReadOnlyList<MovieSnapshot> after, IReadOnlyList<TaskEvidence> tasks,
+    JsonElement healthBefore, JsonElement healthAfter, Verification verification)
+{
+    string rows = string.Join(Environment.NewLine, samples.Select((sample, index) => {
+        MovieSnapshot left = before[index]; MovieSnapshot right = after[index]; TaskEvidence task = tasks.Single(value => value.MovieId == sample.Id);
+        return $"| {sample.Id} | {sample.Code} | {task.Status} | {left.Relations.Actors.Length}->{right.Relations.Actors.Length} | {left.Relations.Genres.Length}->{right.Relations.Genres.Length} | {left.Health.Poster}->{right.Health.Poster} | {left.Health.Fanart}->{right.Health.Fanart} | {left.Health.Preview}->{right.Health.Preview} | {left.Health.Nfo}->{right.Health.Nfo} | {left.Health.Complete}->{right.Health.Complete} |";
+    }));
+    long beforeComplete = healthBefore.TryGetProperty("completeMovies", out JsonElement beforeValue) ? beforeValue.GetInt64() : -1;
+    long afterComplete = healthAfter.TryGetProperty("completeMovies", out JsonElement afterValue) ? afterValue.GetInt64() : -1;
+    return $"""
+        # v0.7.7 MetaTube Stage 2 isolated write smoke
+
+        - Executed: {DateTimeOffset.Now:O}
+        - Source database: `{Path.GetFileName(sourceDatabase)}` (SQLite read-only backup; source was never written)
+        - Isolated root: `{root}`
+        - Scope: exactly five Standard movies; MetaTube only
+        - Result: {(verification.Passed ? "PASS" : "FAIL")}
+        - Tasks: Completed={verification.Completed}, CompletedWithWarnings={verification.CompletedWithWarnings}
+        - Protected user state/tags/playback: {verification.ProtectedAfter}/5
+        - MediaFile identity/path/association preserved: {verification.ProtectedAfter}/5
+        - Poster + Fanart + Preview downloaded and registered: {verification.RegisteredImageTypes}/5
+        - NFO physical file and record: {verification.NfoFiles}/5
+        - FieldSources recorded as MetaTube source: {verification.FieldSources}/5
+        - ProviderResult parser success: {(verification.PlaygroundOk ? "5/5" : "FAIL")}
+        - Metadata Health complete count: {beforeComplete} -> {afterComplete}
+        - SQLite integrity_check: `{verification.Integrity}`
+        - SQLite foreign_key_check rows: {verification.ForeignKeys}
+        - Other Provider activity: {(verification.OnlyMetaTube ? "none" : "detected")}
+
+        | MovieId | Code | Task | Actors | Genres | Poster | Fanart | Preview | NFO | Complete |
+        |---:|---|---|---:|---:|---|---|---|---|---|
+        {rows}
+
+        Evidence files are under `evidence/`: ProviderResult, Merge/Writer snapshots, SQLite Before/After,
+        task logs and history, Metadata Health Before/After, detail API Before/After, and image API results.
+        """;
+}
+
+static async Task<SqliteConnection> OpenAsync(string path, bool readOnly)
+{
+    var connection = new SqliteConnection(new SqliteConnectionStringBuilder {
+        DataSource = path, Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWrite,
+        Cache = SqliteCacheMode.Private,
+    }.ToString());
+    await connection.OpenAsync();
+    if (!readOnly) await ExecuteAsync(connection, "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
+    return connection;
+}
+
+static async Task<bool> TableExistsAsync(SqliteConnection connection, string table, System.Data.Common.DbTransaction? transaction = null)
+{
+    await using var command = connection.CreateCommand();
+    command.Transaction = transaction as SqliteTransaction;
+    command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$table";
+    command.Parameters.AddWithValue("$table", table);
+    return Convert.ToInt64(await command.ExecuteScalarAsync() ?? 0L) > 0;
+}
+
+static async Task ExecuteAsync(SqliteConnection connection, string sql, params (string Name, object? Value)[] parameters)
+{
+    await using var command = connection.CreateCommand();
+    command.CommandText = sql;
+    foreach ((string name, object? value) in parameters) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+    await command.ExecuteNonQueryAsync();
+}
+
+static async Task ExecuteTransactionAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
+    string sql, params (string Name, object? Value)[] parameters)
+{
+    await using var command = connection.CreateCommand();
+    command.Transaction = transaction as SqliteTransaction;
+    command.CommandText = sql;
+    foreach ((string name, object? value) in parameters) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+    await command.ExecuteNonQueryAsync();
+}
+
+static async Task<string?> ScalarTextFromPathAsync(string database, string sql)
+{
+    await using var connection = await OpenAsync(database, true);
+    await using var command = connection.CreateCommand();
+    command.CommandText = sql;
+    return (await command.ExecuteScalarAsync())?.ToString();
+}
+
+static async Task<long> ScalarLongFromPathAsync(string database, string sql)
+{
+    await using var connection = await OpenAsync(database, true);
+    await using var command = connection.CreateCommand();
+    command.CommandText = sql;
+    return Convert.ToInt64(await command.ExecuteScalarAsync() ?? 0L);
+}
+
+static string Hash(string path)
+{
+    using FileStream stream = File.OpenRead(path);
+    return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+}
+
+static Task WriteJsonAsync(string path, object value) => File.WriteAllTextAsync(path,
+    JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
+
+sealed record Sample(long Id, string Code);
+sealed record MovieCore(long Id, string Code, string Title, string OriginalTitle, string Description, string ReleaseDate,
+    long DurationSeconds, double? ProviderRating, bool IsScraped, string ScrapeStatus, string NfoPath);
+sealed record UserProtection(bool Favorite, double UserRating, bool HasUserRating, long PlayCount, string LastPlayedAt,
+    long LastPositionSeconds, string Notes, string[] UserTags, IReadOnlyList<PlayHistorySnapshot> PlayHistory);
+sealed record PlayHistorySnapshot(long Id, long MovieId, long? MediaFileId, string StartedAt, string? EndedAt,
+    long PositionSeconds, long DurationSeconds, bool Completed, string? PlayerName, long? LegacyId);
+sealed record RelationSnapshot(string[] Actors, string[] Genres, string[] Directors, string[] Studios, string[] Series);
+sealed record MediaFileSnapshot(long Id, long MovieId, long? LibraryId, string FilePath, string NormalizedPath,
+    string FileName, string? Extension, long FileSize, string MediaType, string SourceType, bool IsPrimary,
+    string ExistsState, string? FileHash);
+sealed record ImageSnapshot(long Id, string Type, string Path, string SourceUrl, string SourceProvider, string Ownership,
+    bool IsLocked, bool IsPrimary, long FileSize, string FileHash, bool FileExists, string? ActualHash);
+sealed record NfoSnapshot(long Id, string Path, string Ownership, bool IsLocked, string SourceProvider,
+    string FileHash, bool FileExists, string? ActualHash);
+sealed record MovieHealth(bool Number, bool Title, bool ReleaseDate, bool Studio, bool Actors, bool Genres,
+    bool Poster, bool Fanart, bool Preview, bool Nfo, bool Complete);
+sealed record MovieSnapshot(long Id, string Code, MovieCore Core, UserProtection User, RelationSnapshot Relations,
+    IReadOnlyList<MediaFileSnapshot> MediaFiles, IReadOnlyList<ImageSnapshot> Images, IReadOnlyList<NfoSnapshot> Nfos,
+    string[] ExternalIds, MovieHealth Health);
+sealed record TaskEvidence(long Id, long MovieId, string Provider, string Status, string Stage, string Error,
+    int RetryCount, string ResultJson, string ResultSummary, string StartedAt, string CompletedAt,
+    string BeforeJson, string AppliedJson, string SnapshotProvider);
+sealed record TaskLog(long TaskId, string Level, string Message, string CreatedAt);
+sealed record Verification(bool Passed, int ProtectedSourceToBaseline, int ProtectedAfter, int Completed,
+    int CompletedWithWarnings, int FullyPopulated, int RegisteredImageTypes, int NfoFiles, int FieldSources,
+    bool OnlyMetaTube, bool PlaygroundOk, string Integrity, long ForeignKeys);

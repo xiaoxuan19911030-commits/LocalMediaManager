@@ -283,7 +283,7 @@ export default function SettingsPage() {
         {category === 'general' && <GeneralSection snapshot={snapshot} system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
         {category === 'metadata' && <MetadataSection/>}
         {category === 'plugins' && <><MdcPathMappingsSection value={draft.mdcNg} onChange={(value) => updateDraft('mdcNg', value)}/><PluginsSection snapshot={snapshot} mdcNg={draft.mdcNg} setMdcNg={(value) => updateDraft('mdcNg', value)} metaTube={draft.metaTube} setMetaTube={(value) => updateDraft('metaTube', value)} providerNetwork={draft.providerNetwork} setProviderNetwork={(value) => updateDraft('providerNetwork', value)} javBus={draft.javBus} setJavBus={(value) => updateDraft('javBus', value)} dmm={draft.dmm} setDmm={(value) => updateDraft('dmm', value)} javDb={draft.javDb} setJavDb={(value) => updateDraft('javDb', value)} minnano={draft.minnano} setMinnano={(value) => updateDraft('minnano', value)} wikipediaJp={draft.wikipediaJp} setWikipediaJp={(value) => updateDraft('wikipediaJp', value)} setNotice={setNotice}/></>}
-        {category === 'rename' && <RenameSettingsSection setNotice={setNotice}/>}
+        {category === 'rename' && <RenameSettingsSection value={draft.rename} setValue={(value) => updateDraft('rename', value)}/>}
         {category === 'mediaStorage' && <MediaStorageSection mediaStorage={draft.mediaStorage} defaults={defaults.mediaStorage} setMediaStorage={(value) => updateDraft('mediaStorage', value)} setNotice={setNotice}/>}
         {category === 'search' && <SearchSection search={draft.search} setSearch={(value) => updateDraft('search', value)}/>}
         {category === 'shortcuts' && <ShortcutSection system={draft.system} setSystem={(value) => updateDraft('system', value)}/>}
@@ -836,6 +836,9 @@ function MovieWallSection({ value, setValue }: { value: MovieWallDisplaySettings
           <MenuItem value="grid">卡片</MenuItem>
           <MenuItem value="list">列表</MenuItem>
         </TextField>
+        <TextField select size="small" label="封面裁切" value={value.coverCropMode} onChange={event => setValue({ ...value, coverCropMode: event.target.value as MovieWallDisplaySettings['coverCropMode'] })}>
+          <MenuItem value="AutoFace">智能识别</MenuItem><MenuItem value="Left">居左裁切</MenuItem><MenuItem value="Center">居中裁切</MenuItem><MenuItem value="Right">居右裁切</MenuItem>
+        </TextField>
       </Box>
       <Typography variant="body2" color="text.secondary">默认值：展示墙海报、详情页背景图、卡片视图。</Typography>
     </Stack>
@@ -1182,14 +1185,26 @@ function FfmpegSettingsDialog({ open, value, detection, onChange, onClose, onSav
   </Dialog>
 }
 
-const renameTokens = ['{VID}', '{Label}', '{ActorNames}', '{Title}', '{VideoType}', '{Year}', '{Runtime}', '{Country}', '{Director}', '{Series}', '{Category}', '{Publisher}', '{Rating}', '{ReleaseDate}']
-const renameSeparators = [' - ', '-', '_', ' ', '·', ',', '，']
+const renameTokens = [
+  { token: '{VID}', label: '识别码' },
+  { token: '{Label}', label: '标签' },
+  { token: '{ActorNames}', label: '演员' },
+  { token: '{Title}', label: '标题' },
+  { token: '{VideoType}', label: '视频类型' },
+  { token: '{Year}', label: '年份' },
+  { token: '{Runtime}', label: '时长' },
+  { token: '{Country}', label: '国家' },
+  { token: '{Director}', label: '导演' },
+  { token: '{Series}', label: '系列' },
+  { token: '{Category}', label: '类别' },
+  { token: '{Publisher}', label: '发行商' },
+  { token: '{Rating}', label: '评分' },
+  { token: '{ReleaseDate}', label: '发行日期' },
+]
+const renameSeparators = [' - ', '-', '+', '_', ' ', '·', ',', '，']
 
-function RenameSettingsSection({ setNotice }: { setNotice: (value: string) => void }) {
-  const [value, setValue] = useState<RenameSettings>()
+function RenameSettingsSection({ value, setValue }: { value: RenameSettings; setValue: (value: RenameSettings) => void }) {
   const inputRef = useRef<HTMLInputElement>(null)
-  useEffect(() => { bridge.renameSettings().then(setValue).catch((reason: Error) => setNotice(reason.message)) }, [setNotice])
-  if (!value) return <SurfaceSection title="重命名" description="正在读取重命名设置。"><Typography color="text.secondary">正在加载...</Typography></SurfaceSection>
   const insert = (token: string) => {
     const input = inputRef.current
     const start = input?.selectionStart ?? value.template.length
@@ -1219,9 +1234,8 @@ function RenameSettingsSection({ setNotice }: { setNotice: (value: string) => vo
           <TextField select label="标签 / 演员 / 类别分隔符" value={value.listSeparator} onChange={event => setValue({ ...value, listSeparator: event.target.value })}>{renameSeparators.map(item => <MenuItem key={`list-${item}`} value={item}>{item === ' ' ? '空格' : item}</MenuItem>)}</TextField>
         </Box>
         <TextField label="重命名规则" value={value.template} inputRef={inputRef} onChange={event => setValue({ ...value, template: event.target.value })}/>
-        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>{renameTokens.map(token => <Button size="small" variant="outlined" key={token} onClick={() => insert(token)}>{token}</Button>)}</Stack>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>{renameTokens.map(item => <Button size="small" variant="outlined" key={item.token} onClick={() => insert(item.token)}>{item.label}</Button>)}</Stack>
         <TextField label="改名预览" value={`${preview}.mp4`} slotProps={{ input: { readOnly: true } }}/>
-        <Box><Button variant="contained" onClick={() => bridge.saveRenameSettings(value).then(saved => { setValue(saved); setNotice('重命名设置已保存') }).catch((reason: Error) => setNotice(reason.message))}>保存重命名设置</Button></Box>
       </Stack>
     </SurfaceSection>
   </Stack>

@@ -43,9 +43,10 @@ export function TaskStatusBadge({ status }: { status: string }) {
     Blocked: '被阻断',
     Failed: '失败',
     Cancelled: '已取消',
-    Info: 'Info',
-    Warning: 'Warning',
-    Error: 'Error',
+    Info: '信息',
+    Warning: '警告',
+    Error: '错误',
+    Debug: '调试',
   }
   return <StatusBadge label={labels[status] ?? status} tone={tone}/>
 }

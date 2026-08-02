@@ -156,11 +156,17 @@ pub fn run() {
         .setup(|app| {
             let token = Uuid::new_v4().simple().to_string();
             let bridge_already_running = bridge_port_is_in_use();
-            let log_dir = PathBuf::from(r"D:\Local Media Manager Next Data\logs");
-            if !bridge_already_running {
+            let data_root = app.path().resource_dir()
+                .ok()
+                .map(|path| path.join("数据"))
+                .expect("application data directory");
+            let log_dir = PathBuf::from(r"D:\自用软件\部署安装目录\本地媒体管理器\数据\logs");
+            if !bridge_already_running && !data_root.join("data").join("LocalMediaManager.db").is_file() {
                 if let Some(path) = migration_candidates(app).into_iter().find(|path| path.is_file()) {
                     let mut command = Command::new(path);
                     command.args(["upgrade", "--confirm"]);
+                    command.env("LMM_NEXT_DATA_ROOT", &data_root);
+                    command.env("LMM_LEGACY_ROOT", &data_root);
                     configure_release_process(&mut command, &log_dir.join("migration.log"))?;
                     let status = command.status()?;
                     if !status.success() { return Err(format!("数据库升级失败：{status}").into()); }
@@ -175,6 +181,8 @@ pub fn run() {
                     .and_then(|path| {
                         let mut command = Command::new(path);
                         command.env("LMM_BRIDGE_TOKEN", &token);
+                        command.env("LMM_DATA_ROOT", &data_root);
+                        command.env("LMM_LEGACY_ROOT", &data_root);
                         configure_release_process(&mut command, &log_dir.join("bridge.log")).ok()?;
                         command.spawn().ok()
                     })

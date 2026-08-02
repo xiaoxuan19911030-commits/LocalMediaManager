@@ -1,4 +1,6 @@
 import EditRoundedIcon from '@mui/icons-material/EditRounded'
+import CheckRoundedIcon from '@mui/icons-material/CheckRounded'
+import KeyboardArrowRightRoundedIcon from '@mui/icons-material/KeyboardArrowRightRounded'
 import SyncRoundedIcon from '@mui/icons-material/SyncRounded'
 import { Divider, MenuItem, MenuList, Paper, Snackbar, Stack } from '@mui/material'
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
@@ -43,30 +45,35 @@ export default function MediaPage() {
   const [editMode, setEditMode] = useState(false)
   const [syncAllBusy, setSyncAllBusy] = useState(false)
   const [reloadSignal, setReloadSignal] = useState(0)
-  const [contextMenu, setContextMenu] = useState<{ mouseX: number; mouseY: number; item: MediaItem }>()
+  const [contextMenu, setContextMenu] = useState<{ mouseX: number; mouseY: number; item: MediaItem; cropMode: 'AutoFace' | 'Left' | 'Center' | 'Right' }>()
   const contextMenuRef = useRef<HTMLDivElement>(null)
+  const cropSubmenuRef = useRef<HTMLDivElement>(null)
+  const [cropSubmenuOpen, setCropSubmenuOpen] = useState(false)
   const [deletePreview, setDeletePreview] = useState<SafeDeletePreview>()
   const [deleteCommand, setDeleteCommand] = useState<SafeDeletePreviewCommand>()
   const refresh = () => setReloadSignal((value) => value + 1)
-  const closeContextMenu = () => setContextMenu(undefined)
+  const closeContextMenu = () => { setContextMenu(undefined); setCropSubmenuOpen(false) }
   const openContextMenu = (event: MouseEvent, item: MediaItem) => {
     event.preventDefault()
+    setCropSubmenuOpen(false)
     setContextMenu({
       mouseX: Math.min(event.clientX + 2, window.innerWidth - 180),
       mouseY: Math.min(event.clientY - 6, window.innerHeight - 260),
       item,
+      cropMode: 'AutoFace',
     })
+    bridge.coverCrop(item.dataId).then(crop => setContextMenu(current => current?.item.dataId === item.dataId ? { ...current, cropMode: crop.mode } : current)).catch(() => undefined)
   }
   useEffect(() => {
     if (!contextMenu) return
     const close = () => closeContextMenu()
     const onPointerDown = (event: PointerEvent) => {
       if (event.button === 2) return
-      if (contextMenuRef.current?.contains(event.target as Node)) return
+      if (contextMenuRef.current?.contains(event.target as Node) || cropSubmenuRef.current?.contains(event.target as Node)) return
       close()
     }
     const onContextMenu = (event: globalThis.MouseEvent) => {
-      if (contextMenuRef.current?.contains(event.target as Node)) event.preventDefault()
+      if (contextMenuRef.current?.contains(event.target as Node) || cropSubmenuRef.current?.contains(event.target as Node)) event.preventDefault()
       else close()
     }
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') close() }
@@ -122,10 +129,10 @@ export default function MediaPage() {
     closeContextMenu()
     if (item) bridge.generateMovieImage(item.dataId, type).then((result) => setNotice(`${result.message} 可在任务中心查看进度。`)).catch((reason: Error) => setNotice(reason.message))
   }
-  const cropContextImage = () => {
+  const setContextCropMode = (mode: 'AutoFace' | 'Left' | 'Center' | 'Right') => {
     const item = contextMenu?.item
     closeContextMenu()
-    if (item) bridge.cropMovieCard(item.dataId, { aspectRatio: 16 / 9, anchor: 'center' }).then((result) => { setNotice(result.message); refresh() }).catch((reason: Error) => setNotice(reason.message))
+    if (item) bridge.setCoverCrop(item.dataId, mode).then(() => { window.dispatchEvent(new CustomEvent('lmm:cover-crop-updated', { detail: item.dataId })); setNotice('封面裁切已更新'); refresh() }).catch((reason: Error) => setNotice(reason.message))
   }
   const openContextLocation = () => {
     const item = contextMenu?.item
@@ -175,13 +182,19 @@ export default function MediaPage() {
       ] : [
         <MenuItem key="sync" onClick={syncContextMovie}>同步信息</MenuItem>,
         <Divider key="divider-1"/>,
-        <MenuItem key="crop" onClick={cropContextImage}>裁切卡图</MenuItem>,
+        <Divider key="crop-divider" />,
+        <MenuItem key="crop" onMouseEnter={() => setCropSubmenuOpen(true)} onClick={() => setCropSubmenuOpen((open) => !open)} aria-haspopup="menu" aria-expanded={cropSubmenuOpen}>裁切封面<KeyboardArrowRightRoundedIcon fontSize="small" sx={{ ml: 'auto' }}/></MenuItem>,
         <MenuItem key="screenshot" onClick={() => generateContextImage('Screenshot')}>生成截图</MenuItem>,
         <MenuItem key="gif" onClick={() => generateContextImage('GIF')}>生成 GIF</MenuItem>,
         <Divider key="divider-2"/>,
         <MenuItem key="location" onClick={openContextLocation}>打开位置</MenuItem>,
         <MenuItem key="delete-file" onClick={() => contextMenu?.item && openSafeDelete([contextMenu.item.dataId])}>删除影片</MenuItem>,
       ]}
+      </MenuList>
+    </Paper>}
+    {contextMenu && cropSubmenuOpen && <Paper ref={cropSubmenuRef} elevation={8} onContextMenu={(event) => event.preventDefault()} onMouseLeave={() => setCropSubmenuOpen(false)} sx={{ position: 'fixed', top: Math.min(contextMenu.mouseY + 68, window.innerHeight - 160), left: Math.min(contextMenu.mouseX + 150, window.innerWidth - 148), zIndex: (theme) => theme.zIndex.modal + 1, minWidth: 148, py: .5, borderRadius: 1.5, '& .MuiMenuItem-root': { minHeight: 34, py: .75, fontSize: 14 } }}>
+      <MenuList dense autoFocusItem={false} aria-label="裁切封面">
+        {([['AutoFace', '智能识别'], ['Left', '居左裁切'], ['Center', '居中裁切'], ['Right', '居右裁切']] as const).map(([mode, label]) => <MenuItem key={mode} selected={contextMenu.cropMode === mode} onClick={() => setContextCropMode(mode)}>{contextMenu.cropMode === mode ? <CheckRoundedIcon fontSize="small" sx={{ mr: 1 }}/> : <span style={{ width: 20, display: 'inline-block' }}/>} {label}</MenuItem>)}
       </MenuList>
     </Paper>}
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>

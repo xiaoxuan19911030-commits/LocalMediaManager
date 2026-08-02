@@ -1,7 +1,8 @@
-param(
-    [string]$InstallDir = 'D:\Local Media Manager Next',
-    [string]$DataDir = 'D:\Local Media Manager Next Data',
-    [string]$BackupRoot = 'D:\Local Media Manager Next Backups',
+﻿param(
+    [string]$InstallDir = 'D:\自用软件\部署安装目录\本地媒体管理器',
+    [string]$DataDir = 'D:\自用软件\部署安装目录\本地媒体管理器\数据',
+    [string]$BackupRoot = 'D:\自用软件\备份目录\本地媒体管理器',
+    [string]$ReleaseVersion = 'v0.7.9',
     [switch]$SkipBuild,
     [switch]$Launch
 )
@@ -72,6 +73,16 @@ function Invoke-NativeCommand([string]$Name, [scriptblock]$Command) {
     }
 }
 
+function Remove-ManagedReleaseBackups([string]$Root) {
+    # Only backups created under the new versioned convention are eligible.
+    $managed = @(Get-ChildItem -LiteralPath $Root -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^v\d+\.\d+\.\d+$' } |
+        Sort-Object LastWriteTime -Descending)
+    foreach ($backup in $managed | Select-Object -Skip 3) {
+        Remove-Item -LiteralPath $backup.FullName -Recurse -Force
+    }
+}
+
 function Build-ReleaseArtifacts([string]$RepoRoot) {
     Invoke-NativeCommand -Name 'Web build' -Command { pnpm.cmd build:web }
     Invoke-NativeCommand -Name 'Bridge publish' -Command { pnpm.cmd bridge:publish }
@@ -88,8 +99,10 @@ function Build-ReleaseArtifacts([string]$RepoRoot) {
 
 $repoRoot = Resolve-StrictPath (Join-Path $PSScriptRoot '..')
 $installFull = Resolve-StrictPath $InstallDir
-$timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$backupDir = Join-Path $BackupRoot "deploy-$timestamp"
+if ($ReleaseVersion -notmatch '^v\d+\.\d+\.\d+$') {
+    throw "ReleaseVersion must use a versioned backup name such as v0.7.9."
+}
+$backupDir = Join-Path $BackupRoot $ReleaseVersion
 $programBackupDir = Join-Path $backupDir 'program-before'
 $dataBackupDir = Join-Path $backupDir 'user-data'
 
@@ -167,6 +180,8 @@ try {
     if ($Launch) {
         Start-Process -FilePath $installedExe -WorkingDirectory $installFull | Out-Null
     }
+
+    Remove-ManagedReleaseBackups -Root $BackupRoot
 } finally {
     Pop-Location
 }

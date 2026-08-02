@@ -76,6 +76,8 @@ public static class ImageFileValidator
 public sealed class ImageAssetService(string databasePath, string imageRoot)
 {
     private string CacheRoot => Path.GetFullPath(Path.Combine(imageRoot, ".lmm-cache", "thumbnails"));
+    private const string CardThumbnailCacheKind = "CardThumbnailV4";
+    private const int CardThumbnailWidth = 720;
     private const string ActiveImagePredicate = "COALESCE(SourceProvider,'')<>'LegacyFile' AND NOT (COALESCE(FilePath,'') LIKE '%JVDIO%' OR COALESCE(FilePath,'') LIKE '%Jvedio%' OR COALESCE(FilePath,'') LIKE '%BigPic%' OR COALESCE(FilePath,'') LIKE '%SmallPic%' OR COALESCE(FilePath,'') LIKE '%ExtraPic%')";
     private const string ActiveCachePredicate = "NOT (COALESCE(SourceImagePath,'') LIKE '%JVDIO%' OR COALESCE(SourceImagePath,'') LIKE '%Jvedio%' OR COALESCE(SourceImagePath,'') LIKE '%BigPic%' OR COALESCE(SourceImagePath,'') LIKE '%SmallPic%' OR COALESCE(SourceImagePath,'') LIKE '%ExtraPic%')";
 
@@ -269,8 +271,9 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
         await using (SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, cancellationToken)) {
             var rows = new List<(long Id, string Path)>();
             await using (SqliteCommand command = connection.CreateCommand()) {
-                command.CommandText = "SELECT Id,CachePath FROM ImageCacheEntries WHERE MovieId=$movie AND CacheKind='CardThumbnail'";
+                command.CommandText = "SELECT Id,CachePath FROM ImageCacheEntries WHERE MovieId=$movie AND CacheKind=$kind";
                 command.Parameters.AddWithValue("$movie", movieId);
+                command.Parameters.AddWithValue("$kind", CardThumbnailCacheKind);
                 await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
                 while (await reader.ReadAsync(cancellationToken)) rows.Add((reader.GetInt64(0), reader.GetString(1)));
             }
@@ -324,8 +327,9 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
     private async Task<ImageAssetContent?> ReadCachedAsync(SqliteConnection connection, long movieId, string sourcePath, CancellationToken token)
     {
         await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT Id,CachePath FROM ImageCacheEntries WHERE MovieId=$movie AND CacheKind='CardThumbnail' AND SourceImagePath=$source ORDER BY Id DESC LIMIT 1";
+        command.CommandText = "SELECT Id,CachePath FROM ImageCacheEntries WHERE MovieId=$movie AND CacheKind=$kind AND SourceImagePath=$source ORDER BY Id DESC LIMIT 1";
         command.Parameters.AddWithValue("$movie", movieId);
+        command.Parameters.AddWithValue("$kind", CardThumbnailCacheKind);
         command.Parameters.AddWithValue("$source", sourcePath);
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(token);
         if (!await reader.ReadAsync(token)) return null;
@@ -349,19 +353,26 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
             SELECT Id,FilePath,ContentType FROM Images
              WHERE MovieId=$movie AND FilePath IS NOT NULL
                AND {ActiveImagePredicate}
-               AND (IsDerived=0 OR ($variant='thumbnail' AND ImageType='GeneratedCard'))
+               AND (IsDerived=0 OR ($variant='thumbnail' AND ImageType='GeneratedCard')
+                    OR (ImageType='Screenshot' AND IsPrimary=1))
                AND ($source<>'fanart' OR ImageType IN ('Fanart','BigPic'))
-               AND ($source<>'poster' OR ImageType IN ('Poster','GeneratedCard','Thumbnail'))
+               AND ($source<>'poster' OR ImageType IN ('Poster','GeneratedCard','Thumbnail','Preview')
+                    OR (ImageType='Screenshot' AND IsPrimary=1))
              ORDER BY
                CASE WHEN $source='thumbnail' THEN
-                 CASE ImageType WHEN 'Thumbnail' THEN 0 WHEN 'GeneratedCard' THEN 1 WHEN 'Poster' THEN 2 WHEN 'Fanart' THEN 3 ELSE 9 END
+                  CASE WHEN ImageType='Screenshot' AND IsPrimary=1 THEN 0
+                       WHEN ImageType='Poster' THEN 1
+                       WHEN ImageType='GeneratedCard' THEN 2
+                       WHEN ImageType='Thumbnail' THEN 3
+                       WHEN ImageType='Fanart' THEN 4
+                       ELSE 9 END
                WHEN $source='fanart' THEN
                  CASE ImageType WHEN 'Fanart' THEN 0 WHEN 'BigPic' THEN 1 ELSE 9 END
                ELSE
                  CASE WHEN $variant='thumbnail' THEN
-                   CASE ImageType WHEN 'GeneratedCard' THEN 0 WHEN 'Poster' THEN 1 WHEN 'Thumbnail' THEN 2 ELSE 9 END
+                   CASE ImageType WHEN 'GeneratedCard' THEN 0 WHEN 'Poster' THEN 1 WHEN 'Thumbnail' THEN 2 WHEN 'Preview' THEN 3 WHEN 'Screenshot' THEN 4 ELSE 9 END
                  ELSE
-                   CASE ImageType WHEN 'Poster' THEN 0 WHEN 'GeneratedCard' THEN 1 WHEN 'Thumbnail' THEN 2 ELSE 9 END
+                   CASE ImageType WHEN 'Poster' THEN 0 WHEN 'GeneratedCard' THEN 1 WHEN 'Thumbnail' THEN 2 WHEN 'Preview' THEN 3 WHEN 'Screenshot' THEN 4 ELSE 9 END
                  END
                END, IsLocked DESC,IsPrimary DESC, Id LIMIT 1
             """;
@@ -382,18 +393,19 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
     {
         Directory.CreateDirectory(CacheRoot);
         string hash = source.Sha256 ?? sourceId.ToString();
-        string target = Path.Combine(CacheRoot, $"{movieId}-{hash[..Math.Min(hash.Length, 16)]}-w360.jpg");
+        string target = Path.Combine(CacheRoot, $"{movieId}-{hash[..Math.Min(hash.Length, 16)]}-card-v4-w{CardThumbnailWidth}.jpg");
         if (!File.Exists(target)) {
             string temporary = target + $".{Guid.NewGuid():N}.part";
             try {
                 using SKBitmap? bitmap = SKBitmap.Decode(sourcePath);
                 if (bitmap is null) throw new InvalidDataException("源图无法解码。");
-                int width = Math.Min(360, bitmap.Width);
-                int height = Math.Max(1, (int)Math.Round(bitmap.Height * (width / (double)bitmap.Width)));
+                SKRectI sourceRect = TrimSolidBlackBottom(bitmap);
+                int width = Math.Min(CardThumbnailWidth, sourceRect.Width);
+                int height = Math.Max(1, (int)Math.Round(sourceRect.Height * (width / (double)sourceRect.Width)));
                 using var resized = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
                 using (var canvas = new SKCanvas(resized)) {
                     canvas.Clear(SKColors.Transparent);
-                    canvas.DrawBitmap(bitmap, new SKRect(0, 0, width, height), new SKSamplingOptions(SKFilterMode.Linear));
+                    canvas.DrawBitmap(bitmap, new SKRect(sourceRect.Left, sourceRect.Top, sourceRect.Right, sourceRect.Bottom), new SKRect(0, 0, width, height), new SKSamplingOptions(SKFilterMode.Linear));
                 }
                 using SKImage image = SKImage.FromBitmap(resized);
                 using SKData data = image.Encode(SKEncodedImageFormat.Jpeg, 88);
@@ -413,15 +425,38 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
         await using SqliteCommand insert = connection.CreateCommand();
         insert.CommandText = """
             INSERT INTO ImageCacheEntries(MovieId,ActorId,SourceImagePath,CachePath,CacheKind,Width,Height,FileSize,FileHash,CreatedAt,LastAccessedAt)
-            VALUES($movie,NULL,$source,$path,'CardThumbnail',$width,$height,$size,$hash,$at,$at)
+            VALUES($movie,NULL,$source,$path,$kind,$width,$height,$size,$hash,$at,$at)
             ON CONFLICT(CachePath) DO UPDATE SET LastAccessedAt=excluded.LastAccessedAt
             """;
         insert.Parameters.AddWithValue("$movie", movieId); insert.Parameters.AddWithValue("$source", sourcePath);
+        insert.Parameters.AddWithValue("$kind", CardThumbnailCacheKind);
         insert.Parameters.AddWithValue("$path", target); insert.Parameters.AddWithValue("$width", result.Width);
         insert.Parameters.AddWithValue("$height", result.Height); insert.Parameters.AddWithValue("$size", result.FileSize);
         insert.Parameters.AddWithValue("$hash", result.Sha256 ?? ""); insert.Parameters.AddWithValue("$at", Now());
         await insert.ExecuteNonQueryAsync(token);
         return new(target, "image/jpeg");
+    }
+
+    private static SKRectI TrimSolidBlackBottom(SKBitmap bitmap)
+    {
+        int bottom = bitmap.Height - 1;
+        while (bottom >= 0 && IsNearlyBlackRow(bitmap, bottom)) bottom--;
+        int removed = bitmap.Height - bottom - 1;
+        return removed >= bitmap.Height / 8 && bottom >= bitmap.Height / 3
+            ? new SKRectI(0, 0, bitmap.Width, bottom + 1)
+            : new SKRectI(0, 0, bitmap.Width, bitmap.Height);
+    }
+
+    private static bool IsNearlyBlackRow(SKBitmap bitmap, int y)
+    {
+        int samples = 0;
+        int black = 0;
+        for (int x = 0; x < bitmap.Width; x += Math.Max(1, bitmap.Width / 96)) {
+            SKColor pixel = bitmap.GetPixel(x, y);
+            samples++;
+            if (pixel.Red <= 12 && pixel.Green <= 12 && pixel.Blue <= 12) black++;
+        }
+        return samples > 0 && black >= samples * .98;
     }
 
     private static async Task UpdateValidationAsync(SqliteConnection connection, long id, ImageValidationResult result, CancellationToken token)

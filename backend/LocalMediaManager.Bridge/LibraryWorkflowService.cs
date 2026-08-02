@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.IO.Enumeration;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Hosting;
@@ -431,7 +432,7 @@ public sealed class LibraryWorkflowService(string databasePath, IMovieNumberExtr
                 await WaitIfPausedAsync(taskId, control);
                 control.Cancellation.Token.ThrowIfCancellationRequested();
                 try {
-                    ImportOutcome outcome = await ImportFileAsync(connection, taskId, libraryId, path, autoSync, libraryType);
+                    ImportOutcome outcome = await ImportFileAsync(connection, taskId, libraryId, path, autoSync, libraryType, control.Cancellation.Token);
                     imported += outcome.Imported ? 1 : 0;
                     skipped += outcome.Imported ? 0 : 1;
                     restored += outcome.RatingRestored ? 1 : 0;
@@ -498,21 +499,54 @@ public sealed class LibraryWorkflowService(string databasePath, IMovieNumberExtr
         }
     }
 
-    private async Task<ImportOutcome> ImportFileAsync(SqliteConnection connection, long scanTaskId, long libraryId, string path, bool autoSync, LibraryType libraryType)
+    private async Task<ImportOutcome> ImportFileAsync(SqliteConnection connection, long scanTaskId, long libraryId, string path, bool autoSync,
+        LibraryType libraryType, CancellationToken cancellationToken)
     {
         string normalized = NormalizePath(path);
+        var file = new FileInfo(path);
         await using var transaction = await connection.BeginTransactionAsync();
         long existing = await ScalarLongAsync(connection, transaction,
             "SELECT COALESCE(MAX(MovieId),0) FROM MediaFiles WHERE NormalizedPath=$path", ("$path", normalized));
         if (existing > 0) {
+            string? existingFingerprint = await ScalarTextAsync(connection, transaction,
+                "SELECT FileHash FROM MediaFiles WHERE NormalizedPath=$path ORDER BY Id LIMIT 1", ("$path", normalized));
+            long existingSize = await ScalarLongAsync(connection, transaction,
+                "SELECT COALESCE(FileSize,0) FROM MediaFiles WHERE NormalizedPath=$path ORDER BY Id LIMIT 1", ("$path", normalized));
+            string currentFingerprint = !string.IsNullOrWhiteSpace(existingFingerprint) && existingSize == file.Length
+                ? existingFingerprint
+                : await ComputeMediaFingerprintAsync(path, file.Length, cancellationToken);
             await ExecuteAsync(connection, transaction,
-                "UPDATE MediaFiles SET LibraryId=$library,ExistsState='Present',LastSeenAt=$at,UpdatedAt=$at WHERE NormalizedPath=$path",
-                ("$library", libraryId), ("$at", Now()), ("$path", normalized));
+                "UPDATE MediaFiles SET LibraryId=$library,FileHash=$hash,FileSize=$size,ExistsState='Present',LastSeenAt=$at,UpdatedAt=$at WHERE NormalizedPath=$path",
+                ("$library", libraryId), ("$hash", currentFingerprint), ("$size", Math.Max(0, file.Length)), ("$at", Now()), ("$path", normalized));
             await transaction.CommitAsync();
             return new(false, false);
         }
 
-        var file = new FileInfo(path);
+        string fingerprint = await ComputeMediaFingerprintAsync(path, file.Length, cancellationToken);
+        IReadOnlyList<MediaIdentityCandidate> identityCandidates = await FindIdentityCandidatesAsync(connection, transaction, fingerprint);
+        MediaIdentityCandidate[] missingCandidates = identityCandidates.Where(candidate => !File.Exists(candidate.Path)).ToArray();
+        if (identityCandidates.Count == 1 && missingCandidates.Length == 1) {
+            MediaIdentityCandidate match = missingCandidates[0];
+            string relinkSourceType = path.StartsWith("\\\\", StringComparison.Ordinal) ? "NAS" : "Local";
+            string relinkAt = Now();
+            await ExecuteAsync(connection, transaction, """
+                UPDATE MediaFiles
+                   SET LibraryId=$library,FilePath=$path,NormalizedPath=$normalized,FileName=$name,Extension=$extension,
+                       FileSize=$size,FileHash=$hash,SourceType=$source,ExistsState='Present',LastSeenAt=$at,UpdatedAt=$at
+                 WHERE Id=$id
+                """, ("$library", libraryId), ("$path", path), ("$normalized", normalized), ("$name", file.Name),
+                ("$extension", file.Extension.ToLowerInvariant()), ("$size", Math.Max(0, file.Length)), ("$hash", fingerprint),
+                ("$source", relinkSourceType), ("$at", relinkAt), ("$id", match.Id));
+            await LogAsync(connection, transaction, scanTaskId, "Info",
+                $"[Media Identity] MovieId={match.MovieId}; previous={match.Path}; current={path}; fingerprint={fingerprint}; action=Relink");
+            await transaction.CommitAsync();
+            return new(false, false);
+        }
+        if (missingCandidates.Length > 1) {
+            await LogAsync(connection, transaction, scanTaskId, "Warning",
+                $"[Media Identity] 文件指纹匹配到 {missingCandidates.Length} 个缺失记录，未自动合并：{path}");
+        }
+
         string baseName = Path.GetFileNameWithoutExtension(path).Trim();
         string title = string.IsNullOrWhiteSpace(baseName) ? file.Name : baseName;
         MovieNumberExtractionResult? extraction = libraryType == LibraryType.Standard
@@ -529,16 +563,16 @@ public sealed class LibraryWorkflowService(string databasePath, IMovieNumberExtr
             """, ("$code", code), ("$title", title), ("$at", at));
         string sourceType = path.StartsWith("\\\\", StringComparison.Ordinal) ? "NAS" : "Local";
         await ExecuteAsync(connection, transaction, """
-            INSERT INTO MediaFiles(MovieId,LibraryId,FilePath,NormalizedPath,FileName,Extension,FileSize,MediaType,SourceType,IsPrimary,ExistsState,DurationSeconds,LastSeenAt,CreatedAt,UpdatedAt)
-            VALUES($movie,$library,$path,$normalized,$name,$extension,$size,'Video',$source,1,'Present',0,$at,$at,$at)
+            INSERT INTO MediaFiles(MovieId,LibraryId,FilePath,NormalizedPath,FileName,Extension,FileSize,FileHash,MediaType,SourceType,IsPrimary,ExistsState,DurationSeconds,LastSeenAt,CreatedAt,UpdatedAt)
+            VALUES($movie,$library,$path,$normalized,$name,$extension,$size,$hash,'Video',$source,1,'Present',0,$at,$at,$at)
             """, ("$movie", movieId), ("$library", libraryId), ("$path", path), ("$normalized", normalized),
             ("$name", file.Name), ("$extension", file.Extension.ToLowerInvariant()), ("$size", Math.Max(0, file.Length)),
-            ("$source", sourceType), ("$at", at));
+            ("$hash", fingerprint), ("$source", sourceType), ("$at", at));
 
         if (extraction is not null) {
-            string warnings = extraction.Warnings.Count == 0 ? "None" : string.Join(',', extraction.Warnings);
+            string warnings = extraction.Warnings.Count == 0 ? "无" : string.Join(',', extraction.Warnings.Select(warning => warning == "NoCandidate" ? "未找到可识别番号" : warning));
             await LogAsync(connection, transaction, scanTaskId, numberAllowsSync ? "Info" : "Warning",
-                $"[Movie Number] Original={extraction.OriginalFileName}; Matched={extraction.MatchedRule ?? "None"}; Detected={extraction.DetectedNumber ?? "None"}; Normalized={extraction.NormalizedNumber ?? "None"}; Confidence={extraction.Confidence:0.00}; PartIndex={extraction.PartIndex?.ToString() ?? "None"}; Warnings={warnings}");
+                $"影片番号识别：原始文件名：{extraction.OriginalFileName}；匹配规则：{extraction.MatchedRule ?? "无"}；识别结果：{extraction.DetectedNumber ?? "无"}；标准番号：{extraction.NormalizedNumber ?? "无"}；置信度：{extraction.Confidence:0.00}；分集：{extraction.PartIndex?.ToString() ?? "无"}；提示：{warnings}");
         }
 
         bool restored = libraryType == LibraryType.Standard && await RatingHistoryService.RestoreForImportedMovieAsync(connection, transaction, movieId, code, at);
@@ -551,6 +585,44 @@ public sealed class LibraryWorkflowService(string databasePath, IMovieNumberExtr
         }
         await transaction.CommitAsync();
         return new(true, restored);
+    }
+
+    private static async Task<IReadOnlyList<MediaIdentityCandidate>> FindIdentityCandidatesAsync(SqliteConnection connection,
+        System.Data.Common.DbTransaction transaction, string fingerprint)
+    {
+        var result = new List<MediaIdentityCandidate>();
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction as SqliteTransaction;
+        command.CommandText = "SELECT Id,MovieId,FilePath FROM MediaFiles WHERE FileHash=$hash AND MediaType='Video'";
+        command.Parameters.AddWithValue("$hash", fingerprint);
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) result.Add(new(reader.GetInt64(0), reader.GetInt64(1), reader.GetString(2)));
+        return result;
+    }
+
+    private static async Task<string> ComputeMediaFingerprintAsync(string path, long length, CancellationToken cancellationToken)
+    {
+        const int sampleSize = 256 * 1024;
+        long[] offsets = length <= sampleSize
+            ? [0]
+            : [0, Math.Max(0, (length - sampleSize) / 2), Math.Max(0, length - sampleSize)];
+        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hash.AppendData(BitConverter.GetBytes(length));
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
+            sampleSize, FileOptions.Asynchronous | FileOptions.RandomAccess);
+        byte[] buffer = new byte[sampleSize];
+        foreach (long offset in offsets.Distinct()) {
+            stream.Seek(offset, SeekOrigin.Begin);
+            int read = 0;
+            while (read < buffer.Length) {
+                int count = await stream.ReadAsync(buffer.AsMemory(read, buffer.Length - read), cancellationToken);
+                if (count == 0) break;
+                read += count;
+            }
+            hash.AppendData(BitConverter.GetBytes(offset));
+            hash.AppendData(buffer, 0, read);
+        }
+        return "sample-v1:" + Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 
     private static async Task<int> RefreshMissingStatesAsync(SqliteConnection connection, long libraryId)
@@ -783,6 +855,7 @@ public sealed class LibraryWorkflowService(string databasePath, IMovieNumberExtr
     private sealed record ScanFolder(long Id, string Path, bool IncludeSubfolders, IReadOnlyList<string> ExcludePatterns);
     private sealed record ScanTaskPayload(long LibraryId, bool FullScan, bool AutoSync);
     private sealed record ImportOutcome(bool Imported, bool RatingRestored);
+    private sealed record MediaIdentityCandidate(long Id, long MovieId, string Path);
     private sealed class ScanControl
     {
         public CancellationTokenSource Cancellation { get; } = new();

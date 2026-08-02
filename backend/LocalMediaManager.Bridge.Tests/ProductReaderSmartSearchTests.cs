@@ -212,6 +212,23 @@ public sealed class ProductReaderSmartSearchTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WallCardsDoNotProbeNetworkResourcesForMetadataStatus()
+    {
+        await using (var connection = new SqliteConnection($"Data Source={Database}")) {
+            await connection.OpenAsync();
+            await Execute(connection,
+                "INSERT INTO Images(MovieId,ImageType,FilePath,IsPrimary,CreatedAt,UpdatedAt) VALUES(1,'Poster',$path,1,$at,$at)",
+                ("$path", @"\\192.0.2.1\offline\poster.jpg"), ("$at", At));
+        }
+
+        MediaPageDto wall = await ProductReader.ReadVideosPageAsync(Database, "http://localhost", "SONE-104", "newest", 10, 0);
+
+        MediaCardDto item = Assert.Single(wall.Items);
+        Assert.NotNull(item.CoverUrl);
+        Assert.False(item.MetadataStatus.Checks.Single(check => check.Key == "cover").Complete);
+    }
+
+    [Fact]
     public async Task EntityListsReturnDistinctMovieCounts()
     {
         EntityPageDto directors = await ProductReader.ReadEntitiesPageAsync(Database, "http://localhost", "directors", "", "count", 24, 0);

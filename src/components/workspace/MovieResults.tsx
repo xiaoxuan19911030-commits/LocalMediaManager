@@ -43,6 +43,7 @@ export function MovieResultContainer({
   onSelect,
   onRatingClick,
   onContextMenu,
+  onPageCapacityChange,
 }: {
   title?: string
   total?: number
@@ -58,6 +59,7 @@ export function MovieResultContainer({
   onSelect?: (item: MediaItem, selected: boolean) => void
   onRatingClick?: (item: MediaItem, value: number | null) => void
   onContextMenu?: (event: MouseEvent, item: MediaItem) => void
+  onPageCapacityChange?: (capacity: number) => void
 }) {
   useEffect(() => {
     if (import.meta.env.DEV) console.debug('[MovieWall] Received Count', { count: items.length, total })
@@ -66,7 +68,7 @@ export function MovieResultContainer({
     {title && <SectionTitle title={total === undefined ? title : `${title}（${total}）`}/>}
     {items.length === 0 ? <EmptyState title={emptyTitle} description={emptyDescription}/> : view === 'list'
       ? <MovieList items={items} onPlay={onPlay} onOpen={onOpen} onContextMenu={onContextMenu} onRatingClick={onRatingClick}/>
-      : <MediaCardGrid display={display}>{items.map(item => <MediaCard key={item.dataId} item={item} display={display} selected={selectedIds.includes(item.dataId)} onSelect={selectable ? onSelect : undefined} onRatingClick={onRatingClick} onContextMenu={onContextMenu} onPlay={onPlay} onOpen={onOpen}/>)}</MediaCardGrid>}
+      : <MediaCardGrid display={display} onPageCapacityChange={onPageCapacityChange}>{items.map(item => <MediaCard key={item.dataId} item={item} display={display} selected={selectedIds.includes(item.dataId)} onSelect={selectable ? onSelect : undefined} onRatingClick={onRatingClick} onContextMenu={onContextMenu} onPlay={onPlay} onOpen={onOpen}/>)}</MediaCardGrid>}
   </Stack>
 }
 

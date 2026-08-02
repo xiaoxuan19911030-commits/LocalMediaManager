@@ -6,7 +6,7 @@ using Microsoft.Data.Sqlite;
 string bridgeUrl = Environment.GetEnvironmentVariable("LMM_BRIDGE_URL")
     ?? "http://127.0.0.1:47831";
 string nextDataRoot = Environment.GetEnvironmentVariable("LMM_DATA_ROOT")
-    ?? @"D:\Local Media Manager Next Data";
+    ?? @"D:\自用软件\部署安装目录\本地媒体管理器\数据";
 string installedRoot = Environment.GetEnvironmentVariable("LMM_LEGACY_ROOT")
     ?? nextDataRoot;
 string databasePath = Environment.GetEnvironmentVariable("LMM_DATABASE_PATH")
@@ -29,6 +29,11 @@ builder.Services.AddSingleton(serviceProvider => new MovieNumberManagementServic
     databasePath, serviceProvider.GetRequiredService<IMovieNumberExtractor>()));
 builder.Services.AddSingleton(serviceProvider => new ProductWriter(databasePath, serviceProvider.GetRequiredService<RatingHistoryService>()));
 builder.Services.AddSingleton(new PlaybackSettingsService(databasePath, configDatabasePath));
+builder.Services.AddHttpClient("MetadataImages")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler {
+        AllowAutoRedirect = false,
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+    });
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton(serviceProvider => new LibraryWorkflowService(
     databasePath, serviceProvider.GetRequiredService<IMovieNumberExtractor>()));
@@ -52,6 +57,14 @@ builder.Services.AddSingleton(new FfmpegPluginSettingsService(databasePath));
 builder.Services.AddSingleton(new RenameSettingsService(databasePath));
 builder.Services.AddSingleton<IPersonDetectionService>(_ => new OnnxPersonDetectionService(
     Path.Combine(AppContext.BaseDirectory, "models", "ssd_mobilenet_v1_12-int8.onnx")));
+builder.Services.AddSingleton<AiModelRegistry>();
+builder.Services.AddSingleton<AiModelSessionManager>();
+builder.Services.AddSingleton<AiInferenceQueue>();
+builder.Services.AddSingleton(new AiResultCache(nextDataRoot));
+builder.Services.AddSingleton<IFaceDetectionService, YuNetFaceDetectionService>();
+builder.Services.AddSingleton(serviceProvider => new CoverCropService(
+    databasePath,
+    serviceProvider.GetRequiredService<IFaceDetectionService>()));
 builder.Services.AddSingleton(new ImageAssetService(databasePath, imageRoot));
 builder.Services.AddSingleton(serviceProvider => new ImageWorkflowService(
     databasePath,
@@ -549,6 +562,11 @@ app.MapPut("/api/image-assets/{imageId:long}/lock", async (long imageId, ImageLo
 app.MapPost("/api/videos/{movieId:long}/images/crop-card", async (long movieId, ImageCropCommand command, ImageWorkflowService images, CancellationToken token) =>
     Results.Ok(await images.CropCardAsync(movieId, command, token)));
 
+app.MapGet("/api/videos/{movieId:long}/cover-crop", async (long movieId, CoverCropService crops, CancellationToken token) =>
+    Results.Ok(await crops.ResolveAsync(movieId, token)));
+app.MapPut("/api/videos/{movieId:long}/cover-crop", async (long movieId, CoverCropUpdateCommand command, CoverCropService crops, CancellationToken token) =>
+    Results.Ok(await crops.SetAsync(movieId, command, token)));
+
 app.MapGet("/api/images/cache/cleanup-preview", async (ImageAssetService images, CancellationToken token) =>
     Results.Ok(await images.PreviewCacheCleanupAsync(token)));
 
@@ -618,8 +636,8 @@ app.MapPost("/api/organizer/duplicates/execute-delete", async (DuplicateDeleteEx
 
 if (Environment.GetEnvironmentVariable("LMM_VALIDATION_DIAGNOSTICS") == "1")
 {
-    app.MapPost("/api/validation/runtime-snapshot", (bool? fullGc, bool? clearSqlitePools, ProviderManager providers, JavBusProvider javBus) =>
-        Results.Ok(BridgeRuntimeDiagnostics.Capture(fullGc == true, clearSqlitePools == true, providers, javBus)));
+    app.MapPost("/api/validation/runtime-snapshot", (bool? fullGc, bool? clearSqlitePools, bool? includeNativeHeap, ProviderManager providers, JavBusProvider javBus) =>
+        Results.Ok(BridgeRuntimeDiagnostics.Capture(fullGc == true, clearSqlitePools == true, includeNativeHeap == true, providers, javBus)));
 }
 
 app.MapGet("/api/actors/{actorId:long}/image", async (long actorId, ImageAssetService images, CancellationToken token) => {
@@ -651,15 +669,27 @@ app.MapPost("/api/videos/{dataId:long}/play", async (long dataId, ProductWriter 
         return Results.BadRequest($"该记录不是可播放的影片文件：{path}");
 
     string? configuredPlayer = (await playback.ReadAsync()).PlayerPath;
-    var startInfo = new ProcessStartInfo { UseShellExecute = true };
-    if (!string.IsNullOrWhiteSpace(configuredPlayer) && File.Exists(configuredPlayer)) {
-        startInfo.FileName = configuredPlayer;
-        startInfo.ArgumentList.Add(path);
-    } else {
-        startInfo.FileName = path;
-    }
     DateTimeOffset startedAt = DateTimeOffset.UtcNow;
-    Process? player = Process.Start(startInfo);
+    if (string.IsNullOrWhiteSpace(configuredPlayer) || !File.Exists(configuredPlayer)) {
+        try {
+            // Shell launches may not return a process handle even when Windows has opened the default player.
+            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+            return Results.Ok(new { started = true, path, trackingWritten = false, trackingMode = "system-default" });
+        } catch (Exception error) {
+            Console.Error.WriteLine($"System-default playback launch failed: {error}");
+            return Results.Problem("系统默认播放器未能启动。", statusCode: 502);
+        }
+    }
+
+    var startInfo = new ProcessStartInfo { FileName = configuredPlayer, UseShellExecute = false };
+    startInfo.ArgumentList.Add(path);
+    Process? player;
+    try {
+        player = Process.Start(startInfo);
+    } catch (Exception error) {
+        Console.Error.WriteLine($"Configured-player launch failed: {error}");
+        return Results.Problem("播放器未能启动。", statusCode: 502);
+    }
     if (player is null) return Results.Problem("播放器未能启动。", statusCode: 502);
     _ = Task.Run(async () => {
         try {

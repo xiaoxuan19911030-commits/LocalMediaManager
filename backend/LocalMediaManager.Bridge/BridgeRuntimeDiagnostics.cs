@@ -27,7 +27,8 @@ public sealed record BridgeRuntimeMemorySnapshot(
     int ProviderHistoryEntries,
     int JavBusPageCacheEntries,
     IReadOnlyList<BridgeVirtualMemorySummary> VirtualMemorySummaries,
-    BridgeNativeHeapSnapshot? NativeHeap);
+    BridgeNativeHeapSnapshot? NativeHeap,
+    ImagePipelineValidationCounters? ImagePipeline);
 
 public sealed record BridgeVirtualMemorySummary(string Type, long CommittedBytes, int RegionCount);
 public sealed record BridgeNativeHeapSnapshot(
@@ -88,7 +89,8 @@ public static class BridgeRuntimeDiagnostics
             providers.HistoryEntryCount,
             javBus.PageCacheEntryCount,
             ReadVirtualMemorySummaries(),
-            includeNativeHeap ? ReadNativeHeapSnapshot() : null);
+            includeNativeHeap ? ReadNativeHeapSnapshot() : null,
+            ImagePipelineValidationDiagnostics.IsEnabled ? ImagePipelineValidationDiagnostics.Snapshot() : null);
     }
 
     private static IReadOnlyList<BridgeVirtualMemorySummary> ReadVirtualMemorySummaries()

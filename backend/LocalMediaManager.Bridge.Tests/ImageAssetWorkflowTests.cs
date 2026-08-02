@@ -17,7 +17,7 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
         Directory.CreateDirectory(root);
         await using var connection = new SqliteConnection($"Data Source={Database}");
         await connection.OpenAsync();
-        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0012_MediaStorageSettings.sql" }) {
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0012_MediaStorageSettings.sql", "0015_LibraryTypesAndLocalMedia.sql" }) {
             await using var command = connection.CreateCommand();
             command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
             await command.ExecuteNonQueryAsync();
@@ -173,7 +173,7 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
 
         var assets = new ImageAssetService(Database, ImageRoot);
         Assert.NotNull(await assets.ResolveMovieAsync(4, "thumbnail"));
-        Assert.Contains(savedPath!, await Text(verify, "SELECT SourceImagePath FROM ImageCacheEntries WHERE MovieId=4 AND CacheKind='CardThumbnail' ORDER BY Id DESC LIMIT 1"));
+        Assert.Contains(savedPath!, await Text(verify, "SELECT SourceImagePath FROM ImageCacheEntries WHERE MovieId=4 AND CacheKind='CardThumbnailV4' ORDER BY Id DESC LIMIT 1"));
     }
 
     [Fact]
@@ -199,6 +199,32 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
         await using SqliteConnection verify = await Open();
         Assert.Equal(1, await Scalar(verify, "SELECT IsLocked FROM Images WHERE Id=1"));
         Assert.Equal("User", await Text(verify, "SELECT Ownership FROM Images WHERE Id=1"));
+    }
+
+    [Fact]
+    public async Task ThumbnailV4DoesNotReuseSameNamedLegacyCacheFile()
+    {
+        string source = Path.Combine(root, "MediaStorage", "Covers", "CACHE-001", "CACHE-001.png");
+        Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+        await File.WriteAllBytesAsync(source, CreatePng(80, 120, SKColors.CornflowerBlue));
+        ImageValidationResult validation = await ImageFileValidator.ValidateAsync(source);
+        Assert.True(validation.Valid);
+        string hash = validation.Sha256!;
+        string oldTarget = Path.Combine(ImageRoot, ".lmm-cache", "thumbnails", $"1-{hash[..16]}-w720.jpg");
+        Directory.CreateDirectory(Path.GetDirectoryName(oldTarget)!);
+        await File.WriteAllBytesAsync(oldTarget, CreatePng(80, 120, SKColors.Black));
+        await using (SqliteConnection connection = await Open()) {
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES(1,'CACHE-001','Cache',0,0,'pending','Test',$at,$at)", ("$at", at));
+            await Execute(connection, "INSERT INTO Images(Id,MovieId,ImageType,FilePath,IsPrimary,CreatedAt,UpdatedAt,Ownership,IsLocked,IsDerived,ValidationStatus) VALUES(1,1,'Poster',$path,1,$at,$at,'Provider',0,0,'Unknown')", ("$path", source), ("$at", at));
+        }
+
+        ImageAssetContent? thumbnail = await new ImageAssetService(Database, ImageRoot).ResolveMovieAsync(1, "thumbnail");
+
+        Assert.NotNull(thumbnail);
+        Assert.False(string.Equals(oldTarget, thumbnail!.Path, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("-card-v4-w720.jpg", thumbnail.Path, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(oldTarget));
     }
 
     [Fact]
@@ -232,7 +258,7 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
         Assert.Equal("Completed", status);
         await using SqliteConnection verify = await Open();
         Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Images WHERE ActorId=1 AND ImageType='ActorAvatar'"));
-        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM ImageCacheEntries WHERE MovieId=1 AND CacheKind='CardThumbnail'"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM ImageCacheEntries WHERE MovieId=1 AND CacheKind='CardThumbnailV4'"));
         Assert.True(await Scalar(verify, $"SELECT COUNT(*) FROM TaskLogs WHERE TaskId={launch.TaskId}") >= 2);
         Assert.True(File.Exists(source));
         Assert.True(File.Exists(portrait));
@@ -317,6 +343,34 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
         await using SqliteConnection verify = await Open();
         Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Tasks WHERE Id=" + launch.TaskId + " AND TaskType='Screenshot' AND Status='Pending'"));
         Assert.True(await Scalar(verify, $"SELECT COUNT(*) FROM TaskLogs WHERE TaskId={launch.TaskId}") >= 1);
+    }
+
+    [Fact]
+    public async Task LocalRecommendedScreenshotCanResolveAsPosterSource()
+    {
+        string screenshot = Path.Combine(root, "recommended.jpg");
+        await File.WriteAllBytesAsync(screenshot, CreatePng(320, 180, SKColors.Teal));
+        await using (SqliteConnection connection = await Open()) {
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CoverSource,CreatedAt,UpdatedAt) VALUES(1,'','Local',0,0,'pending','Test','Screenshot',$at,$at)", ("$at", at));
+            await Execute(connection, "INSERT INTO Images(MovieId,ImageType,FilePath,IsPrimary,SourceProvider,Ownership,IsDerived,ValidationStatus,CreatedAt,UpdatedAt) VALUES(1,'Screenshot',$path,1,'FFmpeg','Generated',1,'Valid',$at,$at)", ("$path", screenshot), ("$at", at));
+        }
+
+        var assets = new ImageAssetService(Database, ImageRoot);
+        ImageAssetContent? resolved = await assets.ResolveMovieAsync(1, "original", "poster");
+
+        Assert.NotNull(resolved);
+        Assert.Equal(screenshot, resolved!.Path);
+
+        string preview = Path.Combine(root, "preview.jpg");
+        await File.WriteAllBytesAsync(preview, CreatePng(320, 180, SKColors.Purple));
+        await using (SqliteConnection connection = await Open()) {
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, "INSERT INTO Images(MovieId,ImageType,FilePath,IsPrimary,SourceProvider,Ownership,IsDerived,ValidationStatus,CreatedAt,UpdatedAt) VALUES(1,'Preview',$path,0,'Provider','Provider',0,'Valid',$at,$at)", ("$path", preview), ("$at", at));
+        }
+        resolved = await assets.ResolveMovieAsync(1, "original", "poster");
+        Assert.NotNull(resolved);
+        Assert.Equal(preview, resolved!.Path);
     }
 
     public Task DisposeAsync() { try { Directory.Delete(root, true); } catch { } return Task.CompletedTask; }

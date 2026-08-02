@@ -3,7 +3,7 @@ import NewReleasesRoundedIcon from '@mui/icons-material/NewReleasesRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import { Box, Card, CardContent, Checkbox, Chip, IconButton, Rating, Tooltip, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { SmartImage } from '@/components/SmartImage'
 import { movieWallGridTemplate } from '@/components/workspace/movieWallGrid'
 import { defaultMovieWallDisplay, movieWallAspectRatio, type MovieWallDisplaySettings } from '@/components/workspace/movieWallDisplay'
@@ -16,8 +16,32 @@ const isRecent = (value: string) => {
   return Number.isFinite(time) && Date.now() - time < 30 * 24 * 60 * 60 * 1000
 }
 
-export function MediaCardGrid({ children, display = defaultMovieWallDisplay }: { children: ReactNode; display?: MovieWallDisplaySettings }) {
-  return <Box sx={{
+export function MediaCardGrid({ children, display = defaultMovieWallDisplay, onPageCapacityChange }: { children: ReactNode; display?: MovieWallDisplaySettings; onPageCapacityChange?: (capacity: number) => void }) {
+  const gridRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const grid = gridRef.current
+    if (!grid || !onPageCapacityChange) return
+    const updateCapacity = () => {
+      const card = grid.firstElementChild as HTMLElement | null
+      if (!card) return
+      const styles = window.getComputedStyle(grid)
+      const gap = Number.parseFloat(styles.columnGap) || 0
+      const cardRect = card.getBoundingClientRect()
+      if (cardRect.width <= 0 || cardRect.height <= 0) return
+      const columns = Math.max(1, Math.round((grid.getBoundingClientRect().width + gap) / (cardRect.width + gap)))
+      const rowHeight = cardRect.height + (Number.parseFloat(styles.rowGap) || gap)
+      const availableHeight = Math.max(rowHeight, window.innerHeight - grid.getBoundingClientRect().top - 16)
+      const rows = Math.max(1, Math.ceil(availableHeight / rowHeight))
+      onPageCapacityChange(Math.min(96, columns * rows))
+    }
+    const observer = new ResizeObserver(updateCapacity)
+    observer.observe(grid)
+    window.addEventListener('resize', updateCapacity)
+    updateCapacity()
+    return () => { observer.disconnect(); window.removeEventListener('resize', updateCapacity) }
+  }, [children, display.posterOrientation, display.posterSize, onPageCapacityChange])
+
+  return <Box ref={gridRef} sx={{
     display: 'grid',
     gridTemplateColumns: movieWallGridTemplate(display.posterOrientation, display.posterSize),
     gap: { xs: 1.25, md: 1.5 },
@@ -28,9 +52,22 @@ export function MediaCardGrid({ children, display = defaultMovieWallDisplay }: {
 
 export function MediaCard({ item, display = defaultMovieWallDisplay, onPlay, onOpen, selected, onSelect, onRatingClick, onContextMenu }: { item: MediaItem; display?: MovieWallDisplaySettings; onPlay: (item: MediaItem) => void; onOpen?: (item: MediaItem) => void; selected?: boolean; onSelect?: (item: MediaItem, selected: boolean) => void; onRatingClick?: (item: MediaItem, value: number | null) => void; onContextMenu?: (event: MouseEvent, item: MediaItem) => void }) {
   const [coverFailed, setCoverFailed] = useState(false)
+  const [coverPosition, setCoverPosition] = useState('50% 50%')
   if (import.meta.env.DEV) console.debug('[MediaCard] Render Start', { id: item.dataId, code: item.code })
   const clickTimer = useRef<number | undefined>(undefined)
   useEffect(() => setCoverFailed(false), [item.coverUrl])
+  useEffect(() => setCoverPosition('50% 50%'), [item.coverUrl])
+  const resolveCoverFocus = () => bridge.coverCrop(item.dataId)
+    .then(crop => setCoverPosition(`${(crop.focusX * 100).toFixed(2)}% ${(crop.focusY * 100).toFixed(2)}%`))
+    .catch(() => undefined)
+  useEffect(() => { void resolveCoverFocus() }, [item.coverUrl, item.dataId])
+  useEffect(() => {
+    const refreshCoverFocus = (event: Event) => {
+      if ((event as CustomEvent<number>).detail === item.dataId) resolveCoverFocus()
+    }
+    window.addEventListener('lmm:cover-crop-updated', refreshCoverFocus)
+    return () => window.removeEventListener('lmm:cover-crop-updated', refreshCoverFocus)
+  }, [item.dataId])
   useEffect(() => () => { if (clickTimer.current) window.clearTimeout(clickTimer.current) }, [])
   const recent = isRecent(item.importedAt)
   const displayTitle = item.title && !item.title.includes('\uFFFD') ? item.title : ''
@@ -45,12 +82,11 @@ export function MediaCard({ item, display = defaultMovieWallDisplay, onPlay, onO
       <Box sx={{ position: 'relative', aspectRatio: movieWallAspectRatio[display.posterOrientation], bgcolor: 'action.hover', overflow: 'hidden' }}>
         {item.coverUrl && !coverFailed ? (
           <Box className="media-image" sx={{ position: 'absolute', inset: 0, transition: 'transform .35s cubic-bezier(.2,.8,.2,1)' }}>
-            <SmartImage src={item.coverUrl} alt={primaryText} onError={() => setCoverFailed(true)}/>
+            <SmartImage src={item.coverUrl} alt={primaryText} position={coverPosition} onError={() => setCoverFailed(true)}/>
           </Box>
         ) : (
-          <Box sx={{ height: '100%', display: 'grid', placeItems: 'center', color: 'text.disabled', px: 1.5, textAlign: 'center', bgcolor: 'action.hover' }}>{coverFailed ? '图片损坏或不可用' : '暂无海报'}</Box>
+          <Box sx={{ height: '100%', display: 'grid', placeItems: 'center', color: 'text.disabled', px: 1.5, textAlign: 'center', bgcolor: 'action.hover' }}>暂无海报</Box>
         )}
-        <Box sx={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(5,8,14,.08) 45%, rgba(5,8,14,.78) 100%)', pointerEvents: 'none' }}/>
         <Box sx={{ position: 'absolute', top: 8, left: 8, right: 8, display: 'flex', gap: .75, alignItems: 'start', flexWrap: 'wrap' }}>
           {onSelect && (
             <Checkbox checked={Boolean(selected)} onClick={(event) => event.stopPropagation()} onChange={(_, checked) => onSelect(item, checked)} slotProps={{ input: { 'aria-label': `选择 ${primaryText}` } }} sx={{ p: .5, bgcolor: 'rgba(10,13,20,.72)', borderRadius: 1.5, color: 'common.white', '&.Mui-checked': { color: 'primary.light' } }}/>

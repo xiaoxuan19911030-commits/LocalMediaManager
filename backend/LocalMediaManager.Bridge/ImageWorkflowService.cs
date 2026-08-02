@@ -505,23 +505,20 @@ public sealed class ImageGenerationTaskService(
         SafeIntervalResult interval = SafeInterval(totalSeconds, duration.HasValue, settings);
         double start = interval.Start;
         double end = interval.End;
-        int desired = Math.Min(settings.RetainedCount, settings.CandidateCount);
+        const int desired = 12;
+        const int attempts = 30;
         var retained = new List<ScreenshotCandidate>();
         var candidates = new List<ScreenshotCandidate>();
         bool detectorWarningLogged = false;
-        int attempts = Math.Max(settings.CandidateCount, settings.MaximumAttempts);
         int actualAttempts = 0;
         await logs.WriteAsync(taskId, "Info",
-            $"[Screenshot Interval] Duration={TimeSpan.FromSeconds(totalSeconds):hh\\:mm\\:ss}; Start={TimeSpan.FromSeconds(start):hh\\:mm\\:ss}; End={TimeSpan.FromSeconds(end):hh\\:mm\\:ss}; Reason={interval.Reason}", token);
-        for (int attempt = 0; attempt < attempts && (attempt < settings.CandidateCount || retained.Count < desired); attempt++)
+            $"截图取样范围：影片时长={TimeSpan.FromSeconds(totalSeconds):hh\\:mm\\:ss}；开始位置={TimeSpan.FromSeconds(start):hh\\:mm\\:ss}；结束位置={TimeSpan.FromSeconds(end):hh\\:mm\\:ss}；计算依据={interval.Reason}", token);
+        for (int attempt = 0; attempt < attempts; attempt++)
         {
             actualAttempts++;
             token.ThrowIfCancellationRequested();
-            bool isRetry = attempt >= settings.CandidateCount;
-            int retrySlots = Math.Max(1, attempts - settings.CandidateCount);
-            double fraction = isRetry
-                ? ((attempt - settings.CandidateCount) + 0.5) / retrySlots
-                : (attempt + 1d) / (settings.CandidateCount + 1d);
+            bool isRetry = false;
+            double fraction = (attempt + 1d) / (attempts + 1d);
             double captureAt = start + ((end - start) * fraction);
             string target = await TargetPathAsync(movieId, "Screenshot", attempt + 1, token);
             pathResolver.EnsureDirectoryForWrite(target);
@@ -549,7 +546,7 @@ public sealed class ImageGenerationTaskService(
             catch (Exception error)
             {
                 TryDelete(target);
-                await logs.WriteAsync(taskId, "Warning", $"[Screenshot Candidate Failed] CandidateIndex={attempt + 1}; Timestamp={TimeSpan.FromSeconds(captureAt):hh\\:mm\\:ss\\.fff}; Duration={TimeSpan.FromSeconds(totalSeconds):hh\\:mm\\:ss\\.fff}; IsRetry={isRetry}; Error={error.Message}", token);
+                await logs.WriteAsync(taskId, "Warning", $"截图候选生成失败：序号={attempt + 1}；时间点={TimeSpan.FromSeconds(captureAt):hh\\:mm\\:ss\\.fff}；影片时长={TimeSpan.FromSeconds(totalSeconds):hh\\:mm\\:ss\\.fff}；是否重试={isRetry}；原因={error.Message}", token);
             }
         }
         if (retained.Count == 0) throw new InvalidOperationException("所有候选截图均生成失败或被质量过滤。请调整 FFmpeg 插件截图设置。");
@@ -560,15 +557,29 @@ public sealed class ImageGenerationTaskService(
         {
             bool isRetained = selected.Contains(candidate);
             await logs.WriteAsync(taskId, "Info",
-                $"[Screenshot Candidate] CandidateIndex={candidate.Index}; Timestamp={TimeSpan.FromSeconds(candidate.Seconds):hh\\:mm\\:ss\\.fff}; Duration={TimeSpan.FromSeconds(totalSeconds):hh\\:mm\\:ss\\.fff}; HasPerson={(candidate.Person.Available ? candidate.Person.HasPerson.ToString() : "Unavailable")}; PersonCount={(candidate.Person.Available ? candidate.Person.PersonCount.ToString() : "Unavailable")}; LargestPersonAreaRatio={(candidate.Person.Available ? candidate.Person.LargestPersonAreaRatio.ToString("0.000") : "Unavailable")}; Confidence={(candidate.Person.Available ? candidate.Person.Confidence.ToString("0.000") : "Unavailable")}; BrightnessScore={BrightnessScore(candidate.Quality):0.0}; BlurScore={BlurScore(candidate.Quality):0.0}; DuplicateScore={candidate.DuplicateDistance}/64; FinalScore={candidate.Score:0.0}; Filtered={candidate.Filtered}; FilterReason={candidate.FilterReason ?? "None"}; Retained={isRetained}; Recommended={candidate == recommended}; IsRetry={candidate.IsRetry}", token);
+                $"截图候选：序号={candidate.Index}；时间点={TimeSpan.FromSeconds(candidate.Seconds):hh\\:mm\\:ss\\.fff}；影片时长={TimeSpan.FromSeconds(totalSeconds):hh\\:mm\\:ss\\.fff}；检测到人物={(candidate.Person.Available ? candidate.Person.HasPerson.ToString() : "不可用")}；人物数量={(candidate.Person.Available ? candidate.Person.PersonCount.ToString() : "不可用")}；最大人物面积占比={(candidate.Person.Available ? candidate.Person.LargestPersonAreaRatio.ToString("0.000") : "不可用")}；置信度={(candidate.Person.Available ? candidate.Person.Confidence.ToString("0.000") : "不可用")}；亮度评分={BrightnessScore(candidate.Quality):0.0}；清晰度评分={BlurScore(candidate.Quality):0.0}；重复度评分={candidate.DuplicateDistance}/64；最终评分={candidate.Score:0.0}；已过滤={candidate.Filtered}；过滤原因={candidate.FilterReason ?? "无"}；已保留={isRetained}；推荐={candidate == recommended}；是否重试={candidate.IsRetry}", token);
         }
         foreach (ScreenshotCandidate candidate in selected)
         {
             await images.RegisterGeneratedAsync(movieId, "Screenshot", candidate.Path, token);
             await logs.WriteAsync(taskId, "Info",
-                $"[Screenshot Result] Time={TimeSpan.FromSeconds(candidate.Seconds):hh\\:mm\\:ss}; Score={candidate.Score:0.0}; Recommended={candidate == recommended}; Path={candidate.Path}", token);
+                $"截图结果：时间点={TimeSpan.FromSeconds(candidate.Seconds):hh\\:mm\\:ss}；评分={candidate.Score:0.0}；推荐={candidate == recommended}；文件路径={candidate.Path}", token);
         }
-        await logs.WriteAsync(taskId, "Info", $"截图完成：初始候选 {settings.CandidateCount} 张，实际尝试 {actualAttempts} 次，最大尝试 {attempts} 次，保留 {selected.Count} 张，推荐 {Path.GetFileName(recommended.Path)}。自动普通库封面接入尚未启用。", token);
+        await ApplyRecommendedCoverAsync(movieId, recommended.Path, token);
+        await logs.WriteAsync(taskId, "Info", $"截图完成：实际尝试 {actualAttempts} 次，保留 {selected.Count} 张，推荐 {Path.GetFileName(recommended.Path)}。推荐截图已设为影片墙展示图，原海报未覆盖。", token);
+    }
+
+    private async Task<bool> ApplyRecommendedCoverAsync(long movieId, string recommendedPath, CancellationToken token)
+    {
+        await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, token);
+        await ExecuteAsync(connection,
+            "UPDATE Images SET IsPrimary=CASE WHEN lower(FilePath)=lower($path) THEN 1 ELSE 0 END,UpdatedAt=$at WHERE MovieId=$movie AND ImageType='Screenshot'",
+            token, ("$path", recommendedPath), ("$at", Now()), ("$movie", movieId));
+        await ExecuteAsync(connection,
+            "UPDATE Movies SET CoverSource='Screenshot',ScreenshotStatus='Completed',UpdatedAt=$at WHERE Id=$movie",
+            token, ("$at", Now()), ("$movie", movieId));
+        await images.InvalidateMovieCacheAsync(movieId, token);
+        return true;
     }
 
     private static SafeIntervalResult SafeInterval(double duration, bool hasDuration, FfmpegPluginSettingsDto settings)

@@ -59,6 +59,7 @@ export interface MovieWallDisplaySettings {
   wallImageSource: 'poster' | 'thumbnail' | 'fanart'
   detailImageSource: 'poster' | 'thumbnail' | 'fanart'
   defaultViewMode: 'grid' | 'list'
+  coverCropMode: 'AutoFace' | 'Left' | 'Center' | 'Right'
 }
 export interface ScanSettings { minFileSizeMb: number }
 export interface SearchSettings { defaultSort: string; defaultFilter: 'all' }
@@ -105,6 +106,7 @@ export interface UnifiedSettings {
   dataBackup: DataBackupSettings
   scan: ScanSettings
   system: SystemSettings
+  rename: RenameSettings
 }
 export interface UnifiedSettingsSaveResult { settings: UnifiedSettings; changedFields: string[]; message: string }
 

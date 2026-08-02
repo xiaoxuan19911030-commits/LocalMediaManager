@@ -105,18 +105,54 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
                     }
 
                     string temporary = Path.Combine(temporaryRoot, Guid.NewGuid().ToString("N") + ".part");
-                    using var request = new HttpRequestMessage(HttpMethod.Get, image.Url);
-                    ApplyOptions(request, options);
-                    using HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                    using IDisposable requestLifetime = ImagePipelineValidationDiagnostics.TrackRequest();
+                    string requestUrl = ImagePipelineValidationDiagnostics.RequestUrl(image.Url);
+                    using HttpResponseMessage response = await SendWithRedirectsAsync(client, requestUrl, options, cancellationToken);
+                    using IDisposable responseLifetime = ImagePipelineValidationDiagnostics.TrackResponse();
                     response.EnsureSuccessStatusCode();
                     string? declaredType = response.Content.Headers.ContentType?.MediaType;
                     if (response.Content.Headers.ContentLength is > MaximumDownloadBytes)
                         throw new InvalidDataException("远程图片超过 64 MB 安全限制。");
+                    ImagePipelineValidationDiagnostics.Downloaded();
+                    ImagePipelineValidationMode validationMode = ImagePipelineValidationDiagnostics.Mode;
+                    if (ImagePipelineValidationDiagnostics.IsEnabled && validationMode is not ImagePipelineValidationMode.Full and not ImagePipelineValidationMode.FullWithoutFileWrite and not ImagePipelineValidationMode.FullEarlyResponseDispose) {
+                        using IDisposable streamLifetime = ImagePipelineValidationDiagnostics.TrackStream();
+                        await using Stream diagnosticSource = await response.Content.ReadAsStreamAsync(cancellationToken);
+                        if (validationMode == ImagePipelineValidationMode.DownloadAndDrainOnly) {
+                            await ImagePipelineValidationDiagnostics.DrainAsync(diagnosticSource, cancellationToken);
+                        } else {
+                            byte[] bytes = await ImagePipelineValidationDiagnostics.BufferAsync(diagnosticSource, cancellationToken);
+                            if (validationMode == ImagePipelineValidationMode.DownloadAndProbeOnly)
+                                ImagePipelineValidationDiagnostics.Probe(bytes);
+                            else if (validationMode == ImagePipelineValidationMode.DownloadAndDecodeOnly) {
+                                ImagePipelineValidationDiagnostics.Probe(bytes);
+                                ImagePipelineValidationDiagnostics.Decode(bytes);
+                            } else if (validationMode == ImagePipelineValidationMode.DownloadDecodeAndHash) {
+                                ImagePipelineValidationDiagnostics.Probe(bytes);
+                                ImagePipelineValidationDiagnostics.Decode(bytes);
+                                ImagePipelineValidationDiagnostics.Hash(bytes);
+                            }
+                        }
+                        continue;
+                    }
+                    using (IDisposable streamLifetime = ImagePipelineValidationDiagnostics.TrackStream())
                     await using (Stream source = await response.Content.ReadAsStreamAsync(cancellationToken))
                     await using (FileStream destination = new(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                         await CopyWithLimitAsync(source, destination, cancellationToken);
+                    if (ImagePipelineValidationDiagnostics.IsEnabled && validationMode == ImagePipelineValidationMode.FullEarlyResponseDispose) {
+                        response.Dispose();
+                        responseLifetime.Dispose();
+                    }
                     ImageValidationResult validation = await ImageFileValidator.ValidateAsync(temporary, declaredType, cancellationToken);
                     if (!validation.Valid) throw new InvalidDataException(validation.Error ?? "图片校验失败。");
+                    if (ImagePipelineValidationDiagnostics.IsEnabled) {
+                        ImagePipelineValidationDiagnostics.Probed();
+                        ImagePipelineValidationDiagnostics.Hashed();
+                    }
+                    if (ImagePipelineValidationDiagnostics.IsEnabled && validationMode == ImagePipelineValidationMode.FullWithoutFileWrite) {
+                        File.Delete(temporary);
+                        continue;
+                    }
                     string target = (await pathResolver.ResolveForMovieAsync(movie, normalizedType, Extension(validation.ContentType), index, null, cancellationToken)).FullPath;
                     pathResolver.EnsureDirectoryForWrite(target);
                     if (existing is not null && !string.Equals(existing, target, StringComparison.OrdinalIgnoreCase) && File.Exists(existing))
@@ -124,6 +160,7 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
                     if (File.Exists(target)) {
                         if (overwriteExisting) {
                             File.Move(temporary, target, true);
+                            ImagePipelineValidationDiagnostics.Written();
                             saved.Add(new(normalizedType, target, image.Url, validation.FileSize, true, validation.Width,
                                 validation.Height, validation.ContentType, validation.Sha256, "Provider", false, image.Provider));
                             continue;
@@ -136,6 +173,7 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
                         continue;
                     }
                     File.Move(temporary, target, false);
+                    ImagePipelineValidationDiagnostics.Written();
                     saved.Add(new(normalizedType, target, image.Url, validation.FileSize, true, validation.Width,
                         validation.Height, validation.ContentType, validation.Sha256, "Provider", false, image.Provider));
                 } catch (Exception error) when (continueOnError && error is not OperationCanceledException) {
@@ -155,6 +193,27 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
         if (!string.IsNullOrWhiteSpace(options.Cookie)) request.Headers.TryAddWithoutValidation("Cookie", options.Cookie);
         if (!string.IsNullOrWhiteSpace(options.Referer) && Uri.TryCreate(options.Referer, UriKind.Absolute, out Uri? referer)) request.Headers.Referrer = referer;
     }
+    private static async Task<HttpResponseMessage> SendWithRedirectsAsync(HttpClient client, string url,
+        ImageDownloadOptions? options, CancellationToken cancellationToken)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? current))
+            throw new InvalidDataException("图片地址不是有效的绝对 URL。");
+        for (int redirect = 0; redirect <= 5; redirect++) {
+            using var request = new HttpRequestMessage(HttpMethod.Get, current);
+            ApplyOptions(request, options);
+            HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (!IsRedirect(response.StatusCode)) return response;
+            Uri? location = response.Headers.Location;
+            if (location is null) return response;
+            Uri next = location.IsAbsoluteUri ? location : new Uri(current, location);
+            response.Dispose();
+            current = next;
+        }
+        throw new HttpRequestException("图片重定向次数超过安全上限。");
+    }
+    private static bool IsRedirect(System.Net.HttpStatusCode status) =>
+        status is System.Net.HttpStatusCode.Moved or System.Net.HttpStatusCode.Redirect or System.Net.HttpStatusCode.RedirectMethod
+            or System.Net.HttpStatusCode.TemporaryRedirect or System.Net.HttpStatusCode.PermanentRedirect;
     private static bool AppliesTo(Uri? uri, string? restrictedHost) {
         if (string.IsNullOrWhiteSpace(restrictedHost)) return true;
         if (uri is null) return false;
@@ -181,6 +240,7 @@ public sealed class ImageDownloadService(IHttpClientFactory clients)
             if (read == 0) break;
             total += read;
             if (total > MaximumDownloadBytes) throw new InvalidDataException("远程图片超过 64 MB 安全限制。");
+            if (ImagePipelineValidationDiagnostics.IsEnabled) ImagePipelineValidationDiagnostics.Read(read);
             await destination.WriteAsync(buffer.AsMemory(0, read), token);
         }
     }
@@ -236,12 +296,19 @@ public sealed class MetadataWriteService(string databasePath)
             "INSERT OR IGNORE INTO ExternalIds(EntityType,EntityId,Provider,ExternalId) VALUES('Movie',$movie,$provider,$external)",
             ("$movie", movie.Id), ("$provider", metadata.Provider), ("$external", metadata.ExternalId));
 
+        // Optional relations are replaced only when the provider supplied a value. A missing
+        // optional field is not an instruction to discard a previously stored relation.
+        bool writeDirector = SourceProvided(metadata, "Director", metadata.Director);
+        bool writeSeries = SourceProvided(metadata, "Series", metadata.Series);
+        bool replaceDirector = overwrite && writeDirector;
+        bool replaceSeries = overwrite && writeSeries;
         if (overwrite) {
             await ExecuteAsync(connection, transaction, "DELETE FROM MovieGenres WHERE MovieId=$movie", ("$movie", movie.Id));
-            await ExecuteAsync(connection, transaction, "DELETE FROM MovieSeries WHERE MovieId=$movie", ("$movie", movie.Id));
+            if (replaceSeries)
+                await ExecuteAsync(connection, transaction, "DELETE FROM MovieSeries WHERE MovieId=$movie", ("$movie", movie.Id));
             await ExecuteAsync(connection, transaction, "DELETE FROM MovieStudios WHERE MovieId=$movie", ("$movie", movie.Id));
             await ExecuteAsync(connection, transaction, "DELETE FROM MovieActors WHERE MovieId=$movie", ("$movie", movie.Id));
-            if (await TableExistsAsync(connection, transaction, "MovieDirectors"))
+            if (replaceDirector && await TableExistsAsync(connection, transaction, "MovieDirectors"))
                 await ExecuteAsync(connection, transaction, "DELETE FROM MovieDirectors WHERE MovieId=$movie", ("$movie", movie.Id));
         }
         foreach (string genre in metadata.Genres) {
@@ -252,10 +319,10 @@ public sealed class MetadataWriteService(string databasePath)
             long id = await EnsureActorAsync(connection, transaction, actor);
             await ExecuteAsync(connection, transaction, "INSERT OR IGNORE INTO MovieActors(MovieId,ActorId,RoleName,SortOrder) VALUES($movie,$id,'',999)", ("$movie", movie.Id), ("$id", id));
         }
-        if (!string.IsNullOrWhiteSpace(metadata.Director)
+        if (writeDirector
             && await TableExistsAsync(connection, transaction, "Directors")
             && await TableExistsAsync(connection, transaction, "MovieDirectors")) {
-            long id = await EnsureNamedAsync(connection, transaction, "Directors", metadata.Director);
+            long id = await EnsureNamedAsync(connection, transaction, "Directors", metadata.Director!);
             await ExecuteAsync(connection, transaction, "INSERT OR IGNORE INTO MovieDirectors(MovieId,DirectorId) VALUES($movie,$id)", ("$movie", movie.Id), ("$id", id));
         }
         foreach ((string? name, string relation) in new[] { (metadata.Studio, "Studio"), (metadata.Publisher, "Publisher") }) {
@@ -263,8 +330,8 @@ public sealed class MetadataWriteService(string databasePath)
             long id = await EnsureNamedAsync(connection, transaction, "Studios", name);
             await ExecuteAsync(connection, transaction, "INSERT OR IGNORE INTO MovieStudios(MovieId,StudioId,RelationType) VALUES($movie,$id,$type)", ("$movie", movie.Id), ("$id", id), ("$type", relation));
         }
-        if (!string.IsNullOrWhiteSpace(metadata.Series)) {
-            long id = await EnsureNamedAsync(connection, transaction, "Series", metadata.Series);
+        if (writeSeries) {
+            long id = await EnsureNamedAsync(connection, transaction, "Series", metadata.Series!);
             await ExecuteAsync(connection, transaction, "INSERT OR IGNORE INTO MovieSeries(MovieId,SeriesId,SortOrder) VALUES($movie,$id,0)", ("$movie", movie.Id), ("$id", id));
         }
         foreach (SavedImage image in files.Images)
@@ -329,6 +396,9 @@ public sealed class MetadataWriteService(string databasePath)
     }
 
     private static IReadOnlyList<string> Values(params string?[] values) => values.Where(value => !string.IsNullOrWhiteSpace(value)).Cast<string>().ToArray();
+    private static bool SourceProvided(ProviderMetadata metadata, string field, string? value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && (metadata.FieldSources is null || metadata.FieldSources.ContainsKey(field));
     private static void AddIf(HashSet<string> fields, string name, string? value) { if (!string.IsNullOrWhiteSpace(value)) fields.Add(name); }
 
     private static async Task<long> EnsureNamedAsync(SqliteConnection c, System.Data.Common.DbTransaction tx, string table, string value) {
@@ -540,7 +610,7 @@ public sealed class MetadataSyncExecutor(
                 throw new MetadataProviderBlockedException("影片没有可用于同步的番号。");
             movie = movie with { Code = normalizedCode };
             if (extraction is not null)
-                await logs.WriteAsync(taskId, "Info", $"[Movie Number] Original={extraction.OriginalFileName}; Matched={extraction.MatchedRule}; Detected={extraction.DetectedNumber}; Normalized={extraction.NormalizedNumber}; Confidence={extraction.Confidence:0.00}; PartIndex={extraction.PartIndex?.ToString() ?? "None"}", cancellationToken);
+                await logs.WriteAsync(taskId, "Info", $"影片番号识别：原始文件名：{extraction.OriginalFileName}；匹配规则：{extraction.MatchedRule ?? "无"}；识别结果：{extraction.DetectedNumber ?? "无"}；标准番号：{extraction.NormalizedNumber ?? "无"}；置信度：{extraction.Confidence:0.00}；分集：{extraction.PartIndex?.ToString() ?? "无"}", cancellationToken);
             await StageAsync(taskId, "Preparing", 8, $"准备影片 {movie.Code}", cancellationToken);
             await EnsureRunnableAsync(taskId, cancellationToken);
 
@@ -548,21 +618,21 @@ public sealed class MetadataSyncExecutor(
                 PreferredSource = await ReadSourceAsync(taskId, cancellationToken),
                 CurrentMoviePath = movie.PrimaryFile,
                 RequestedFields = targets,
-                ProviderLog = (source, message, token) => logs.WriteAsync(taskId, "Info", $"[{source}] {message}", token),
-                ProviderDebugLog = (source, message, token) => logs.WriteAsync(taskId, "Debug", $"[{source}] {message}", token),
+                ProviderLog = (source, message, token) => logs.WriteAsync(taskId, "Info", $"【{source}】{message}", token),
+                ProviderDebugLog = (source, message, token) => logs.WriteAsync(taskId, "Debug", $"【{source}】{message}", token),
                 ProviderFailure = diagnostics.ReportRuntimeFailureAsync,
                 ProviderSuccess = diagnostics.ReportRuntimeSuccessAsync,
             };
             settings = await diagnostics.FilterMovieProvidersAsync(settings, cancellationToken);
             await StageAsync(taskId, "FetchingMetadata", 22, $"{settings.PreferredSource ?? "自动数据源"} 搜索：{movie.Code}", cancellationToken);
             IReadOnlyList<MetadataSearchResult> results = await provider.SearchAsync(movie.Code, settings, cancellationToken);
-            await logs.WriteAsync(taskId, "Info", $"Provider Search Results: {results.Count} candidate(s).", cancellationToken);
+            await logs.WriteAsync(taskId, "Info", $"数据源搜索完成：找到 {results.Count} 个候选结果。", cancellationToken);
             if (results.Count == 0) throw new MetadataNoResultException($"{settings.PreferredSource ?? "元数据源"} 未找到 {movie.Code} 的结果。");
             ProviderMetadata? metadata = null;
             var attemptErrors = new List<string>();
             foreach (MetadataSearchResult selected in results) {
                 await SetProviderAsync(taskId, selected.Provider, cancellationToken);
-                await logs.WriteAsync(taskId, "Info", $"Provider Detail Request: {selected.Provider} externalId={selected.ExternalId}", cancellationToken);
+                await logs.WriteAsync(taskId, "Info", $"请求数据源详情：数据源={selected.Provider}；外部编号={selected.ExternalId}", cancellationToken);
                 try {
                     ProviderMetadata? candidate = await provider.GetMetadataAsync(selected, settings, cancellationToken);
                     if (candidate is null) {
@@ -584,13 +654,13 @@ public sealed class MetadataSyncExecutor(
                 }
             }
             if (metadata is null)
-                throw new MetadataNoResultException($"{settings.PreferredSource ?? "元数据源"} 未找到 {movie.Code} 的可用详情。Attempts: {string.Join(" | ", attemptErrors)}");
+                throw new MetadataNoResultException($"{settings.PreferredSource ?? "元数据源"} 未找到 {movie.Code} 的可用详情。尝试记录：{string.Join(" | ", attemptErrors)}");
             if (targets is not null) {
                 metadata = RestrictToTargets(metadata, movie, targets);
-                await logs.WriteAsync(taskId, "Info", $"[Repair Target] {string.Join(",", targets.Order())}", cancellationToken);
+                await logs.WriteAsync(taskId, "Info", $"定向修复字段：{string.Join("、", targets.Order())}", cancellationToken);
             }
             await logs.WriteAsync(taskId, "Info",
-                $"Parse Success: title={(string.IsNullOrWhiteSpace(metadata.Title) ? 0 : 1)}, actors={metadata.Actors.Count}, director={(string.IsNullOrWhiteSpace(metadata.Director) ? 0 : 1)}, series={(string.IsNullOrWhiteSpace(metadata.Series) ? 0 : 1)}, tags={metadata.Genres.Count}, images={metadata.Images.Count}",
+                $"元数据解析完成：标题={(string.IsNullOrWhiteSpace(metadata.Title) ? 0 : 1)}；演员={metadata.Actors.Count}；导演={(string.IsNullOrWhiteSpace(metadata.Director) ? 0 : 1)}；系列={(string.IsNullOrWhiteSpace(metadata.Series) ? 0 : 1)}；标签={metadata.Genres.Count}；图片={metadata.Images.Count}",
                 cancellationToken);
 
             IReadOnlyList<SavedImage> savedImages = [];
@@ -608,11 +678,11 @@ public sealed class MetadataSyncExecutor(
                         string imageFailureSummary = string.Join(", ", download.Failures.GroupBy(value => value.Type, StringComparer.OrdinalIgnoreCase)
                             .Select(group => $"{group.Key} {group.Count()} 项"));
                         partialFailures.Add($"部分图片写入失败: {imageFailureSummary}");
-                        await logs.WriteAsync(taskId, "Warning", $"[Image Write] Partial failure; continuing with valid images: {imageFailureSummary}", cancellationToken);
+                        await logs.WriteAsync(taskId, "Warning", $"部分图片写入失败，已保留有效图片并继续同步：{imageFailureSummary}", cancellationToken);
                     }
                 } catch (Exception error) when (error is not OperationCanceledException) {
                     partialFailures.Add($"图片写入失败: {error.Message}");
-                    await logs.WriteAsync(taskId, "Warning", $"[Image Write] Failed; metadata merge will continue: {error.Message}", cancellationToken);
+                    await logs.WriteAsync(taskId, "Warning", $"图片写入失败，元数据合并将继续执行：{error.Message}", cancellationToken);
                 }
             }
             string? nfoPath = null;
@@ -623,16 +693,16 @@ public sealed class MetadataSyncExecutor(
                         ? await nfo.WriteFromDatabaseAsync(movie.Id, cancellationToken)
                         : await nfo.WriteAsync(movie, metadata, cancellationToken);
                     if (created && nfoPath is not null) createdPaths.Add(nfoPath);
-                    await logs.WriteAsync(taskId, "Info", $"[NFO Write] Success: {nfoPath ?? "skipped"}", cancellationToken);
+                    await logs.WriteAsync(taskId, "Info", $"NFO 写入完成：{nfoPath ?? "已跳过"}", cancellationToken);
                 } catch (Exception error) when (error is not OperationCanceledException) {
                     partialFailures.Add($"NFO 写入失败: {error.Message}");
-                    await logs.WriteAsync(taskId, "Warning", $"[NFO Write] Failed; metadata merge will continue: {error.Message}", cancellationToken);
+                    await logs.WriteAsync(taskId, "Warning", $"NFO 写入失败，元数据合并将继续执行：{error.Message}", cancellationToken);
                 }
             }
             await StageAsync(taskId, "WritingMetadata", 82, overwrite ? "覆盖同步刮削元数据" : "非破坏合并元数据", cancellationToken);
             string summary = await writer.ApplyAsync(taskId, movie, metadata, new(savedImages, nfoPath, createdPaths), overwrite, cancellationToken);
-            await logs.WriteAsync(taskId, "Info", $"[Database Merge] {summary}", cancellationToken);
-            await logs.WriteAsync(taskId, "Info", "[Database Merge] Success", cancellationToken);
+            await logs.WriteAsync(taskId, "Info", $"数据库合并：{summary}", cancellationToken);
+            await logs.WriteAsync(taskId, "Info", "数据库合并成功。", cancellationToken);
             health?.Invalidate();
             if (actorImageImporter is not null && settings.DownloadImages(metadata.Provider) && metadata.ActorImages?.Count > 0 && (targets is null || targets.Contains("Actors"))) {
                 await StageAsync(taskId, "DownloadingImages", 92, $"下载演员头像（{metadata.ActorImages.Count} 项）", cancellationToken);

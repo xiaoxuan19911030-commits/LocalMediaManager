@@ -143,12 +143,15 @@ public sealed class LegacyCompletionPart2Tests : IAsyncLifetime
         DashboardDto dashboard = await ProductReader.ReadDashboardAsync(Database, "http://127.0.0.1:47831", await healthService.GetAsync());
         MediaPageDto defaultPage = await ProductReader.AdvancedSearchAsync(Database, "http://127.0.0.1:47831", "", null, null, null, null, null, null, null, null, 0, "all", "all", "all", "all", null, "newest", 24, 0);
         MediaPageDto missingPage = await ProductReader.AdvancedSearchAsync(Database, "http://127.0.0.1:47831", "", null, null, null, null, null, null, null, null, 0, "all", "all", "missing", "all", null, "newest", 24, 0);
+        MediaPageDto collectionPage = await ProductReader.AdvancedSearchAsync(Database, "http://127.0.0.1:47831", "", null, null, null, null, null, null, null, null, 0, "all", "all", "include-missing", "all", null, "newest", 24, 0);
 
         Assert.Equal(1, dashboard.MovieCount);
         Assert.Equal(1, defaultPage.Total);
         Assert.Equal("FILE-001", defaultPage.Items[0].Code);
         Assert.Equal(1, missingPage.Total);
         Assert.Equal("FILE-002", missingPage.Items[0].Code);
+        Assert.Equal(2, collectionPage.Total);
+        Assert.Equal(["FILE-001", "FILE-002"], collectionPage.Items.Select(item => item.Code).Order());
     }
 
     [Fact]

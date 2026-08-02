@@ -789,21 +789,21 @@ public sealed class CompositeMetadataProvider(MdcNgProvider mdcNg, MetaTubeProvi
             }
             await LogAsync(settings, sourceName, accepted ? "结束：已参与合并" : "结束：无可合并结果", cancellationToken);
             if (merged is not null && MetadataProviderCapabilities.Satisfies(merged, settings.RequestedFields)) {
-                await LogAsync(settings, "Metadata Router", "目标字段已满足，停止调用后续 Provider", cancellationToken);
+                await LogAsync(settings, "元数据路由", "目标字段已满足，停止调用后续数据源", cancellationToken);
                 break;
             }
             if (merged is not null
                 && (settings.RequestedFields is null || settings.RequestedFields.Count == 0)
                 && sourceName.Equals("MetaTube", StringComparison.OrdinalIgnoreCase)
                 && !NeedsJavBusSupplement(merged)) {
-                await LogAsync(settings, "Metadata Router", "MetaTube 已覆盖 JavBus 可补字段，停止调用 JavBus", cancellationToken);
+                await LogAsync(settings, "元数据路由", "MetaTube 已覆盖 JavBus 可补字段，停止调用 JavBus", cancellationToken);
                 break;
             }
         }
         if (merged is null && providerFailures > 0 && completedSearches == 0)
             throw new HttpRequestException("所有已启用 Provider 均发生网络或解析异常；详见任务日志。");
         if (merged is not null)
-            await LogAsync(settings, "Metadata Merge", $"最终字段：{Describe(merged)}", cancellationToken);
+            await LogAsync(settings, "元数据合并", $"最终字段：{Describe(merged)}", cancellationToken);
         return merged;
     }
 

@@ -209,7 +209,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         Assert.Contains(providerLogs, message => message.StartsWith("MDC-NG:开始"));
         Assert.Contains(providerLogs, message => message.StartsWith("MetaTube:开始"));
         Assert.DoesNotContain(providerLogs, message => message.StartsWith("JavBus:开始"));
-        Assert.Contains(providerLogs, message => message.StartsWith("Metadata Merge:最终字段"));
+        Assert.Contains(providerLogs, message => message.StartsWith("元数据合并:最终字段"));
         Assert.Equal("MDC-NG", metadata.FieldSources!["Genres"]);
     }
 
@@ -414,6 +414,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Progress,TotalItems,CompletedItems,CreatedAt,CurrentMovieId) VALUES(1,'Sync','WritingMetadata',80,1,0,$at,1)", ("$at", at));
         await Execute(connection, "INSERT INTO Genres(Id,Name,NormalizedName) VALUES(1,'Old genre','OLD GENRE'); INSERT INTO MovieGenres(MovieId,GenreId) VALUES(1,1)");
         await Execute(connection, "INSERT INTO Series(Id,Name,NormalizedName) VALUES(1,'Old series','OLD SERIES'); INSERT INTO MovieSeries(MovieId,SeriesId,SortOrder) VALUES(1,1,0)");
+        await Execute(connection, "INSERT INTO Directors(Id,Name,NormalizedName) VALUES(1,'Old director','OLD DIRECTOR'); INSERT INTO MovieDirectors(MovieId,DirectorId) VALUES(1,1)");
         await Execute(connection, "INSERT INTO Actors(Id,Name,NormalizedName,LegacySource,CreatedAt,UpdatedAt) VALUES(1,'Old actor','OLD ACTOR','Test',$at,$at); INSERT INTO MovieActors(MovieId,ActorId,RoleName,SortOrder) VALUES(1,1,'',0)", ("$at", at));
         await Execute(connection, "INSERT INTO Tags(Id,Name,NormalizedName,Source,CreatedAt,UpdatedAt) VALUES(1,'User tag','USER TAG','User',$at,$at); INSERT INTO MovieTags(MovieId,TagId,CreatedAt) VALUES(1,1,$at)", ("$at", at));
         var movie = new SyncMovie(1, "OLD-001", "Old title", "Old plot", null, 60, null, null);
@@ -428,9 +429,130 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieGenres mg JOIN Genres g ON g.Id=mg.GenreId WHERE mg.MovieId=1 AND g.Name='New genre'"));
         Assert.Equal(0, await Scalar(connection, "SELECT COUNT(*) FROM MovieGenres mg JOIN Genres g ON g.Id=mg.GenreId WHERE mg.MovieId=1 AND g.Name='Old genre'"));
         Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieDirectors md JOIN Directors d ON d.Id=md.DirectorId WHERE md.MovieId=1 AND d.Name='Director A'"));
+        Assert.Equal(0, await Scalar(connection, "SELECT COUNT(*) FROM MovieDirectors md JOIN Directors d ON d.Id=md.DirectorId WHERE md.MovieId=1 AND d.Name='Old director'"));
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieSeries ms JOIN Series s ON s.Id=ms.SeriesId WHERE ms.MovieId=1 AND s.Name='Series A'"));
+        Assert.Equal(0, await Scalar(connection, "SELECT COUNT(*) FROM MovieSeries ms JOIN Series s ON s.Id=ms.SeriesId WHERE ms.MovieId=1 AND s.Name='Old series'"));
         Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieActors ma JOIN Actors a ON a.Id=ma.ActorId WHERE ma.MovieId=1 AND a.Name='Actor A'"));
         Assert.Equal(0, await Scalar(connection, "SELECT COUNT(*) FROM MovieActors ma JOIN Actors a ON a.Id=ma.ActorId WHERE ma.MovieId=1 AND a.Name='Old actor'"));
         Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieTags WHERE MovieId=1"));
+    }
+
+    [Fact]
+    public async Task Thu063OverwriteKeepsDirectorAndSeriesWhenProviderOmitsOptionalFields()
+    {
+        await using var connection = await Open();
+        await InsertMovie(connection, 1, "THU-063");
+        await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Progress,TotalItems,CompletedItems,CreatedAt,CurrentMovieId) VALUES(1,'Sync','WritingMetadata',80,1,0,$at,1)", ("$at", DateTimeOffset.UtcNow.ToString("O")));
+        await Execute(connection, "INSERT INTO Directors(Id,Name,NormalizedName) VALUES(1,'Director Old','DIRECTOR OLD'); INSERT INTO MovieDirectors(MovieId,DirectorId) VALUES(1,1); INSERT INTO Series(Id,Name,NormalizedName) VALUES(1,'Series Old','SERIES OLD'); INSERT INTO MovieSeries(MovieId,SeriesId,SortOrder) VALUES(1,1,0)");
+        var metadata = new ProviderMetadata("Test", "thu-063", "THU-063", "THU-063", null, null, null, null, null, null, null, null, [], [], [], FieldSources: new Dictionary<string, string> { ["Title"] = "Test" });
+
+        await new MetadataWriteService(Database).ApplyAsync(1, new(1, "THU-063", "THU-063", null, null, 0, null, null), metadata, new([], null, []), true, CancellationToken.None);
+
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieDirectors md JOIN Directors d ON d.Id=md.DirectorId WHERE md.MovieId=1 AND d.Name='Director Old'"));
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieSeries ms JOIN Series s ON s.Id=ms.SeriesId WHERE ms.MovieId=1 AND s.Name='Series Old'"));
+    }
+
+    [Fact]
+    public async Task Thu063SyncCompletesWithoutWarningWhenProviderOmitsDirector()
+    {
+        await using (var connection = await Open()) {
+            await InsertMovie(connection, 1, "THU-063");
+            await InsertPrimaryFile(connection, 1, "THU-063");
+            await Execute(connection, "INSERT INTO Directors(Id,Name,NormalizedName) VALUES(1,'Director Old','DIRECTOR OLD'); INSERT INTO MovieDirectors(MovieId,DirectorId) VALUES(1,1)");
+        }
+        var settings = new MetadataProviderSettingsService(Database);
+        await settings.SaveMetaTubeAsync(new(true, "http://127.0.0.1:8080/", 30, false, false, false, false));
+        var factory = new FakeHttpClientFactory(request => new(HttpStatusCode.OK) { Content = new StringContent(
+            request.RequestUri!.AbsolutePath.Contains("search")
+                ? """{"data":[{"provider":"FANZA","id":"thu-063","number":"THU-063","title":"THU-063"}]}"""
+                : """{"data":{"provider":"FANZA","id":"thu-063","number":"THU-063","title":"THU-063","actors":[],"genres":[],"preview_images":[]}}""", Encoding.UTF8, "application/json") });
+        var resolver = new MediaStoragePathResolver(Database, root);
+        var executor = new MetadataSyncExecutor(Database, resolver, settings, CreateDiagnostics(settings, factory), new MetaTubeProvider(factory),
+            new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database, resolver), new TaskLogService(Database));
+        MetadataSyncLaunchResult launch = await executor.EnqueueAsync(1, "THU-063", overwrite: true, source: "metatube");
+
+        await executor.StartAsync(CancellationToken.None);
+        string status = await WaitForTerminalStatusAsync(launch.TaskId);
+        await executor.StopAsync(CancellationToken.None);
+
+        await using var verify = await Open();
+        Assert.Equal("Completed", status);
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM MovieDirectors md JOIN Directors d ON d.Id=md.DirectorId WHERE md.MovieId=1 AND d.Name='Director Old'"));
+        Assert.Equal(0, await Scalar(verify, $"SELECT COUNT(*) FROM TaskLogs WHERE TaskId={launch.TaskId} AND Level='Warning'"));
+    }
+
+    [Fact]
+    public async Task OverwriteWithoutHistoricalDirectorSucceedsWhenProviderOmitsDirector()
+    {
+        await using var connection = await Open();
+        await InsertMovie(connection, 1, "THU-064");
+        await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Progress,TotalItems,CompletedItems,CreatedAt,CurrentMovieId) VALUES(1,'Sync','WritingMetadata',80,1,0,$at,1)", ("$at", DateTimeOffset.UtcNow.ToString("O")));
+        var metadata = new ProviderMetadata("Test", "thu-064", "THU-064", "THU-064", null, null, null, null, null, null, null, null, [], [], [], FieldSources: new Dictionary<string, string> { ["Title"] = "Test" });
+
+        await new MetadataWriteService(Database).ApplyAsync(1, new(1, "THU-064", "THU-064", null, null, 0, null, null), metadata, new([], null, []), true, CancellationToken.None);
+
+        Assert.Equal(0, await Scalar(connection, "SELECT COUNT(*) FROM MovieDirectors WHERE MovieId=1"));
+    }
+
+    [Fact]
+    public async Task SecondOverwriteWithoutDirectorRetainsDirectorFromFirstSync()
+    {
+        await using var connection = await Open();
+        await InsertMovie(connection, 1, "THU-065");
+        await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Progress,TotalItems,CompletedItems,CreatedAt,CurrentMovieId) VALUES(1,'Sync','WritingMetadata',80,1,0,$at,1)", ("$at", DateTimeOffset.UtcNow.ToString("O")));
+        var movie = new SyncMovie(1, "THU-065", "THU-065", null, null, 0, null, null);
+        var first = new ProviderMetadata("Test", "thu-065", "THU-065", "THU-065", null, "Director First", null, null, null, null, null, null, [], [], [], FieldSources: new Dictionary<string, string> { ["Director"] = "Test" });
+        var second = first with { Director = null, FieldSources = new Dictionary<string, string> { ["Title"] = "Test" } };
+        var writer = new MetadataWriteService(Database);
+
+        await writer.ApplyAsync(1, movie, first, new([], null, []), true, CancellationToken.None);
+        await writer.ApplyAsync(1, movie, second, new([], null, []), true, CancellationToken.None);
+
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieDirectors md JOIN Directors d ON d.Id=md.DirectorId WHERE md.MovieId=1 AND d.Name='Director First'"));
+    }
+
+    [Fact]
+    public async Task ExplicitDirectorWriteFailureRollsBackRelationReplacement()
+    {
+        await using var connection = await Open();
+        await InsertMovie(connection, 1, "THU-066");
+        await Execute(connection, "INSERT INTO Tasks(Id,TaskType,Status,Progress,TotalItems,CompletedItems,CreatedAt,CurrentMovieId) VALUES(1,'Sync','WritingMetadata',80,1,0,$at,1)", ("$at", DateTimeOffset.UtcNow.ToString("O")));
+        await Execute(connection, "INSERT INTO Directors(Id,Name,NormalizedName) VALUES(1,'Director Old','DIRECTOR OLD'); INSERT INTO MovieDirectors(MovieId,DirectorId) VALUES(1,1); CREATE TRIGGER fail_director_insert BEFORE INSERT ON MovieDirectors WHEN NEW.DirectorId <> 1 BEGIN SELECT RAISE(ABORT, 'simulated director write failure'); END;");
+        var metadata = new ProviderMetadata("Test", "thu-066", "THU-066", "THU-066", null, "Director New", null, null, null, null, null, null, [], [], [], FieldSources: new Dictionary<string, string> { ["Director"] = "Test" });
+
+        await Assert.ThrowsAsync<SqliteException>(() => new MetadataWriteService(Database).ApplyAsync(1, new(1, "THU-066", "THU-066", null, null, 0, null, null), metadata, new([], null, []), true, CancellationToken.None));
+
+        Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM MovieDirectors md JOIN Directors d ON d.Id=md.DirectorId WHERE md.MovieId=1 AND d.Name='Director Old'"));
+        Assert.Equal(0, await Scalar(connection, "SELECT COUNT(*) FROM MovieDirectors md JOIN Directors d ON d.Id=md.DirectorId WHERE md.MovieId=1 AND d.Name='Director New'"));
+    }
+
+    [Fact]
+    public async Task ExplicitDirectorWriteFailureMarksSyncTaskFailed()
+    {
+        await using (var connection = await Open()) {
+            await InsertMovie(connection, 1, "THU-067");
+            await InsertPrimaryFile(connection, 1, "THU-067");
+            await Execute(connection, "INSERT INTO Directors(Id,Name,NormalizedName) VALUES(1,'Director Old','DIRECTOR OLD'); INSERT INTO MovieDirectors(MovieId,DirectorId) VALUES(1,1); CREATE TRIGGER fail_director_insert BEFORE INSERT ON MovieDirectors WHEN NEW.DirectorId <> 1 BEGIN SELECT RAISE(ABORT, 'simulated director write failure'); END;");
+        }
+        var settings = new MetadataProviderSettingsService(Database);
+        await settings.SaveMetaTubeAsync(new(true, "http://127.0.0.1:8080/", 30, false, false, false, false));
+        var factory = new FakeHttpClientFactory(request => new(HttpStatusCode.OK) { Content = new StringContent(
+            request.RequestUri!.AbsolutePath.Contains("search")
+                ? """{"data":[{"provider":"FANZA","id":"thu-067","number":"THU-067","title":"THU-067"}]}"""
+                : """{"data":{"provider":"FANZA","id":"thu-067","number":"THU-067","title":"THU-067","director":"Director New","actors":[],"genres":[],"preview_images":[]}}""", Encoding.UTF8, "application/json") });
+        var resolver = new MediaStoragePathResolver(Database, root);
+        var executor = new MetadataSyncExecutor(Database, resolver, settings, CreateDiagnostics(settings, factory), new MetaTubeProvider(factory),
+            new MetadataWriteService(Database), new ImageDownloadService(factory), new NfoService(Database, resolver), new TaskLogService(Database));
+        MetadataSyncLaunchResult launch = await executor.EnqueueAsync(1, "THU-067", overwrite: true, source: "metatube");
+
+        await executor.StartAsync(CancellationToken.None);
+        string status = await WaitForTerminalStatusAsync(launch.TaskId);
+        await executor.StopAsync(CancellationToken.None);
+
+        await using var verify = await Open();
+        Assert.Equal("Failed", status);
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM MovieDirectors md JOIN Directors d ON d.Id=md.DirectorId WHERE md.MovieId=1 AND d.Name='Director Old'"));
+        Assert.Equal(0, await Scalar(verify, "SELECT COUNT(*) FROM MovieDirectors md JOIN Directors d ON d.Id=md.DirectorId WHERE md.MovieId=1 AND d.Name='Director New'"));
     }
 
     [Fact]
@@ -1038,7 +1160,7 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM MovieActors WHERE MovieId=1"));
         Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM MovieGenres WHERE MovieId=1"));
         Assert.Contains("NFO 写入失败", await Text(verify, $"SELECT ErrorMessage FROM Tasks WHERE Id={launch.TaskId}"));
-        Assert.Equal(1, await Scalar(verify, $"SELECT COUNT(*) FROM TaskLogs WHERE TaskId={launch.TaskId} AND Message='[Database Merge] Success'"));
+        Assert.Equal(1, await Scalar(verify, $"SELECT COUNT(*) FROM TaskLogs WHERE TaskId={launch.TaskId} AND Message='数据库合并成功。'"));
     }
 
     public Task DisposeAsync() { try { Directory.Delete(root, true); } catch { } return Task.CompletedTask; }
@@ -1110,6 +1232,16 @@ public sealed class MetadataSyncWorkflowTests : IAsyncLifetime
         string path = $"Z:\\Videos\\{code}.mp4";
         return Execute(c, "INSERT INTO MediaFiles(MovieId,FilePath,NormalizedPath,FileName,MediaType,SourceType,IsPrimary,ExistsState,CreatedAt,UpdatedAt) VALUES($movie,$path,$path,$name,'Video','Test',1,'Present',$at,$at)",
             ("$movie", movieId), ("$path", path), ("$name", $"{code}.mp4"), ("$at", at));
+    }
+    private async Task<string> WaitForTerminalStatusAsync(long taskId)
+    {
+        for (int attempt = 0; attempt < 100; attempt++) {
+            await Task.Delay(50);
+            await using SqliteConnection check = await Open();
+            string? status = await Text(check, $"SELECT Status FROM Tasks WHERE Id={taskId}");
+            if (status is "Completed" or "CompletedWithWarnings" or "Failed" or "NoResult" or "Blocked") return status;
+        }
+        return "Timeout";
     }
     private static async Task Execute(SqliteConnection c, string sql, params (string,object?)[] values) { await using var x=c.CreateCommand();x.CommandText=sql;foreach(var(n,v)in values)x.Parameters.AddWithValue(n,v??DBNull.Value);await x.ExecuteNonQueryAsync(); }
     private static async Task<long> Scalar(SqliteConnection c,string sql){await using var x=c.CreateCommand();x.CommandText=sql;return Convert.ToInt64(await x.ExecuteScalarAsync()??0L);}

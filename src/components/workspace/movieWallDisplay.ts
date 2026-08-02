@@ -9,6 +9,7 @@ export interface MovieWallDisplaySettings {
   wallImageSource: MovieImageSource
   detailImageSource: MovieImageSource
   defaultViewMode: MovieWallDefaultViewMode
+  coverCropMode: 'AutoFace' | 'Left' | 'Center' | 'Right'
 }
 
 export const defaultMovieWallDisplay: MovieWallDisplaySettings = {
@@ -17,6 +18,7 @@ export const defaultMovieWallDisplay: MovieWallDisplaySettings = {
   wallImageSource: 'poster',
   detailImageSource: 'fanart',
   defaultViewMode: 'grid',
+  coverCropMode: 'AutoFace',
 }
 
 export const movieWallAspectRatio: Record<MovieWallPosterOrientation, string> = {
@@ -43,5 +45,6 @@ export function normalizeMovieWallDisplay(value?: Partial<MovieWallDisplaySettin
   const wallImageSource = value?.wallImageSource === 'thumbnail' || value?.wallImageSource === 'fanart' ? value.wallImageSource : 'poster'
   const detailImageSource = value?.detailImageSource === 'poster' || value?.detailImageSource === 'thumbnail' ? value.detailImageSource : 'fanart'
   const defaultViewMode = value?.defaultViewMode === 'list' ? 'list' : 'grid'
-  return { posterOrientation, posterSize, wallImageSource, detailImageSource, defaultViewMode }
+  const coverCropMode = value?.coverCropMode === 'Left' || value?.coverCropMode === 'Center' || value?.coverCropMode === 'Right' ? value.coverCropMode : 'AutoFace'
+  return { posterOrientation, posterSize, wallImageSource, detailImageSource, defaultViewMode, coverCropMode }
 }

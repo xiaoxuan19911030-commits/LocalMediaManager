@@ -744,10 +744,10 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
         Exception? last = null;
         for (int attempt = 1; attempt <= MaximumAttempts; attempt++) {
             Stopwatch requestTimer = Stopwatch.StartNew();
-            string prefix = $"[MovieId {movieId} {code}][{provider}]";
+            string prefix = $"【影片 {movieId} · {code}】【{provider}】";
             AddItemLog(itemLogs, provider, "RequestStart", "Info", "Provider 请求开始。", attempt,
                 itemTimer.ElapsedMilliseconds);
-            await logs.WriteAsync(taskId, "Info", $"{prefix} attempt {attempt}/{MaximumAttempts} start", token);
+            await logs.WriteAsync(taskId, "Info", $"{prefix}第 {attempt}/{MaximumAttempts} 次请求开始。", token);
             try {
                 ProviderMetadata? metadata = await WithThrottleAsync(provider,
                     ct => providerClient.GetMetadataAsync(provider, code, moviePath,
@@ -755,12 +755,12 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
                             ProviderLog = async (source, message, logToken) => {
                                 AddItemLog(itemLogs, source, "ProviderLog", "Info", message, attempt,
                                     itemTimer.ElapsedMilliseconds, ParseHttpStatus(message));
-                                await logs.WriteAsync(taskId, "Info", $"[MovieId {movieId} {code}][{source}] {message}", logToken);
+                                await logs.WriteAsync(taskId, "Info", $"【影片 {movieId} · {code}】【{source}】{message}", logToken);
                             },
                             ProviderDebugLog = async (source, message, logToken) => {
                                 AddItemLog(itemLogs, source, "ProviderLog", "Debug", message, attempt,
                                     itemTimer.ElapsedMilliseconds, ParseHttpStatus(message));
-                                await logs.WriteAsync(taskId, "Debug", $"[MovieId {movieId} {code}][{source}] {message}", logToken);
+                                await logs.WriteAsync(taskId, "Debug", $"【影片 {movieId} · {code}】【{source}】{message}", logToken);
                             },
                         }, ct), token);
                 requestTimer.Stop();
@@ -769,7 +769,7 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
                     metadata is null ? "Provider 返回无结果。" : "Provider 返回可解析元数据。",
                     attempt, itemTimer.ElapsedMilliseconds, null, metadata is null ? "NoData" : null);
                 await logs.WriteAsync(taskId, metadata is null ? "Warning" : "Info",
-                    $"{prefix} attempt {attempt}/{MaximumAttempts} {(metadata is null ? "no result" : "success")} in {requestTimer.ElapsedMilliseconds} ms", token);
+                    $"{prefix}第 {attempt}/{MaximumAttempts} 次请求结束：{(metadata is null ? "无结果" : "成功")}，耗时 {requestTimer.ElapsedMilliseconds} 毫秒。", token);
                 return new(metadata, attempt, metadata is null ? "NoData" : null);
             }
             catch (Exception error) when (error is not OperationCanceledException) {
@@ -778,7 +778,7 @@ public sealed class MetadataCompletionWorkflow : BackgroundService
                 requestTimer.Stop();
                 AddItemLog(itemLogs, provider, "RequestFailure", "Warning", error.Message, attempt,
                     itemTimer.ElapsedMilliseconds, ParseHttpStatus(error.Message), category);
-                await logs.WriteAsync(taskId, "Warning", $"{prefix} attempt {attempt}/{MaximumAttempts}: {category}: {error.Message}", token);
+                await logs.WriteAsync(taskId, "Warning", $"{prefix}第 {attempt}/{MaximumAttempts} 次请求失败：{category}；{error.Message}", token);
                 if (attempt < MaximumAttempts)
                     await delay(TimeSpan.FromMilliseconds(250 * Math.Pow(2, attempt - 1)), token);
             }

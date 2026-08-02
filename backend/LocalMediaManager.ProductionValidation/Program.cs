@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Net.Sockets;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
@@ -22,6 +23,8 @@ return command switch {
     "coverage" => await CoverageAsync(args),
     "manifest" => await ManifestAsync(args),
     "memory" => await MemoryAsync(args),
+    "heapwalk" => await HeapWalkAsync(args),
+    "growth-shape" => await GrowthShapeAsync(args),
     _ => Usage(),
 };
 
@@ -35,6 +38,8 @@ int Usage()
     Console.Error.WriteLine("  coverage <database> <repo-root> <output-root>");
     Console.Error.WriteLine("  manifest <source-manifest> <output-manifest>");
     Console.Error.WriteLine("  memory <validation-root> <repo-root> [port] [no-images]");
+    Console.Error.WriteLine("  heapwalk <validation-root> <repo-root> <run-label> <Full|Disabled|DownloadAndDrainOnly|DownloadToBufferOnly|DownloadAndProbeOnly|DownloadAndDecodeOnly|DownloadDecodeAndHash|FullWithoutFileWrite|FullEarlyResponseDispose> [port]");
+    Console.Error.WriteLine("  growth-shape <validation-root> <repo-root> <run-label> <same-process|fresh-process|disabled> [port]");
     return 2;
 }
 
@@ -485,12 +490,309 @@ async Task<int> MemoryAsync(string[] input)
     }
 }
 
+async Task<int> GrowthShapeAsync(string[] input)
+{
+    if (input.Length is < 5 or > 6) return Usage();
+    string root = Path.GetFullPath(input[1]);
+    string repo = Path.GetFullPath(input[2]);
+    string runLabel = input[3].Trim();
+    string experiment = input[4].Trim().ToLowerInvariant();
+    if (experiment is not ("same-process" or "fresh-process" or "disabled")) return Usage();
+    int port = input.Length == 6 && int.TryParse(input[5], out int parsed) ? parsed : 48220;
+    if (string.IsNullOrWhiteSpace(runLabel) || runLabel.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        throw new ArgumentException("Run label is not a valid directory name.");
+
+    string baseline = Path.Combine(root, "baseline", "LocalMediaManager.db");
+    string manifestPath = Path.Combine(root, "manifests", "sample-20.json");
+    if (!File.Exists(baseline) || !File.Exists(manifestPath)) throw new InvalidOperationException("Run prepare first.");
+    SampleManifest manifest = JsonSerializer.Deserialize<SampleManifest>(await File.ReadAllTextAsync(manifestPath), jsonOptions)
+        ?? throw new InvalidDataException("Sample manifest could not be read.");
+    string runRoot = Path.Combine(root, runLabel);
+    int[] batchSizes = experiment == "disabled" ? [20, 20, 20]
+        : experiment == "same-process" ? [1, 5, 10, 20, 20, 20] : [1, 5, 10, 20];
+    bool downloadImages = experiment != "disabled";
+    if (Directory.Exists(runRoot) && Directory.EnumerateFileSystemEntries(runRoot).Any())
+        throw new InvalidOperationException($"Growth-shape validation root already contains evidence: {runRoot}");
+    if (downloadImages) await EnsureLocalMetaTubeProviderAsync();
+    Directory.CreateDirectory(runRoot);
+    Directory.CreateDirectory(Path.Combine(runRoot, "evidence"));
+    var stages = new List<GrowthShapeStage>();
+    if (experiment == "fresh-process") {
+        for (int index = 0; index < batchSizes.Length; index++)
+            stages.Add(await RunGrowthShapeProcessAsync(runRoot, repo, baseline, manifest, batchSizes[index], index + 1,
+                port + index, downloadImages, startupOnly: false));
+    }
+    else {
+        stages.AddRange(await RunGrowthShapeSameProcessAsync(runRoot, repo, baseline, manifest, batchSizes, port, downloadImages));
+    }
+
+    var result = new GrowthShapeRunResult(runLabel, experiment, manifest.Seed, manifest.Count, downloadImages, stages,
+        DateTimeOffset.UtcNow.ToString("O"));
+    await WriteJsonAsync(Path.Combine(runRoot, "evidence", "growth-shape-result.json"), result);
+    Console.WriteLine(JsonSerializer.Serialize(result, jsonOptions));
+    return stages.All(stage => stage.HeapWalkValid && stage.Failed == 0 && stage.Cancelled == 0) ? 0 : 4;
+}
+
+async Task<IReadOnlyList<GrowthShapeStage>> RunGrowthShapeSameProcessAsync(string runRoot, string repo, string baseline,
+    SampleManifest manifest, IReadOnlyList<int> batchSizes, int port, bool downloadImages)
+{
+    string processRoot = Path.Combine(runRoot, "same-bridge");
+    string database = Path.Combine(processRoot, "data", "LocalMediaManager.db");
+    string mediaStorage = Path.Combine(processRoot, "MediaStorage");
+    string logs = Path.Combine(processRoot, "logs");
+    Directory.CreateDirectory(Path.GetDirectoryName(database)!);
+    Directory.CreateDirectory(mediaStorage);
+    Directory.CreateDirectory(logs);
+    await BackupAsync(baseline, database);
+    await ConfigureIsolationAsync(database, mediaStorage, downloadImages);
+    await ResetProviderMetadataAsync(database, manifest.Samples);
+    string bridgeExe = Path.Combine(repo, "backend", "LocalMediaManager.Bridge", "bin", "Release", "net8.0", "LocalMediaManager.Bridge.exe");
+    if (!File.Exists(bridgeExe)) throw new FileNotFoundException("Build the Release Bridge before running validation.", bridgeExe);
+    string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+    string bridgeUrl = $"http://127.0.0.1:{port}";
+    using Process bridge = StartBridge(bridgeExe, database, processRoot, mediaStorage, bridgeUrl, token, logs,
+        enableValidationDiagnostics: true, validationImageMode: "Full");
+    using var client = new HttpClient { BaseAddress = new Uri(bridgeUrl), Timeout = TimeSpan.FromSeconds(90) };
+    client.DefaultRequestHeaders.Add("X-LMM-Session", token);
+    try {
+        await WaitForBridgeAsync(client, bridge, TimeSpan.FromSeconds(30));
+        var result = new List<GrowthShapeStage> {
+            await CaptureGrowthShapeStageAsync(client, database, "Startup", 0, 0, [])
+        };
+        for (int index = 0; index < batchSizes.Count; index++) {
+            IReadOnlyList<SampleCandidate> samples = manifest.Samples.Take(batchSizes[index]).ToArray();
+            await ClearIsolatedResourcesAsync(mediaStorage, processRoot);
+            await ResetProviderMetadataAsync(database, samples);
+            long previousTask = await ScalarLongAsync(database, "SELECT COALESCE(MAX(Id),0) FROM Tasks");
+            await PostJsonAsync(client, "/api/videos/batch/sync", samples.Select(value => value.MovieId).ToArray());
+            IReadOnlyList<TaskRow> tasks = await WaitForHeapWalkTasksAsync(database, previousTask, samples.Count,
+                TimeSpan.FromMinutes(90), bridge);
+            result.Add(await CaptureGrowthShapeStageAsync(client, database, $"Batch{index + 1}_{samples.Count}",
+                index + 1, samples.Count, tasks));
+        }
+        return result;
+    }
+    finally { try { if (!bridge.HasExited) { bridge.CloseMainWindow(); if (!bridge.WaitForExit(5000)) bridge.Kill(true); } } catch { } }
+}
+
+async Task<GrowthShapeStage> RunGrowthShapeProcessAsync(string runRoot, string repo, string baseline, SampleManifest manifest,
+    int sampleCount, int batchIndex, int port, bool downloadImages, bool startupOnly)
+{
+    string processRoot = Path.Combine(runRoot, $"fresh-{batchIndex}-{sampleCount}");
+    string database = Path.Combine(processRoot, "data", "LocalMediaManager.db");
+    string mediaStorage = Path.Combine(processRoot, "MediaStorage");
+    string logs = Path.Combine(processRoot, "logs");
+    Directory.CreateDirectory(Path.GetDirectoryName(database)!);
+    Directory.CreateDirectory(mediaStorage);
+    Directory.CreateDirectory(logs);
+    await BackupAsync(baseline, database);
+    await ConfigureIsolationAsync(database, mediaStorage, downloadImages);
+    IReadOnlyList<SampleCandidate> samples = manifest.Samples.Take(sampleCount).ToArray();
+    await ResetProviderMetadataAsync(database, samples);
+    string bridgeExe = Path.Combine(repo, "backend", "LocalMediaManager.Bridge", "bin", "Release", "net8.0", "LocalMediaManager.Bridge.exe");
+    if (!File.Exists(bridgeExe)) throw new FileNotFoundException("Build the Release Bridge before running validation.", bridgeExe);
+    string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+    string bridgeUrl = $"http://127.0.0.1:{port}";
+    using Process bridge = StartBridge(bridgeExe, database, processRoot, mediaStorage, bridgeUrl, token, logs,
+        enableValidationDiagnostics: true, validationImageMode: "Full");
+    using var client = new HttpClient { BaseAddress = new Uri(bridgeUrl), Timeout = TimeSpan.FromSeconds(90) };
+    client.DefaultRequestHeaders.Add("X-LMM-Session", token);
+    try {
+        await WaitForBridgeAsync(client, bridge, TimeSpan.FromSeconds(30));
+        if (startupOnly) return await CaptureGrowthShapeStageAsync(client, database, "Startup", 0, 0, []);
+        long previousTask = await ScalarLongAsync(database, "SELECT COALESCE(MAX(Id),0) FROM Tasks");
+        await PostJsonAsync(client, "/api/videos/batch/sync", samples.Select(value => value.MovieId).ToArray());
+        IReadOnlyList<TaskRow> tasks = await WaitForHeapWalkTasksAsync(database, previousTask, samples.Count,
+            TimeSpan.FromMinutes(90), bridge);
+        return await CaptureGrowthShapeStageAsync(client, database, $"Fresh{batchIndex}_{sampleCount}", batchIndex, sampleCount, tasks);
+    }
+    finally { try { if (!bridge.HasExited) { bridge.CloseMainWindow(); if (!bridge.WaitForExit(5000)) bridge.Kill(true); } } catch { } }
+}
+
+async Task<GrowthShapeStage> CaptureGrowthShapeStageAsync(HttpClient client, string database, string label, int batchIndex,
+    int sampleCount, IReadOnlyList<TaskRow> tasks)
+{
+    await Task.Delay(TimeSpan.FromSeconds(30));
+    var snapshots = new List<MemoryRuntimeSnapshot>();
+    await CaptureMemorySnapshotAsync(client, database, snapshots, label + "FullGc", tasks.Count(value => Terminal(value.Status)), true, captureNativeHeap: true);
+    await Task.Delay(TimeSpan.FromSeconds(30));
+    await CaptureMemorySnapshotAsync(client, database, snapshots, label + "Settled", tasks.Count(value => Terminal(value.Status)), false, captureNativeHeap: true);
+    BridgeRuntimeMemorySnapshot bridge = snapshots[^1].Bridge;
+    ImagePipelineValidationCounters? counters = bridge.ImagePipeline;
+    BridgeNativeHeapSnapshot? native = bridge.NativeHeap;
+    long privateCommit = bridge.VirtualMemorySummaries.Where(value => value.Type == "Private").Sum(value => value.CommittedBytes);
+    return new(label, batchIndex, sampleCount, tasks.Count(value => value.Status == "Completed"),
+        tasks.Count(value => value.Status == "CompletedWithWarnings"), tasks.Count(value => value.Status == "NoResult"),
+        tasks.Count(value => value.Status == "Failed"), tasks.Count(value => value.Status == "Cancelled"),
+        counters?.DownloadedImages ?? 0, counters?.ReadBytes ?? 0, counters?.WrittenImages ?? 0,
+        bridge.PrivateMemoryBytes, privateCommit, bridge.ManagedHeapBytes, bridge.LargeObjectHeapBytes,
+        bridge.PinnedObjectHeapBytes, bridge.HandleCount, bridge.ThreadCount, native?.BusyBytes,
+        native?.BusyEntries, native?.FreeBytes, native?.Complete == true && native.WalkSucceeded && native.BusyBytes >= 0,
+        counters, snapshots);
+}
+
+async Task EnsureLocalMetaTubeProviderAsync()
+{
+    if (await IsTcpPortOpenAsync("127.0.0.1", 8080)) return;
+    const string dockerDesktop = @"C:\Program Files\Docker\Docker\Docker Desktop.exe";
+    if (!File.Exists(dockerDesktop))
+        throw new FileNotFoundException("Docker Desktop is required for the isolated local MetaTube provider.", dockerDesktop);
+    Process.Start(new ProcessStartInfo { FileName = dockerDesktop, UseShellExecute = true });
+
+    Stopwatch timer = Stopwatch.StartNew();
+    while (timer.Elapsed < TimeSpan.FromMinutes(3)) {
+        if (await TryRunDockerAsync("info")) {
+            await TryRunDockerAsync("start metatube");
+            string mdcContainers = await RunDockerOutputAsync("ps -aq --filter ancestor=mdcng/mdc:latest");
+            foreach (string container in mdcContainers.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                await TryRunDockerAsync($"start {container}");
+            if (await IsTcpPortOpenAsync("127.0.0.1", 8080)) return;
+        }
+        await Task.Delay(TimeSpan.FromSeconds(3));
+    }
+    throw new TimeoutException("Docker Desktop started, but the local MetaTube container did not expose 127.0.0.1:8080 within three minutes.");
+}
+
+async Task<bool> IsTcpPortOpenAsync(string host, int port)
+{
+    using var client = new TcpClient();
+    try {
+        await client.ConnectAsync(host, port).WaitAsync(TimeSpan.FromSeconds(2));
+        return true;
+    }
+    catch (SocketException) { return false; }
+    catch (TimeoutException) { return false; }
+}
+
+async Task<bool> TryRunDockerAsync(string arguments)
+{
+    try {
+        using Process process = Process.Start(new ProcessStartInfo {
+            FileName = "docker", Arguments = arguments, UseShellExecute = false,
+            CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+        }) ?? throw new InvalidOperationException("Could not start Docker CLI.");
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+        return process.ExitCode == 0;
+    }
+    catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or TimeoutException) { return false; }
+}
+
+async Task<string> RunDockerOutputAsync(string arguments)
+{
+    try {
+        using Process process = Process.Start(new ProcessStartInfo {
+            FileName = "docker", Arguments = arguments, UseShellExecute = false,
+            CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+        }) ?? throw new InvalidOperationException("Could not start Docker CLI.");
+        string output = await process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+        return process.ExitCode == 0 ? output : string.Empty;
+    }
+    catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or TimeoutException) { return string.Empty; }
+}
+
+async Task<int> HeapWalkAsync(string[] input)
+{
+    if (input.Length is < 5 or > 6) return Usage();
+    string root = Path.GetFullPath(input[1]);
+    string repo = Path.GetFullPath(input[2]);
+    string runLabel = input[3].Trim();
+    string requestedMode = input[4].Trim();
+    bool downloadImages = !requestedMode.Equals("Disabled", StringComparison.OrdinalIgnoreCase);
+    string imageMode = downloadImages && Enum.TryParse<ImagePipelineValidationMode>(requestedMode, true, out ImagePipelineValidationMode parsedMode)
+        ? parsedMode.ToString()
+        : "Full";
+    if (!requestedMode.Equals("Disabled", StringComparison.OrdinalIgnoreCase) && !Enum.TryParse<ImagePipelineValidationMode>(requestedMode, true, out _)) return Usage();
+    int port = input.Length == 6 && int.TryParse(input[5], out int parsed) ? parsed : 48120;
+    if (string.IsNullOrWhiteSpace(runLabel) || runLabel.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        throw new ArgumentException("Run label is not a valid directory name.");
+
+    string baseline = Path.Combine(root, "baseline", "LocalMediaManager.db");
+    string manifestPath = Path.Combine(root, "manifests", "sample-20.json");
+    if (!File.Exists(baseline) || !File.Exists(manifestPath)) throw new InvalidOperationException("Run prepare first.");
+    SampleManifest manifest = JsonSerializer.Deserialize<SampleManifest>(await File.ReadAllTextAsync(manifestPath), jsonOptions)
+        ?? throw new InvalidDataException("Sample manifest could not be read.");
+    string runRoot = Path.Combine(root, runLabel);
+    if (Directory.Exists(runRoot) && Directory.EnumerateFileSystemEntries(runRoot).Any())
+        throw new InvalidOperationException($"HeapWalk validation root already contains evidence: {runRoot}");
+    string database = Path.Combine(runRoot, "data", "LocalMediaManager.db");
+    string evidence = Path.Combine(runRoot, "evidence");
+    string logs = Path.Combine(runRoot, "logs");
+    string mediaStorage = Path.Combine(runRoot, "MediaStorage");
+    Directory.CreateDirectory(Path.GetDirectoryName(database)!);
+    Directory.CreateDirectory(evidence);
+    Directory.CreateDirectory(logs);
+    Directory.CreateDirectory(mediaStorage);
+    await BackupAsync(baseline, database);
+    await ConfigureIsolationAsync(database, mediaStorage, downloadImages);
+    await ManifestAsync(["manifest", manifestPath, Path.Combine(evidence, "stage3-manifest.json")]);
+    IReadOnlyList<MovieSnapshot> source = await SnapshotAsync(database, manifest.Samples);
+    await WriteJsonAsync(Path.Combine(evidence, "source-before-reset.json"), source);
+    await ResetProviderMetadataAsync(database, manifest.Samples);
+    long previousMaxTask = await ScalarLongAsync(database, "SELECT COALESCE(MAX(Id),0) FROM Tasks");
+
+    string bridgeExe = Path.Combine(repo, "backend", "LocalMediaManager.Bridge", "bin", "Release", "net8.0", "LocalMediaManager.Bridge.exe");
+    if (!File.Exists(bridgeExe)) throw new FileNotFoundException("Build the Release Bridge before running validation.", bridgeExe);
+    string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+    string bridgeUrl = $"http://127.0.0.1:{port}";
+    using Process bridge = StartBridge(bridgeExe, database, runRoot, mediaStorage, bridgeUrl, token, logs,
+        enableValidationDiagnostics: true, validationImageMode: imageMode);
+    using var client = new HttpClient { BaseAddress = new Uri(bridgeUrl), Timeout = TimeSpan.FromSeconds(90) };
+    client.DefaultRequestHeaders.Add("X-LMM-Session", token);
+    try
+    {
+        await WaitForBridgeAsync(client, bridge, TimeSpan.FromSeconds(30));
+        await Task.Delay(TimeSpan.FromSeconds(30));
+        var snapshots = new List<MemoryRuntimeSnapshot>();
+        await CaptureMemorySnapshotAsync(client, database, snapshots, "Startup", 0, false, captureNativeHeap: true);
+        await PostJsonAsync(client, "/api/videos/batch/sync", manifest.Samples.Select(value => value.MovieId).ToArray());
+        IReadOnlyList<TaskRow> tasks = await WaitForHeapWalkTasksAsync(database, previousMaxTask, manifest.Samples.Count,
+            TimeSpan.FromMinutes(90), bridge);
+        await Task.Delay(TimeSpan.FromSeconds(30));
+        await CaptureMemorySnapshotAsync(client, database, snapshots, "FullGc", tasks.Count(value => Terminal(value.Status)), true, captureNativeHeap: true);
+        await Task.Delay(TimeSpan.FromSeconds(30));
+        await CaptureMemorySnapshotAsync(client, database, snapshots, "AfterGc", tasks.Count(value => Terminal(value.Status)), false, captureNativeHeap: true);
+        await CaptureMemorySnapshotAsync(client, database, snapshots, "AfterGcHeapWalkRepeat", tasks.Count(value => Terminal(value.Status)), false, captureNativeHeap: true);
+        string integrity = await ScalarTextAsync(database, "PRAGMA integrity_check") ?? "unknown";
+        long foreignKeys = await ScalarLongAsync(database, "SELECT COUNT(*) FROM pragma_foreign_key_check");
+        ImagePipelineValidationCounters? counters = snapshots.LastOrDefault()?.Bridge.ImagePipeline;
+        var result = new HeapWalkRunResult(runLabel, requestedMode, manifest.Samples.Count,
+            tasks.Count(value => value.Status == "Completed"), tasks.Count(value => value.Status == "CompletedWithWarnings"),
+            tasks.Count(value => value.Status == "NoResult"), tasks.Count(value => value.Status == "Failed"),
+            integrity, foreignKeys, counters, snapshots);
+        await WriteJsonAsync(Path.Combine(evidence, "heapwalk-snapshots.json"), snapshots);
+        await WriteJsonAsync(Path.Combine(evidence, "heapwalk-result.json"), result);
+        await WriteJsonAsync(Path.Combine(evidence, "tasks.json"), tasks);
+        Console.WriteLine(JsonSerializer.Serialize(result, jsonOptions));
+        return integrity == "ok" && foreignKeys == 0 && tasks.All(value => value.Status is not "Failed" and not "Cancelled") ? 0 : 4;
+    }
+    finally
+    {
+        try { if (!bridge.HasExited) { bridge.CloseMainWindow(); if (!bridge.WaitForExit(5000)) bridge.Kill(true); } }
+        catch { }
+    }
+}
+
+async Task<IReadOnlyList<TaskRow>> WaitForHeapWalkTasksAsync(string database, long previousMaxTask, int expected,
+    TimeSpan timeout, Process bridge)
+{
+    Stopwatch timer = Stopwatch.StartNew();
+    while (timer.Elapsed < timeout)
+    {
+        IReadOnlyList<TaskRow> tasks = await ReadTasksAsync(database, previousMaxTask);
+        if (tasks.Count == expected && tasks.All(value => Terminal(value.Status))) return tasks;
+        if (bridge.HasExited) throw new InvalidOperationException($"Bridge exited during HeapWalk validation: {bridge.ExitCode}");
+        await Task.Delay(1000);
+    }
+    throw new TimeoutException($"HeapWalk validation did not reach {expected} terminal tasks within {timeout}.");
+}
+
 async Task<MemoryTaskWaitResult> WaitForMemoryTasksAsync(string database, long previousMaxTask, int expected,
     TimeSpan timeout, Process bridge, HttpClient client, List<MemoryRuntimeSnapshot> snapshots, string batch)
 {
     Stopwatch timer = Stopwatch.StartNew();
     var captured = new HashSet<int>();
-    int[] milestones = [0, 10, 25, 50, 100];
+    int[] milestones = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
     while (timer.Elapsed < timeout) {
         IReadOnlyList<TaskRow> tasks = await ReadTasksAsync(database, previousMaxTask);
         int complete = tasks.Count(value => Terminal(value.Status));
@@ -517,9 +819,10 @@ async Task<MemoryTaskWaitResult> WaitForMemoryTasksAsync(string database, long p
 }
 
 async Task CaptureMemorySnapshotAsync(HttpClient client, string database, List<MemoryRuntimeSnapshot> snapshots,
-    string label, int completedTasks, bool fullGc, bool clearSqlitePools = false)
+    string label, int completedTasks, bool fullGc, bool clearSqlitePools = false, bool captureNativeHeap = false)
 {
-    JsonElement json = await PostJsonAsync(client, $"/api/validation/runtime-snapshot?fullGc={fullGc.ToString().ToLowerInvariant()}&clearSqlitePools={clearSqlitePools.ToString().ToLowerInvariant()}", new { });
+    bool includeNativeHeap = captureNativeHeap || label.Contains("AfterFullGc", StringComparison.Ordinal);
+    JsonElement json = await PostJsonAsync(client, $"/api/validation/runtime-snapshot?fullGc={fullGc.ToString().ToLowerInvariant()}&clearSqlitePools={clearSqlitePools.ToString().ToLowerInvariant()}&includeNativeHeap={includeNativeHeap.ToString().ToLowerInvariant()}", new { });
     BridgeRuntimeMemorySnapshot bridge = JsonSerializer.Deserialize<BridgeRuntimeMemorySnapshot>(json.GetRawText(), jsonOptions)
         ?? throw new InvalidDataException("Bridge runtime diagnostics returned an invalid payload.");
     long taskResults = await ScalarLongAsync(database, "SELECT COUNT(*) FROM Tasks WHERE TaskType='Sync'");
@@ -635,10 +938,13 @@ async Task ConfigureIsolationAsync(string database, string mediaStorage, bool do
 {
     await using SqliteConnection connection = await OpenAsync(database, false);
     string at = DateTimeOffset.UtcNow.ToString("O");
+    int validationImageTimeout = int.TryParse(Environment.GetEnvironmentVariable("LMM_VALIDATION_IMAGE_TIMEOUT_SECONDS"), out int parsedTimeout)
+        ? Math.Clamp(parsedTimeout, 1, 60)
+        : 60;
     var values = new Dictionary<string, (object Value, string Type)> {
         ["metadata.metatube.enabled"] = (true, "boolean"),
         ["metadata.metatube.baseUrl"] = ("http://127.0.0.1:8080/", "string"),
-        ["metadata.metatube.timeoutSeconds"] = (60, "integer"),
+        ["metadata.metatube.timeoutSeconds"] = (validationImageTimeout, "integer"),
         ["metadata.metatube.downloadImages"] = (downloadImages, "boolean"),
         ["metadata.metatube.writeNfo"] = (true, "boolean"),
         ["metadata.metatube.autoExecute"] = (true, "boolean"),
@@ -747,6 +1053,7 @@ async Task<BatchVerification> VerifyBatchAsync(string baseline, string database,
     int fanart = after.Count(value => value.FanartCount > 0);
     int preview = after.Count(value => value.PreviewCount > 0);
     int nfo = after.Count(value => value.NfoCount > 0 && !string.IsNullOrWhiteSpace(value.NfoPath) && File.Exists(value.NfoPath));
+    OptionalFieldStatistics optionalFields = await BuildOptionalFieldStatisticsAsync(database, source, after, tasks);
     string ids = string.Join(',', after.Select(value => value.MovieId));
     long baselineDuplicateActors = await ScalarLongAsync(baseline, "SELECT COUNT(*) FROM (SELECT NormalizedName,COUNT(*) c FROM Actors WHERE trim(COALESCE(NormalizedName,''))<>'' GROUP BY NormalizedName HAVING c>1)");
     long baselineDuplicateGenres = await ScalarLongAsync(baseline, "SELECT COUNT(*) FROM (SELECT NormalizedName,COUNT(*) c FROM Genres WHERE trim(COALESCE(NormalizedName,''))<>'' GROUP BY NormalizedName HAVING c>1)");
@@ -768,16 +1075,104 @@ async Task<BatchVerification> VerifyBatchAsync(string baseline, string database,
     bool passed = completed + warnings >= Math.Ceiling(tasks.Count * 0.95)
         && failed <= 1 && protectedChanges == 0 && duplicateActors == 0 && duplicateGenres == 0
         && duplicateMovieActors == 0 && duplicateMovieGenres == 0
-        && duplicateResources == 0 && unregisteredFiles == 0 && integrity == "ok" && foreignKeys == 0;
+        && duplicateResources == 0 && unregisteredFiles == 0 && integrity == "ok" && foreignKeys == 0
+        && optionalFields.Director.DataRegression == 0 && optionalFields.Series.DataRegression == 0
+        && optionalFields.Director.WriteFailure == 0 && optionalFields.Series.WriteFailure == 0;
     return new(passed, tasks.Count, completed, warnings, noMatch, blocked, failed, cancelled,
         metadataSuccess, poster, fanart, preview, nfo, protectedChanges,
         duplicateActors, duplicateGenres, duplicateMovieActors, duplicateMovieGenres, duplicateResources,
         missingResources, unregisteredFiles, integrity, foreignKeys, elapsed.TotalMilliseconds,
-        tasks.Count == 0 ? 0 : elapsed.TotalMilliseconds / tasks.Count, p95, metaTubeCalls, javBusCalls, challenges, rateLimits);
+        tasks.Count == 0 ? 0 : elapsed.TotalMilliseconds / tasks.Count, p95, metaTubeCalls, javBusCalls, challenges, rateLimits,
+        optionalFields);
+}
+
+async Task<OptionalFieldStatistics> BuildOptionalFieldStatisticsAsync(string database,
+    IReadOnlyList<MovieSnapshot> source, IReadOnlyList<MovieSnapshot> after, IReadOnlyList<TaskRow> tasks)
+{
+    var sourceProvided = new Dictionary<long, HashSet<string>>();
+    await using (SqliteConnection connection = await OpenAsync(database, true)) {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT TaskId,AppliedJson FROM MetadataSyncSnapshots
+             WHERE AppliedJson IS NOT NULL AND RolledBackAt IS NULL
+             ORDER BY Id
+            """;
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) {
+            long taskId = reader.GetInt64(0);
+            string json = reader.GetString(1);
+            HashSet<string> fields = ReadProvidedOptionalFields(json);
+            if (fields.Count > 0) sourceProvided[taskId] = fields;
+        }
+    }
+
+    var byMovie = tasks.GroupBy(value => value.MovieId).ToDictionary(group => group.Key,
+        group => group.OrderByDescending(value => value.TaskId).First());
+    OptionalFieldCounts Director() => ClassifyOptionalField("Director", source, after, byMovie, sourceProvided,
+        value => value.DirectorCount);
+    OptionalFieldCounts Series() => ClassifyOptionalField("Series", source, after, byMovie, sourceProvided,
+        value => value.SeriesCount);
+    return new(Director(), Series());
+}
+
+static HashSet<string> ReadProvidedOptionalFields(string json)
+{
+    var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    try {
+        using JsonDocument document = JsonDocument.Parse(json);
+        if (!TryGetProperty(document.RootElement, "FieldSources", out JsonElement sources)
+            || sources.ValueKind != JsonValueKind.Object) return result;
+        foreach (JsonProperty field in sources.EnumerateObject())
+            if (field.Name.Equals("Director", StringComparison.OrdinalIgnoreCase)
+                || field.Name.Equals("Series", StringComparison.OrdinalIgnoreCase)) result.Add(field.Name);
+    }
+    catch (JsonException) { }
+    return result;
+}
+
+static bool TryGetProperty(JsonElement element, string name, out JsonElement value)
+{
+    foreach (JsonProperty property in element.EnumerateObject()) {
+        if (property.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) {
+            value = property.Value;
+            return true;
+        }
+    }
+    value = default;
+    return false;
+}
+
+static OptionalFieldCounts ClassifyOptionalField(string field, IReadOnlyList<MovieSnapshot> source,
+    IReadOnlyList<MovieSnapshot> after, IReadOnlyDictionary<long, TaskRow> taskByMovie,
+    IReadOnlyDictionary<long, HashSet<string>> sourceProvided, Func<MovieSnapshot, int> relationCount)
+{
+    int provided = 0;
+    int written = 0;
+    int notApplicable = 0;
+    int writeFailure = 0;
+    int dataRegression = 0;
+    foreach (MovieSnapshot current in after) {
+        bool fieldProvided = taskByMovie.TryGetValue(current.MovieId, out TaskRow? task)
+            && task is not null
+            && sourceProvided.TryGetValue(task.TaskId, out HashSet<string>? fields)
+            && fields.Contains(field);
+        if (fieldProvided) {
+            provided++;
+            if (relationCount(current) > 0) written++;
+            else writeFailure++;
+        }
+        else {
+            notApplicable++;
+        }
+
+        MovieSnapshot before = source.First(value => value.MovieId == current.MovieId);
+        if (relationCount(before) > 0 && relationCount(current) == 0) dataRegression++;
+    }
+    return new(provided, written, notApplicable, writeFailure, dataRegression);
 }
 
 Process StartBridge(string executable, string database, string dataRoot, string mediaStorage, string url, string token,
-    string logRoot, bool enableValidationDiagnostics = false)
+    string logRoot, bool enableValidationDiagnostics = false, string? validationImageMode = null)
 {
     var start = new ProcessStartInfo(executable) {
         WorkingDirectory = Path.GetDirectoryName(executable)!,
@@ -794,6 +1189,7 @@ Process StartBridge(string executable, string database, string dataRoot, string 
     start.Environment["LMM_BRIDGE_URL"] = url;
     start.Environment["LMM_BRIDGE_TOKEN"] = token;
     if (enableValidationDiagnostics) start.Environment["LMM_VALIDATION_DIAGNOSTICS"] = "1";
+    if (!string.IsNullOrWhiteSpace(validationImageMode)) start.Environment["LMM_VALIDATION_IMAGE_MODE"] = validationImageMode;
     Process process = Process.Start(start) ?? throw new InvalidOperationException("Bridge process did not start.");
     _ = PumpAsync(process.StandardOutput, Path.Combine(logRoot, "bridge-stdout.log"));
     _ = PumpAsync(process.StandardError, Path.Combine(logRoot, "bridge-stderr.log"));
@@ -1185,6 +1581,8 @@ string RenderBatchSummary(int size, string database, BatchVerification result) =
     - Fanart: {result.Fanart}/{result.Total}
     - Preview: {result.Preview}/{result.Total}
     - NFO: {result.Nfo}/{result.Total}
+    - Director source provided/written/not applicable/write failure/data regression: {result.OptionalFields.Director.SourceProvided}/{result.OptionalFields.Director.Written}/{result.OptionalFields.Director.NotApplicable}/{result.OptionalFields.Director.WriteFailure}/{result.OptionalFields.Director.DataRegression}
+    - Series source provided/written/not applicable/write failure/data regression: {result.OptionalFields.Series.SourceProvided}/{result.OptionalFields.Series.Written}/{result.OptionalFields.Series.NotApplicable}/{result.OptionalFields.Series.WriteFailure}/{result.OptionalFields.Series.DataRegression}
     - SQLite integrity_check: `{result.Integrity}`
     - Foreign-key errors: {result.ForeignKeys}
     - Unregistered isolated files: {result.UnregisteredFiles}
@@ -1226,7 +1624,11 @@ sealed record BatchVerification(bool Passed, int Total, int Completed, int Compl
     int ProtectedDataChanges, long DuplicateActors, long DuplicateGenres, long DuplicateMovieActors,
     long DuplicateMovieGenres, long DuplicateResources, long MissingRegisteredResources, long UnregisteredFiles,
     string Integrity, long ForeignKeys, double TotalElapsedMilliseconds, double AverageMilliseconds,
-    double P95Milliseconds, int MetaTubeLogEvents, int JavBusLogEvents, int ChallengePages, int RateLimits);
+    double P95Milliseconds, int MetaTubeLogEvents, int JavBusLogEvents, int ChallengePages, int RateLimits,
+    OptionalFieldStatistics OptionalFields);
+sealed record OptionalFieldStatistics(OptionalFieldCounts Director, OptionalFieldCounts Series);
+sealed record OptionalFieldCounts(int SourceProvided, int Written, int NotApplicable, int WriteFailure,
+    int DataRegression);
 sealed record TaskWaitResult(IReadOnlyList<TaskRow> Tasks, IReadOnlyList<RuntimeSample> RuntimeSamples);
 sealed record RuntimeSample(string CapturedAt, double ElapsedMilliseconds, long WorkingSetBytes,
     long PrivateMemoryBytes, int HandleCount, int PendingTasks, int RunningTasks);
@@ -1234,6 +1636,18 @@ sealed record MemoryTaskWaitResult(IReadOnlyList<TaskRow> Tasks, TimeSpan Elapse
 sealed record MemoryRuntimeSnapshot(string Label, int CompletedTasks, BridgeRuntimeMemorySnapshot Bridge,
     long TaskResultCount, long LogEntryCount, long ResourceMetadataCount,
     long? ActiveHttpRequests, long? ActiveSqliteConnections, long? OpenStreams, string AvailabilityNote);
+sealed record HeapWalkRunResult(string RunLabel, string Mode, int SampleCount, int Completed,
+    int CompletedWithWarnings, int NoResult, int Failed, string Integrity, long ForeignKeys,
+    ImagePipelineValidationCounters? ImagePipeline, IReadOnlyList<MemoryRuntimeSnapshot> Snapshots);
+sealed record GrowthShapeRunResult(string RunLabel, string Experiment, string SampleSeed, int FixedSampleCount,
+    bool DownloadImages, IReadOnlyList<GrowthShapeStage> Stages, string CompletedAt);
+sealed record GrowthShapeStage(string Label, int BatchIndex, int SampleCount, int Completed,
+    int CompletedWithWarnings, int NoResult, int Failed, int Cancelled, long DownloadedImages,
+    long ReadBytes, long WrittenImages, long PrivateMemoryBytes, long ProcessPrivateCommitBytes,
+    long ManagedHeapBytes, long LargeObjectHeapBytes, long PinnedObjectHeapBytes, int HandleCount,
+    int ThreadCount, long? NativeBusyBytes, long? NativeBusyEntries, long? NativeFreeBytes,
+    bool HeapWalkValid, ImagePipelineValidationCounters? ImagePipeline,
+    IReadOnlyList<MemoryRuntimeSnapshot> Snapshots);
 sealed record TaskStageMetric(int BatchIndex, long TaskId, long MovieId, string FinalStatus, int RetryCount,
     double TotalDuration, double QueueDuration, double NormalizeDuration, double MetaTubeDuration,
     double JavBusDuration, double MergeDuration, double ResourceDownloadDuration, double WriterDuration,

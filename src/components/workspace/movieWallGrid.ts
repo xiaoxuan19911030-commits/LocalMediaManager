@@ -5,7 +5,7 @@ type CardWidthRule = { min: number }
 const cardWidthRules: Record<MovieWallPosterOrientation, Record<MovieWallPosterSize, CardWidthRule>> = {
   portrait: {
     small: { min: 120 },
-    medium: { min: 140 },
+    medium: { min: 175 },
     large: { min: 180 },
   },
   landscape: {

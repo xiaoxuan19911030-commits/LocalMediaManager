@@ -13,6 +13,8 @@
     <PackageReference Include="SkiaSharp" Version="4.150.1" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="AppResources\AI\Models\face_detection_yunet_2023mar.onnx" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="AppResources\AI\Models\YuNet-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="models\ssd_mobilenet_v1_12-int8.onnx" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="models\PERSON_DETECTION_MODEL.md" CopyToOutputDirectory="PreserveNewest" />
     <Content Update="movie-number-rules.json" CopyToOutputDirectory="PreserveNewest" />

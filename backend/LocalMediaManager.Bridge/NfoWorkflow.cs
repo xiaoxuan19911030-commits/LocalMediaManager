@@ -208,7 +208,15 @@ public sealed class NfoService(string databasePath, MediaStoragePathResolver pat
                 await document.SaveAsync(writer, cancellationToken); await writer.FlushAsync(); await output.FlushAsync(cancellationToken);
             }
             _ = await ParseAsync(temporary, cancellationToken);
-            if (existed) File.Replace(temporary, path, backup, true); else File.Move(temporary, path, false);
+            if (existed) {
+                try {
+                    File.Replace(temporary, path, backup, true);
+                } catch (IOException) when (backup is not null && File.Exists(backup) && !File.Exists(path) && File.Exists(temporary)) {
+                    // File.Replace can leave the original at the backup name on network shares.
+                    // The validated temporary file can still be installed without discarding that backup.
+                    File.Move(temporary, path, false);
+                }
+            } else File.Move(temporary, path, false);
             installed = true;
             string hash = await HashAsync(path, cancellationToken);
             await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, cancellationToken);

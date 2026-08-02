@@ -257,7 +257,28 @@ export default function MovieDetailPage() {
   const displayedHeroImageUrl = heroOverrideUrl ?? heroImageUrl
   useEffect(() => { setPosterFailed(false) }, [displayedHeroImageUrl])
 
-  const displayedImages = imageTab === 'stills' ? stills : screenshots
+  const defaultHeroAsset = useMemo<ImageAsset | undefined>(() => {
+    if (!heroImageUrl) return undefined
+    return imageAssets.find((asset) => asset.url === heroImageUrl) ?? {
+      id: 0,
+      type: 'DefaultHero',
+      url: heroImageUrl,
+      ownership: 'System',
+      locked: false,
+      derived: false,
+      primary: true,
+      validationStatus: 'Valid',
+      width: 0,
+      height: 0,
+      fileSize: 0,
+    }
+  }, [heroImageUrl, imageAssets])
+  const displayedImages = imageTab === 'stills'
+    ? [
+      ...(defaultHeroAsset ? [defaultHeroAsset] : []),
+      ...stills.filter((asset) => asset.url !== heroImageUrl),
+    ]
+    : screenshots
   useEffect(() => {
     if (heroOverrideUrl && !displayedImages.some((asset) => asset.url === heroOverrideUrl)) setHeroOverrideUrl(undefined)
   }, [displayedImages, heroOverrideUrl])
@@ -413,21 +434,21 @@ export default function MovieDetailPage() {
   const normalizedTagSearch = tagSearch.trim().toLocaleLowerCase()
   const filteredTagOptions = useMemo(() => tagOptions.filter((tag) => tag.name.toLocaleLowerCase().includes(normalizedTagSearch)), [normalizedTagSearch, tagOptions])
   const selectedTagIds = useMemo(() => new Set(selectedTags.map((tag) => tag.id)), [selectedTags])
-  const heroColumns = { xs: '1fr', lg: 'minmax(420px, 1.2fr) minmax(440px, 1fr)' }
+  const heroColumns = { xs: '1fr', lg: 'minmax(0, 1fr) minmax(288px, 320px)' }
 
   return <Box sx={{ '@keyframes detailIn': { from: { opacity: 0, transform: 'translateY(10px)' }, to: { opacity: 1, transform: 'translateY(0)' } } }}>
     {error && <Alert severity="error">{error}</Alert>}
-    {!movie && !error ? <Box sx={{ minHeight: 420, display: 'grid', placeItems: 'center' }}><CircularProgress/></Box> : movie && <Stack spacing={1.75} sx={{ animation: 'detailIn .32s ease both', '@media (prefers-reduced-motion: reduce)': { animation: 'none' } }}>
+    {!movie && !error ? <Box sx={{ minHeight: 420, display: 'grid', placeItems: 'center' }}><CircularProgress/></Box> : movie && <Stack spacing={1.75} sx={{ minWidth: 0, animation: 'detailIn .32s ease both', '@media (prefers-reduced-motion: reduce)': { animation: 'none' } }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
         <Button color="inherit" startIcon={<ArrowBackRoundedIcon/>} onClick={() => navigate(-1)}>返回</Button>
         <Box sx={{ flex: '1 1 auto' }}/>
       </Box>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: heroColumns, border: 1, borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
-        <Box sx={{ height: 'clamp(720px, calc(72vh + 200px), 920px)', bgcolor: 'background.default', display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: heroColumns, gap: 1.5, minWidth: 0, alignItems: 'start' }}>
+        <Box sx={{ aspectRatio: '16 / 9', minHeight: { xs: 250, md: 360 }, bgcolor: 'background.default', display: 'grid', placeItems: 'center', overflow: 'hidden', border: 1, borderColor: 'divider', borderRadius: 1 }}>
           {displayedHeroImageUrl && !posterFailed ? <SmartImage src={displayedHeroImageUrl} alt={movie.code || movie.title || ''} fit="contain" eager bgcolor="background.default" onError={() => setPosterFailed(true)}/> : <Typography color="text.disabled">{posterFailed ? '图片损坏或不可用' : '暂无图片'}</Typography>}
         </Box>
-        <Stack spacing={2} sx={{ minWidth: 0, p: { xs: 2, md: 3 }, borderLeft: { lg: 1 }, borderColor: 'divider', height: '100%' }}>
+        <Stack spacing={2} sx={{ minWidth: 0, p: { xs: 2, md: 2.5 }, border: 1, borderColor: 'divider', borderRadius: 1 }}>
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="h5" sx={{ fontWeight: 850 }}>{movie.code || '番号未知'}</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: .75, lineHeight: 1.7, overflowWrap: 'anywhere' }}>{movie.title || movie.originalTitle || movie.code || `影片 ${movie.id}`}</Typography>
@@ -515,7 +536,7 @@ export default function MovieDetailPage() {
           </ToggleButtonGroup>
         </Stack>
         <Box onWheel={horizontalWheel} sx={{ display: 'flex', gap: 1.25, overflowX: 'auto', pb: .5, minHeight: 185, scrollBehavior: 'smooth', ...horizontalScrollSx }}>
-          {displayedImages.length ? displayedImages.map((asset, index) => <Box key={`${asset.type}-${asset.id}`} onClick={() => { setHeroOverrideUrl(asset.url); setPosterFailed(false) }} sx={{ flex: '0 0 189px', height: 180, bgcolor: 'background.default', border: 1, borderColor: 'divider', borderRadius: 1, overflow: 'hidden', cursor: 'pointer' }}>
+          {displayedImages.length ? displayedImages.map((asset, index) => <Box key={`${asset.type}-${asset.id}`} onClick={() => { setHeroOverrideUrl(asset.id === 0 || asset.url === heroImageUrl ? undefined : asset.url); setPosterFailed(false) }} sx={{ flex: '0 0 189px', height: 180, bgcolor: 'background.default', border: 1, borderColor: heroOverrideUrl === asset.url ? 'primary.main' : 'divider', borderRadius: 1, overflow: 'hidden', cursor: 'pointer' }}>
             <SmartImage src={asset.url} alt={asset.type}/>
           </Box>) : <Box sx={{ width: '100%', minHeight: 128, display: 'grid', placeItems: 'center', border: 1, borderColor: 'divider', borderRadius: 1, bgcolor: 'action.hover' }}>
             <Typography color="text.secondary">{imageTab === 'stills' ? '暂无剧照' : '暂无截图'}</Typography>

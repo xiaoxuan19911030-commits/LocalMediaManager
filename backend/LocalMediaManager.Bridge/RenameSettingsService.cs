@@ -12,7 +12,7 @@ public sealed record RenameSettingsDto(bool TrimTitle, bool RenameAfterFavorite,
 public sealed class RenameSettingsService(string databasePath)
 {
     private const string Key = "rename.settings";
-    private static readonly string[] AllowedSeparators = [" - ", "-", "_", " ", "·", ",", "，"];
+    private static readonly string[] AllowedSeparators = [" - ", "-", "+", "_", " ", "·", ",", "，"];
 
     public async Task<RenameSettingsDto> ReadAsync(CancellationToken token = default)
     {
@@ -41,7 +41,7 @@ public sealed class RenameSettingsService(string databasePath)
         return clean;
     }
 
-    private static RenameSettingsDto Normalize(RenameSettingsDto input)
+    internal static RenameSettingsDto Normalize(RenameSettingsDto input)
     {
         string info = AllowedSeparators.Contains(input.InformationSeparator) ? input.InformationSeparator : " - ";
         string list = AllowedSeparators.Contains(input.ListSeparator) ? input.ListSeparator : " - ";

@@ -69,6 +69,67 @@ interface TaskTypeOption { value: string; label: string; types: string[] }
 const activeStates = ['Pending', 'Preparing', 'FetchingMetadata', 'DownloadingImages', 'WritingMetadata', 'WritingNfo', 'Retrying', 'Running', 'Paused']
 const terminalStates = ['Completed', 'CompletedWithErrors', 'CompletedWithWarnings', 'NoResult', 'Blocked', 'Failed', 'Cancelled']
 
+const numberLogEmptyLabels: Record<string, string> = {
+  None: '无',
+  NoCandidate: '未找到可识别番号',
+  Unavailable: '不可用',
+  True: '是',
+  False: '否',
+}
+
+function formatTaskLogMessage(message: string) {
+  const numberMatch = /^\[Movie Number\] Original=(.*?); Matched=(.*?); Detected=(.*?); Normalized=(.*?); Confidence=(.*?); PartIndex=(.*?)(?:; Warnings=(.*))?$/.exec(message)
+  if (numberMatch) {
+    const [, original, matched, detected, normalized, confidence, partIndex, warnings] = numberMatch
+    const readable = (value: string | undefined) => numberLogEmptyLabels[value ?? ''] ?? value ?? '无'
+    return `影片番号识别：原始文件名：${original}；匹配规则：${readable(matched)}；识别结果：${readable(detected)}；标准番号：${readable(normalized)}；置信度：${confidence}；分集：${readable(partIndex)}；提示：${readable(warnings)}`
+  }
+  const providerSearch = /^Provider Search Results: (\d+) candidate\(s\)\.$/.exec(message)
+  if (providerSearch) return `数据源搜索完成：找到 ${providerSearch[1]} 个候选结果。`
+  const providerDetail = /^Provider Detail Request: (.+?) externalId=(.*)$/.exec(message)
+  if (providerDetail) return `请求数据源详情：数据源=${providerDetail[1]}；外部编号=${providerDetail[2]}`
+
+  const replacements: Array<[RegExp, string]> = [
+    [/^\[Screenshot Interval\]\s*/, '截图取样范围：'],
+    [/^\[Screenshot Candidate Failed\]\s*/, '截图候选生成失败：'],
+    [/^\[Screenshot Candidate\]\s*/, '截图候选：'],
+    [/^\[Screenshot Result\]\s*/, '截图结果：'],
+    [/^\[Repair Target\]\s*/, '定向修复字段：'],
+    [/^Parse Success:\s*/, '元数据解析完成：'],
+    [/^\[Image Write\] Partial failure; continuing with valid images:\s*/, '部分图片写入失败，已保留有效图片并继续同步：'],
+    [/^\[Image Write\] Failed; metadata merge will continue:\s*/, '图片写入失败，元数据合并将继续执行：'],
+    [/^\[NFO Write\] Success:\s*/, 'NFO 写入完成：'],
+    [/^\[NFO Write\] Failed; metadata merge will continue:\s*/, 'NFO 写入失败，元数据合并将继续执行：'],
+    [/^\[Database Merge\] Success$/, '数据库合并成功。'],
+    [/^\[Database Merge\]\s*/, '数据库合并：'],
+    [/Duration=/g, '影片时长='],
+    [/Start=/g, '开始位置='],
+    [/End=/g, '结束位置='],
+    [/Reason=/g, '计算依据='],
+    [/CandidateIndex=/g, '序号='],
+    [/Timestamp=/g, '时间点='],
+    [/IsRetry=/g, '是否重试='],
+    [/Error=/g, '原因='],
+    [/HasPerson=/g, '检测到人物='],
+    [/PersonCount=/g, '人物数量='],
+    [/LargestPersonAreaRatio=/g, '最大人物面积占比='],
+    [/Confidence=/g, '置信度='],
+    [/BrightnessScore=/g, '亮度评分='],
+    [/BlurScore=/g, '清晰度评分='],
+    [/DuplicateScore=/g, '重复度评分='],
+    [/FinalScore=/g, '最终评分='],
+    [/Filtered=/g, '已过滤='],
+    [/FilterReason=/g, '过滤原因='],
+    [/Retained=/g, '已保留='],
+    [/Recommended=/g, '推荐='],
+    [/Time=/g, '时间点='],
+    [/Score=/g, '评分='],
+    [/Path=/g, '文件路径='],
+  ]
+  return replacements.reduce((value, [pattern, replacement]) => value.replace(pattern, replacement), message)
+    .replace(/\b(?:None|Unavailable|True|False)\b/g, value => numberLogEmptyLabels[value] ?? value)
+}
+
 const preferredTypeOptions: TaskTypeOption[] = [
   { value: 'all', label: '全部类型', types: [] },
   { value: 'Sync', label: '同步信息', types: ['Sync'] },
@@ -96,7 +157,7 @@ export default function TasksPage() {
   const load = useCallback((showLoading = false) => {
     if (showLoading) setTasks(undefined)
     setError('')
-    return bridge.tasks(100).then(setTasks).catch((reason: Error) => setError(reason.message))
+    return bridge.tasks().then(setTasks).catch((reason: Error) => setError(reason.message))
   }, [])
   useEffect(() => { void load(true) }, [load])
 
@@ -243,7 +304,7 @@ export default function TasksPage() {
     <Dialog open={bulkAction === 'cancel'} onClose={busy ? undefined : () => setBulkAction(undefined)} fullWidth maxWidth="sm"><DialogTitle>取消任务</DialogTitle><DialogContent dividers><Alert severity="warning">将取消当前筛选结果中的 {visibleActive.length} 个执行中任务，包括等待中和排队中的任务。已经完成并提交的单项不会回滚。</Alert></DialogContent><DialogActions><Button onClick={() => setBulkAction(undefined)} disabled={busy !== undefined}>返回</Button><Button color="error" variant="contained" onClick={() => void cancelVisible()} disabled={busy !== undefined || visibleActive.length === 0}>确认取消</Button></DialogActions></Dialog>
     <Dialog open={bulkAction === 'cleanup'} onClose={busy ? undefined : () => { setBulkAction(undefined); setCleanupTarget(undefined) }} fullWidth maxWidth="sm"><DialogTitle>清除任务</DialogTitle><DialogContent dividers><Alert severity="warning">将清除当前筛选结果中的 {visibleTerminal.length} 个终态任务记录和对应日志。执行中的任务不会被清除，媒体文件和业务数据不受影响。</Alert></DialogContent><DialogActions><Button onClick={() => { setBulkAction(undefined); setCleanupTarget(undefined) }} disabled={busy !== undefined}>返回</Button><Button color="error" variant="contained" onClick={() => void cleanup()} disabled={busy !== undefined || visibleTerminal.length === 0}>确认清除</Button></DialogActions></Dialog>
     <Dialog open={Boolean(deleteTarget)} onClose={busy ? undefined : () => setDeleteTarget(undefined)} fullWidth maxWidth="sm"><DialogTitle>删除任务记录</DialogTitle><DialogContent dividers><Alert severity="warning">将删除“{deleteTarget?.name}”及其日志。活动任务不会被删除，媒体文件和数据库业务数据不受影响。</Alert></DialogContent><DialogActions><Button onClick={() => setDeleteTarget(undefined)} disabled={busy !== undefined}>返回</Button><Button color="error" variant="contained" onClick={() => void deleteTask()} disabled={busy !== undefined}>删除记录</Button></DialogActions></Dialog>
-    <Dialog open={Boolean(logs)} onClose={() => setLogs(undefined)} fullWidth maxWidth="md"><DialogTitle>任务日志 · {logs?.task.name}</DialogTitle><DialogContent dividers>{!logs?.items ? <Box sx={{ minHeight: 180, display: 'grid', placeItems: 'center' }}><CircularProgress/></Box> : logs.items.length === 0 ? <EmptyState title="暂无日志" description="该任务没有持久日志记录。"/> : <Stack spacing={1}>{logs.items.map(log => <Box key={log.id} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '160px 80px minmax(0,1fr)' }, gap: 1.5, py: 1, borderBottom: 1, borderColor: 'divider' }}><Typography variant="caption" color="text.secondary">{formatDate(log.createdAt)}</Typography><TaskStatusBadge status={log.level}/><Typography variant="body2">{log.message}</Typography></Box>)}</Stack>}</DialogContent><DialogActions><Button onClick={() => setLogs(undefined)}>关闭</Button></DialogActions></Dialog>
+    <Dialog open={Boolean(logs)} onClose={() => setLogs(undefined)} fullWidth maxWidth="md"><DialogTitle>任务日志 · {logs?.task.name}</DialogTitle><DialogContent dividers>{!logs?.items ? <Box sx={{ minHeight: 180, display: 'grid', placeItems: 'center' }}><CircularProgress/></Box> : logs.items.length === 0 ? <EmptyState title="暂无日志" description="该任务没有持久日志记录。"/> : <Stack spacing={1}>{logs.items.map(log => <Box key={log.id} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '160px 80px minmax(0,1fr)' }, gap: 1.5, py: 1, borderBottom: 1, borderColor: 'divider' }}><Typography variant="caption" color="text.secondary">{formatDate(log.createdAt)}</Typography><TaskStatusBadge status={log.level}/><Typography variant="body2">{formatTaskLogMessage(log.message)}</Typography></Box>)}</Stack>}</DialogContent><DialogActions><Button onClick={() => setLogs(undefined)}>关闭</Button></DialogActions></Dialog>
   </WorkspacePage>
 }
 

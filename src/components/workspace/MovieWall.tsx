@@ -147,7 +147,7 @@ export function MovieWall({
   initialSearch = '',
   emptyTitle = '暂无影片',
   emptyDescription = '当前条件下没有可展示的影片。',
-  pageSize = 24,
+  pageSize = 48,
   selectable,
   selectedIds = [],
   onSelect,
@@ -195,6 +195,7 @@ export function MovieWall({
   const [libraryId, setLibraryId] = useState(canReuseSavedState ? saved.libraryId ?? 0 : defaults.libraryId ?? 0)
   const [view, setView] = useState<WorkspaceViewMode>(canReuseSavedState ? saved.view ?? 'grid' : 'grid')
   const [movieWallDisplay, setMovieWallDisplay] = useState<MovieWallDisplaySettings>(defaultMovieWallDisplay)
+  const [adaptivePageSize, setAdaptivePageSize] = useState(pageSize)
   const [shortcutsEnabled, setShortcutsEnabled] = useState(true)
   const [libraries, setLibraries] = useState<MediaLibrary[]>([])
   const [loading, setLoading] = useState(true)
@@ -214,9 +215,10 @@ export function MovieWall({
   const buildSavedState = useCallback((): SavedMovieWallState => ({ page, search, query, sort, rating, metadataStatus, imageStatus, libraryId, view, defaultsSignature }), [defaultsSignature, imageStatus, libraryId, metadataStatus, page, query, rating, search, sort, view])
   const filterDirty = rating !== 'all' || metadataStatus !== 'all' || imageStatus !== 'all' || libraryId !== (defaults.libraryId ?? 0)
   const activeFilterCount = (query ? 1 : 0) + (sort !== 'newest' ? 1 : 0) + (filterDirty ? 1 : 0)
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const effectivePageSize = view === 'grid' ? adaptivePageSize : pageSize
+  const totalPages = Math.max(1, Math.ceil(total / effectivePageSize))
 
-  const buildSearchFilters = useCallback((nextLimit = pageSize, nextOffset = (page - 1) * pageSize): AdvancedSearchFilters => {
+  const buildSearchFilters = useCallback((nextLimit = effectivePageSize, nextOffset = (page - 1) * effectivePageSize): AdvancedSearchFilters => {
     const effectiveMetadataStatus = defaults.metadataStatus ?? (imageStatus === 'missing' ? 'missing-images' : imageStatus === 'normal' ? 'complete' : metadataStatus)
     return {
       query,
@@ -228,7 +230,7 @@ export function MovieWall({
       limit: nextLimit,
       offset: nextOffset,
     }
-  }, [defaults, imageStatus, libraryId, metadataStatus, page, pageSize, query, rating, sort])
+  }, [defaults, effectivePageSize, imageStatus, libraryId, metadataStatus, page, query, rating, sort])
 
   const load = useCallback(() => {
     const seq = ++loadSeq.current
@@ -249,6 +251,7 @@ export function MovieWall({
   useEffect(load, [load, reloadSignal])
   useEffect(() => () => { loadSeq.current += 1 }, [])
   useEffect(() => { bridge.libraries().then(setLibraries).catch(() => undefined) }, [])
+  useEffect(() => setAdaptivePageSize(pageSize), [pageSize])
   useEffect(() => {
     bridge.allSettings().then(settings => {
       const display = normalizeMovieWallDisplay(settings.movieWallDisplay)
@@ -290,6 +293,9 @@ export function MovieWall({
     setPage(clamped)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }, [page, totalPages])
+  const updatePageCapacity = useCallback((nextCapacity: number) => {
+    setAdaptivePageSize((current) => current === nextCapacity ? current : nextCapacity)
+  }, [])
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || isMovieWallShortcutBlocked(event)) return
@@ -323,7 +329,7 @@ export function MovieWall({
   const openRandomMovie = () => {
     if (randomLoading) return
     setRandomLoading(true)
-    bridge.randomMovie(buildSearchFilters(pageSize, 0))
+    bridge.randomMovie(buildSearchFilters(effectivePageSize, 0))
       .then((result) => {
         if (result.items.length === 0) {
           setNotice('当前条件下没有可随机的影片。')
@@ -422,10 +428,10 @@ export function MovieWall({
   </Stack>
 
   return <WorkspacePage title={title} description={description?.(total)} stats={stats} filters={filters} activeFilterCount={activeFilterCount} loading={loading} error={error}>
-    <Box sx={{ position: 'relative', pb: total > pageSize ? { xs: 9, md: 10 } : 0 }}>
-      <MovieResultContainer items={items} total={total} display={movieWallDisplay} view={view} selectable={selectable} selectedIds={selectedIds} onSelect={onSelect} onRatingClick={onRatingClick ?? saveRating} onContextMenu={onContextMenu} onPlay={movieActions.playMovie} onOpen={openMovie} emptyTitle={emptyTitle} emptyDescription={emptyDescription}/>
+    <Box sx={{ position: 'relative', pb: total > effectivePageSize ? { xs: 9, md: 10 } : 0 }}>
+      <MovieResultContainer items={items} total={total} display={movieWallDisplay} view={view} selectable={selectable} selectedIds={selectedIds} onSelect={onSelect} onRatingClick={onRatingClick ?? saveRating} onContextMenu={onContextMenu} onPageCapacityChange={updatePageCapacity} onPlay={movieActions.playMovie} onOpen={openMovie} emptyTitle={emptyTitle} emptyDescription={emptyDescription}/>
     </Box>
-    {total > pageSize && <FloatingPagination page={page} totalPages={totalPages} onPageChange={goToPage} focusSignal={pageInputFocusSignal}/>}
+    {total > effectivePageSize && <FloatingPagination page={page} totalPages={totalPages} onPageChange={goToPage} focusSignal={pageInputFocusSignal}/>}
     {childrenAfterResults?.(context)}
     <Snackbar open={Boolean(notice)} autoHideDuration={3500} onClose={() => setNotice('')} message={notice}/>
   </WorkspacePage>

@@ -50,6 +50,26 @@ public sealed class SettingsSaveCoordinatorTests : IAsyncLifetime
         Assert.Equal(defaults.MediaStorage, loaded.MediaStorage);
         Assert.Equal(defaults.MovieWallDisplay, loaded.MovieWallDisplay);
         Assert.Equal(defaults.Scan, loaded.Scan);
+        Assert.Equal(defaults.Rename, loaded.Rename);
+    }
+
+    [Fact]
+    public async Task RenameSettingsPersistThroughUnifiedSaveAndAllowPlusSeparator()
+    {
+        UnifiedSettingsDto current = await coordinator.ReadAsync();
+        RenameSettingsDto rename = current.Rename! with {
+            InformationSeparator = "+",
+            ListSeparator = "+",
+            Template = "{VID}+{Title}"
+        };
+
+        UnifiedSettingsSaveResult result = await coordinator.SaveAsync(current with { Rename = rename });
+        UnifiedSettingsDto saved = await coordinator.ReadAsync();
+
+        Assert.Contains("rename", result.ChangedFields);
+        Assert.Equal("+", saved.Rename!.InformationSeparator);
+        Assert.Equal("+", saved.Rename.ListSeparator);
+        Assert.Equal("{VID}+{Title}", saved.Rename.Template);
     }
 
     [Fact]

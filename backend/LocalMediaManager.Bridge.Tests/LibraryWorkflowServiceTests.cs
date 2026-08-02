@@ -63,8 +63,43 @@ public sealed class LibraryWorkflowServiceTests : IAsyncLifetime
         Assert.Equal(1, await Scalar(connection, "SELECT COUNT(*) FROM Movies WHERE Code='WAAA-448'"));
         Assert.Equal(2, await Scalar(connection, "SELECT COUNT(*) FROM Movies WHERE Code='SONE-454'"));
         Assert.Equal(2, await Scalar(connection, "SELECT COUNT(*) FROM Tasks WHERE TaskType='Sync'"));
-        Assert.Equal(3, await Scalar(connection, "SELECT COUNT(*) FROM TaskLogs WHERE TaskId=$id AND Message LIKE '[Movie Number]%'", ("$id", scan.TaskId)));
+        Assert.Equal(3, await Scalar(connection, "SELECT COUNT(*) FROM TaskLogs WHERE TaskId=$id AND Message LIKE '影片番号识别：%'", ("$id", scan.TaskId)));
         Assert.True(File.Exists(Path.Combine(MediaRoot, "WAAA-448+五星+娇小可爱清纯+小坂七香.mp4")));
+    }
+
+    [Fact]
+    public async Task ScanRelinksRenamedOrMovedFileAndPreservesMovieIdentity()
+    {
+        string original = Path.Combine(MediaRoot, "家庭视频.mp4");
+        await File.WriteAllBytesAsync(original, Enumerable.Range(0, 4096).Select(value => (byte)(value % 251)).ToArray());
+        LibraryMutationResult library = await service.CreateLibraryAsync(new(
+            "Identity", null, true, [new(MediaRoot)], nameof(LibraryType.Local)));
+
+        ScanLaunchResult first = await service.StartScanAsync(library.Id, new(FullScan: true, AutoSync: false));
+        Assert.True(await service.RunQueuedScanForTestsAsync(first.TaskId));
+        long movieId;
+        await using (var seed = await Open()) {
+            movieId = await Scalar(seed, "SELECT Id FROM Movies LIMIT 1");
+            await Execute(seed, "INSERT INTO UserMovieState(MovieId,IsFavorite,UpdatedAt) VALUES($movie,1,$at)",
+                ("$movie", movieId), ("$at", DateTimeOffset.UtcNow.ToString("O")));
+            Assert.StartsWith("sample-v1:", await TextScalar(seed, "SELECT FileHash FROM MediaFiles WHERE MovieId=$movie", ("$movie", movieId)));
+        }
+
+        string movedDirectory = Path.Combine(MediaRoot, "已整理");
+        Directory.CreateDirectory(movedDirectory);
+        string moved = Path.Combine(movedDirectory, "新的名称.mp4");
+        File.Move(original, moved);
+        ScanLaunchResult second = await service.StartScanAsync(library.Id, new(FullScan: true, AutoSync: false));
+        Assert.True(await service.RunQueuedScanForTestsAsync(second.TaskId));
+
+        await using var verify = await Open();
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM Movies"));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM MediaFiles"));
+        Assert.Equal(movieId, await Scalar(verify, "SELECT MovieId FROM MediaFiles"));
+        Assert.Equal(Path.GetFullPath(moved), await TextScalar(verify, "SELECT FilePath FROM MediaFiles"));
+        Assert.Equal("新的名称.mp4", await TextScalar(verify, "SELECT FileName FROM MediaFiles"));
+        Assert.Equal(1, await Scalar(verify, "SELECT IsFavorite FROM UserMovieState WHERE MovieId=$movie", ("$movie", movieId)));
+        Assert.Equal(1, await Scalar(verify, "SELECT COUNT(*) FROM TaskLogs WHERE TaskId=$task AND Message LIKE '[Media Identity]%action=Relink'", ("$task", second.TaskId)));
     }
 
     [Fact]
