@@ -161,7 +161,8 @@ pub fn run() {
                 .map(|path| path.join("数据"))
                 .expect("application data directory");
             let log_dir = PathBuf::from(r"D:\自用软件\部署安装目录\本地媒体管理器\数据\logs");
-            if !bridge_already_running && !data_root.join("data").join("LocalMediaManager.db").is_file() {
+            // Existing installations must apply bundled schema upgrades before the Bridge opens the database.
+            if !bridge_already_running && data_root.join("data").join("LocalMediaManager.db").is_file() {
                 if let Some(path) = migration_candidates(app).into_iter().find(|path| path.is_file()) {
                     let mut command = Command::new(path);
                     command.args(["upgrade", "--confirm"]);

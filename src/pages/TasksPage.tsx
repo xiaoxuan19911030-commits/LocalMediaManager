@@ -30,6 +30,7 @@ const taskNames: Record<string, string> = {
   ActorProfileComplete: '演员资料补全',
   MetadataCompletion: '元数据补全',
   ImageCacheRebuild: '图片缓存重建',
+  GeneratedCover: '备用封面生成',
   Organizer: '批量整理',
   Rename: '重命名',
   DeleteMetadata: '删除影片',
@@ -49,6 +50,7 @@ const sourceNames: Record<string, string> = {
   DeleteMetadata: 'Safe Delete',
   DeleteMedia: 'Safe Delete',
   ImageCacheRebuild: '图片缓存',
+  GeneratedCover: 'FFmpeg / 本地 AI',
   ActorProfileComplete: '演员资料',
   MetadataCompletion: 'Provider Pipeline',
 }
@@ -136,6 +138,7 @@ const preferredTypeOptions: TaskTypeOption[] = [
   { value: 'ActorProfileComplete', label: '演员资料补全', types: ['ActorProfileComplete'] },
   { value: 'Scan', label: '扫描影片', types: ['Scan'] },
   { value: 'Screenshot', label: '生成截图', types: ['Screenshot'] },
+  { value: 'GeneratedCover', label: '备用封面生成', types: ['GeneratedCover'] },
   { value: 'GIF', label: '生成 GIF', types: ['GIF'] },
   { value: 'Rename', label: '重命名', types: ['Rename'] },
   { value: 'Delete', label: '删除影片', types: ['DeleteMetadata', 'DeleteMedia'] },

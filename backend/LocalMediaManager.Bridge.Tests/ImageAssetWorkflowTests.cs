@@ -17,7 +17,7 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
         Directory.CreateDirectory(root);
         await using var connection = new SqliteConnection($"Data Source={Database}");
         await connection.OpenAsync();
-        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0012_MediaStorageSettings.sql", "0015_LibraryTypesAndLocalMedia.sql" }) {
+        foreach (string file in new[] { "0001_InitialSchema.sql", "0003_UserStateAuditAndRatingMemory.sql", "0004_LibraryScanWorkflow.sql", "0005_MetadataSyncWorkflow.sql", "0006_ImageAssetWorkflow.sql", "0007_NfoWorkflow.sql", "0008_FileOrganizerWorkflow.sql", "0009_PlaybackSettings.sql", "0012_MediaStorageSettings.sql", "0015_LibraryTypesAndLocalMedia.sql", "0017_GeneratedCoverFallback.sql" }) {
             await using var command = connection.CreateCommand();
             command.CommandText = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "migrations", file));
             await command.ExecuteNonQueryAsync();
@@ -373,6 +373,66 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
         Assert.Equal(preview, resolved!.Path);
     }
 
+    [Fact]
+    public async Task GeneratedCoverIsFallbackToFormalPosterAndInvalidatesWhenVideoChanges()
+    {
+        string video = Path.Combine(root, "fallback.mp4");
+        string generated = Path.Combine(ImageRoot, "Cache", "GeneratedCovers", "1", "cover.jpg");
+        string poster = Path.Combine(root, "poster.jpg");
+        Directory.CreateDirectory(Path.GetDirectoryName(generated)!);
+        await File.WriteAllBytesAsync(video, [1, 2, 3, 4]);
+        await File.WriteAllBytesAsync(generated, CreatePng(320, 180, SKColors.Teal));
+        await using (SqliteConnection connection = await Open()) {
+            await InsertMovie(connection, 1, "FALLBACK-001", "Fallback");
+            FileInfo info = new(video); string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, "INSERT INTO GeneratedCoverInfo(MovieId,SourceVideoPath,SourceVideoSize,SourceVideoModifiedTime,GeneratedCoverPath,FramePosition,Score,CreatedAt) VALUES(1,$video,$size,$modified,$cover,12.5,80,$at)",
+                ("$video", video), ("$size", info.Length), ("$modified", info.LastWriteTimeUtc.Ticks.ToString()), ("$cover", generated), ("$at", at));
+        }
+
+        var resolver = new CoverResolver(Database);
+        Assert.Equal(generated, (await resolver.ResolveAsync(1))!.Path);
+
+        await File.WriteAllBytesAsync(poster, CreatePng(200, 300, SKColors.Orange));
+        await using (SqliteConnection connection = await Open()) {
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            await Execute(connection, "INSERT INTO Images(MovieId,ImageType,FilePath,IsPrimary,SourceProvider,Ownership,IsLocked,IsDerived,ValidationStatus,CreatedAt,UpdatedAt) VALUES(1,'Poster',$path,1,'Provider','Provider',0,0,'Valid',$at,$at)", ("$path", poster), ("$at", at));
+        }
+        Assert.Equal(poster, (await resolver.ResolveAsync(1))!.Path);
+
+        await using (SqliteConnection connection = await Open()) await Execute(connection, "DELETE FROM Images WHERE MovieId=1");
+        await using (FileStream append = new(video, FileMode.Append, FileAccess.Write, FileShare.None)) await append.WriteAsync(new byte[] { 5 });
+        Assert.Null(await new CoverResolver(Database).ResolveAsync(1));
+    }
+
+    [Fact]
+    public void GeneratedCoverScoreRewardsFacesButBlackFramesAreRejectedByThreshold()
+    {
+        var quality = new ScreenshotQuality(.50, .10, .10, 0);
+        double withoutFace = GeneratedCoverTaskService.Score(quality, new([], "test"));
+        double withFace = GeneratedCoverTaskService.Score(quality, new([new FaceRectangle(.25, .2, .35, .4, .95)], "test"));
+        Assert.True(withFace > withoutFace);
+        Assert.True(new ScreenshotQuality(.02, .90, .10, 0).BlackRatio >= .85);
+    }
+
+    [Fact]
+    public async Task GeneratedCoverQueuesOneHundredMoviesWithoutDuplicateTasks()
+    {
+        string video = Path.Combine(root, "queue.mp4");
+        await File.WriteAllBytesAsync(video, [1, 2, 3, 4]);
+        await using (SqliteConnection connection = await Open()) {
+            string at = DateTimeOffset.UtcNow.ToString("O");
+            for (int id = 1; id <= 100; id++) {
+                await Execute(connection, "INSERT INTO Movies(Id,Code,Title,DurationSeconds,IsScraped,ScrapeStatus,LegacySource,CreatedAt,UpdatedAt) VALUES($id,$code,$code,0,0,'pending','Test',$at,$at)", ("$id", id), ("$code", $"QUEUE-{id:000}"), ("$at", at));
+                await Execute(connection, "INSERT INTO MediaFiles(MovieId,FilePath,NormalizedPath,FileName,Extension,MediaType,SourceType,FileSize,ExistsState,IsPrimary,CreatedAt,UpdatedAt) VALUES($movie,$path,$path,'queue.mp4','.mp4','Video','Test',4,'Exists',1,$at,$at)", ("$movie", id), ("$path", video), ("$at", at));
+            }
+        }
+        var service = new GeneratedCoverTaskService(Database, ImageRoot, new CoverResolver(Database), new GeneratedCoverSettingsService(Database), new FfmpegLocator(Database, root), new TaskLogService(Database), new FakeFaceDetection());
+        Assert.Equal(100, await service.EnqueueEligibleAsync(new(true, false, true, "All")));
+        Assert.Equal(0, await service.EnqueueEligibleAsync(new(true, false, true, "All")));
+        await using SqliteConnection verify = await Open();
+        Assert.Equal(100, await Scalar(verify, "SELECT COUNT(*) FROM Tasks WHERE TaskType='GeneratedCover' AND Status='Pending'"));
+    }
+
     public Task DisposeAsync() { try { Directory.Delete(root, true); } catch { } return Task.CompletedTask; }
     private MediaStoragePathResolver Resolver() => new(Database, root);
     private async Task<SqliteConnection> Open() { var connection = new SqliteConnection($"Data Source={Database}"); await connection.OpenAsync(); return connection; }
@@ -394,4 +454,5 @@ public sealed class ImageAssetWorkflowTests : IAsyncLifetime
             protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(response(request));
         }
     }
+    private sealed class FakeFaceDetection : IFaceDetectionService { public Task<FaceDetectionResult> DetectAsync(string imagePath, CancellationToken token = default) => Task.FromResult(new FaceDetectionResult([], "test")); }
 }

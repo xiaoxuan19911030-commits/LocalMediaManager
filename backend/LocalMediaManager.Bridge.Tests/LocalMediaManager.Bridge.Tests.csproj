@@ -29,5 +29,6 @@
     <Content Include="..\LocalMediaManager.Migration\migrations\0014_ActorProfileFields.sql" Link="migrations\0014_ActorProfileFields.sql" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\LocalMediaManager.Migration\migrations\0015_LibraryTypesAndLocalMedia.sql" Link="migrations\0015_LibraryTypesAndLocalMedia.sql" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\LocalMediaManager.Migration\migrations\0016_MovieCoverCropSettings.sql" Link="migrations\0016_MovieCoverCropSettings.sql" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\LocalMediaManager.Migration\migrations\0017_GeneratedCoverFallback.sql" Link="migrations\0017_GeneratedCoverFallback.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -920,10 +920,13 @@ public static class ProductReader
             await HasDirectorsAsync(connection),
             await TableExistsAsync(connection, "NfoDocuments"),
             allowNetworkAccess);
+        string displayCover = await TableExistsAsync(connection, "GeneratedCoverInfo")
+            ? "(EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND i.FilePath IS NOT NULL) OR EXISTS(SELECT 1 FROM GeneratedCoverInfo g WHERE g.MovieId=m.Id AND g.GeneratedCoverPath IS NOT NULL))"
+            : "EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND i.FilePath IS NOT NULL)";
         await using var command=connection.CreateCommand();
         command.CommandText=$"""
             SELECT m.Id,COALESCE(NULLIF(m.Code,''),NULLIF(m.Title,''),CAST(m.Id AS TEXT)),COALESCE(m.Title,''),COALESCE(f.FilePath,''),
-                   COALESCE(s.UserRating,0),COALESCE(s.IsFavorite,0),COALESCE(m.ReleaseDate,''),COALESCE(m.ImportedAt,m.CreatedAt,''),EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND i.FilePath IS NOT NULL),
+                   COALESCE(s.UserRating,0),COALESCE(s.IsFavorite,0),COALESCE(m.ReleaseDate,''),COALESCE(m.ImportedAt,m.CreatedAt,''),{displayCover},
                    {metadataColumns}
               FROM Movies m LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video' LEFT JOIN UserMovieState s ON s.MovieId=m.Id
              WHERE f.ExistsState<>'Missing' AND {(playedOnly ? "COALESCE(s.PlayCount,0)>0" : "1=1")} ORDER BY {orderBy} LIMIT $limit
@@ -935,6 +938,9 @@ public static class ProductReader
     {
         await using var connection = await OpenAsync(databasePath);
         string cardImageSource = await ReadImageSourceSettingAsync(connection, "movieWall.wallImageSource", "poster");
+        string displayCover = await TableExistsAsync(connection, "GeneratedCoverInfo")
+            ? "(EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND i.FilePath IS NOT NULL) OR EXISTS(SELECT 1 FROM GeneratedCoverInfo g WHERE g.MovieId=m.Id AND g.GeneratedCoverPath IS NOT NULL))"
+            : "EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND i.FilePath IS NOT NULL)";
         string metadataColumns = MetadataColumnsSql(
             await HasDirectorsAsync(connection),
             await TableExistsAsync(connection, "NfoDocuments"),
@@ -946,7 +952,7 @@ public static class ProductReader
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
             SELECT m.Id,COALESCE(NULLIF(m.Code,''),NULLIF(m.Title,''),CAST(m.Id AS TEXT)),COALESCE(m.Title,''),COALESCE(f.FilePath,''),
-                   COALESCE(s.UserRating,0),COALESCE(s.IsFavorite,0),COALESCE(m.ReleaseDate,''),COALESCE(m.ImportedAt,m.CreatedAt,''),EXISTS(SELECT 1 FROM Images i WHERE i.MovieId=m.Id AND i.FilePath IS NOT NULL),
+                   COALESCE(s.UserRating,0),COALESCE(s.IsFavorite,0),COALESCE(m.ReleaseDate,''),COALESCE(m.ImportedAt,m.CreatedAt,''),{displayCover},
                    {metadataColumns}
               FROM Movies m LEFT JOIN MediaFiles f ON f.MovieId=m.Id AND f.IsPrimary=1 AND f.MediaType='Video' LEFT JOIN UserMovieState s ON s.MovieId=m.Id
              WHERE {condition} GROUP BY m.Id ORDER BY {FilePresenceOrderSql()},{orderBy} LIMIT $limit OFFSET $offset

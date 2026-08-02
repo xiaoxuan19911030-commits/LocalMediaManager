@@ -25,7 +25,7 @@ import { bridge } from '@/services/bridge'
 import { testMdcPathMapping } from '@/features/mdcPathMapping'
 import { useColorMode } from '@/themes/ThemeContext'
 import type { BridgeHealth, TaskItem } from '@/types/media'
-import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegPluginSettings, FfmpegToolStatus, JavBusSettings, LogCleanupPreview, LogCleanupResult, MdcNgSettings, MdcNgToolStatus, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, PersonDetectionStatus, PlaybackSettings, ProviderDiagnosticResult, ProviderNetworkSettings, RatingRetentionSettings, RenameSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult, WebMetadataSettings } from '@/types/settings'
+import type { BackupValidation, DataBackupSettings, DataSafetyOverview, DiagnosticCheck, FfmpegPluginSettings, FfmpegToolStatus, GeneratedCoverSettings, JavBusSettings, LogCleanupPreview, LogCleanupResult, MdcNgSettings, MdcNgToolStatus, MediaStorageSettings, MetaTubeSettings, MovieWallDisplaySettings, PersonDetectionStatus, PlaybackSettings, ProviderDiagnosticResult, ProviderNetworkSettings, RatingRetentionSettings, RenameSettings, ScanSettings, SearchSettings, SettingsSnapshot, SystemDiagnostic, SystemSettings, UnifiedSettings, UpdateCheckResult, WebMetadataSettings } from '@/types/settings'
 import type { ImageCachePreview } from '@/types/media'
 
 const categories = [
@@ -840,6 +840,7 @@ function MovieWallSection({ value, setValue }: { value: MovieWallDisplaySettings
           <MenuItem value="AutoFace">智能识别</MenuItem><MenuItem value="Left">居左裁切</MenuItem><MenuItem value="Center">居中裁切</MenuItem><MenuItem value="Right">居右裁切</MenuItem>
         </TextField>
       </Box>
+      <GeneratedCoverSettingsSection/>
       <Typography variant="body2" color="text.secondary">默认值：展示墙海报、详情页背景图、卡片视图。</Typography>
     </Stack>
   </SurfaceSection>
@@ -1071,6 +1072,30 @@ function MdcPathMappingsSection({ value, onChange }: { value: MdcNgSettings; onC
           <Typography variant="body2">状态：{testResult.status === 'matched' ? testFileExists === false ? '本地文件不存在' : testFileExists === true ? '映射成功' : '等待本地文件检查' : '未找到映射'}</Typography>
         </Stack>
       </Alert>}
+    </Stack>
+  </SurfaceSection>
+}
+
+function GeneratedCoverSettingsSection() {
+  const [value, setValue] = useState<GeneratedCoverSettings>()
+  const [saving, setSaving] = useState(false)
+  useEffect(() => { void bridge.generatedCoverSettings().then(setValue).catch(() => undefined) }, [])
+  const save = async () => {
+    if (!value) return
+    setSaving(true)
+    try { setValue(await bridge.saveGeneratedCoverSettings(value)) }
+    finally { setSaving(false) }
+  }
+  if (!value) return null
+  return <SurfaceSection title="自动生成备用封面" description="仅在没有正式 Poster 时从本地视频生成展示截图。同步得到 Poster 后会自动优先显示正式海报；不会修改视频、Poster、NFO 或上传图片。">
+    <Stack spacing={1.25}>
+      <FormControlLabel control={<Switch checked={value.enabled} onChange={event => setValue({ ...value, enabled: event.target.checked })}/>} label="自动生成备用封面"/>
+      <FormControlLabel disabled={!value.enabled} control={<Switch checked={value.checkOnStartup} onChange={event => setValue({ ...value, checkOnStartup: event.target.checked })}/>} label="启动时检查无海报影片"/>
+      <FormControlLabel disabled={!value.enabled} control={<Switch checked={value.backgroundGeneration} onChange={event => setValue({ ...value, backgroundGeneration: event.target.checked })}/>} label="后台自动生成"/>
+      <TextField select size="small" disabled={!value.enabled} label="检查范围" value={value.scope} onChange={event => setValue({ ...value, scope: event.target.value as GeneratedCoverSettings['scope'] })}>
+        <MenuItem value="Recent">最近新增影片</MenuItem><MenuItem value="All">全部影片</MenuItem>
+      </TextField>
+      <Box><Button variant="outlined" disabled={saving} onClick={() => void save()}>保存备用封面设置</Button></Box>
     </Stack>
   </SurfaceSection>
 }

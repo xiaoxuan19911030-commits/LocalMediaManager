@@ -65,7 +65,13 @@ builder.Services.AddSingleton<IFaceDetectionService, YuNetFaceDetectionService>(
 builder.Services.AddSingleton(serviceProvider => new CoverCropService(
     databasePath,
     serviceProvider.GetRequiredService<IFaceDetectionService>()));
-builder.Services.AddSingleton(new ImageAssetService(databasePath, imageRoot));
+builder.Services.AddSingleton(new CoverResolver(databasePath));
+builder.Services.AddSingleton(serviceProvider => new ImageAssetService(databasePath, imageRoot, serviceProvider.GetRequiredService<CoverResolver>()));
+builder.Services.AddSingleton(new GeneratedCoverSettingsService(databasePath));
+builder.Services.AddSingleton(serviceProvider => new GeneratedCoverTaskService(databasePath, imageRoot,
+    serviceProvider.GetRequiredService<CoverResolver>(), serviceProvider.GetRequiredService<GeneratedCoverSettingsService>(),
+    serviceProvider.GetRequiredService<FfmpegLocator>(), serviceProvider.GetRequiredService<TaskLogService>(), serviceProvider.GetRequiredService<IFaceDetectionService>()));
+builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<GeneratedCoverTaskService>());
 builder.Services.AddSingleton(serviceProvider => new ImageWorkflowService(
     databasePath,
     imageRoot,
@@ -234,7 +240,7 @@ app.Use(async (context, next) => {
 app.MapGet("/health", () => Results.Ok(new {
     product = "Local Media Manager",
     abbreviation = "LMM",
-    version = "0.7.6",
+    version = "0.7.7",
     status = "ok",
     databaseAvailable = File.Exists(databasePath),
     databasePath,
@@ -292,6 +298,13 @@ app.MapGet("/api/plugins/ffmpeg/status", (FfmpegLocator ffmpeg) =>
     Results.Ok(ffmpeg.Status()));
 app.MapGet("/api/plugins/ffmpeg/settings", async (FfmpegPluginSettingsService settings, CancellationToken token) =>
     Results.Ok(await settings.ReadAsync(token)));
+app.MapGet("/api/movie-wall/generated-cover/settings", async (GeneratedCoverSettingsService settings, CancellationToken token) =>
+    Results.Ok(await settings.ReadAsync(token)));
+app.MapPut("/api/movie-wall/generated-cover/settings", async (GeneratedCoverSettingsDto command, GeneratedCoverSettingsService settings, GeneratedCoverTaskService tasks, CancellationToken token) => {
+    GeneratedCoverSettingsDto saved = await settings.SaveAsync(command, token);
+    if (saved.Enabled && saved.BackgroundGeneration) await tasks.EnqueueEligibleAsync(saved, token);
+    return Results.Ok(saved);
+});
 app.MapPut("/api/plugins/ffmpeg/settings", async (FfmpegPluginSettingsDto command, FfmpegPluginSettingsService settings, CancellationToken token) =>
     Results.Ok(await settings.SaveAsync(command, token)));
 app.MapGet("/api/plugins/ffmpeg/person-detection", (IPersonDetectionService detector) =>

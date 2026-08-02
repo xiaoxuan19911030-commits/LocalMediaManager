@@ -249,6 +249,11 @@ export function MovieWall({
   }, [buildSearchFilters])
 
   useEffect(load, [load, reloadSignal])
+  useEffect(() => {
+    if (!items.some(item => !item.coverUrl)) return
+    const timer = window.setInterval(() => { void load() }, 5000)
+    return () => window.clearInterval(timer)
+  }, [items, load])
   useEffect(() => () => { loadSeq.current += 1 }, [])
   useEffect(() => { bridge.libraries().then(setLibraries).catch(() => undefined) }, [])
   useEffect(() => setAdaptivePageSize(pageSize), [pageSize])

@@ -61,6 +61,7 @@ export interface MovieWallDisplaySettings {
   defaultViewMode: 'grid' | 'list'
   coverCropMode: 'AutoFace' | 'Left' | 'Center' | 'Right'
 }
+export interface GeneratedCoverSettings { enabled: boolean; checkOnStartup: boolean; backgroundGeneration: boolean; scope: 'All' | 'Recent' }
 export interface ScanSettings { minFileSizeMb: number }
 export interface SearchSettings { defaultSort: string; defaultFilter: 'all' }
 export interface DataBackupSettings { enabled: boolean; frequencyDays: 1 | 3 | 7; retentionCount: 5 | 10 | 20 }

@@ -73,8 +73,9 @@ public static class ImageFileValidator
     }
 }
 
-public sealed class ImageAssetService(string databasePath, string imageRoot)
+public sealed class ImageAssetService(string databasePath, string imageRoot, CoverResolver? coverResolver = null)
 {
+    private readonly CoverResolver coverResolver = coverResolver ?? new CoverResolver(databasePath);
     private string CacheRoot => Path.GetFullPath(Path.Combine(imageRoot, ".lmm-cache", "thumbnails"));
     private const string CardThumbnailCacheKind = "CardThumbnailV4";
     private const int CardThumbnailWidth = 720;
@@ -159,16 +160,22 @@ public sealed class ImageAssetService(string databasePath, string imageRoot)
         string normalized = variant.Equals("thumbnail", StringComparison.OrdinalIgnoreCase) ? "thumbnail" : "original";
         string normalizedSource = NormalizeSource(source);
         await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, cancellationToken);
+        if (normalizedSource != "fanart") {
+            ResolvedCover? resolved = await coverResolver.ResolveAsync(movieId, cancellationToken);
+            if (resolved is not null) {
+                if (normalized == "original" || resolved.ImageId is null) return new(resolved.Path, resolved.ContentType!);
+                ImageAssetContent? cached = await ReadCachedAsync(connection, movieId, resolved.Path, cancellationToken);
+                if (cached is not null) return cached;
+                ImageValidationResult resolvedValidation = await ImageFileValidator.ValidateAsync(resolved.Path, resolved.ContentType, cancellationToken);
+                return await CreateThumbnailAsync(connection, movieId, resolved.ImageId.Value, resolved.Path, resolvedValidation, cancellationToken);
+            }
+        }
         (long Id, string Path, string? ContentType)? image = await ReadBestSourceAsync(connection, movieId, normalized, normalizedSource, cancellationToken);
         if (image is null) return null;
         ImageValidationResult validation = await ImageFileValidator.ValidateAsync(image.Value.Path, null, cancellationToken);
         await UpdateValidationAsync(connection, image.Value.Id, validation, cancellationToken);
         if (!validation.Valid) return null;
         if (normalized == "original") return new(image.Value.Path, validation.ContentType!);
-        if (normalizedSource == "poster") {
-            ImageAssetContent? cached = await ReadCachedAsync(connection, movieId, image.Value.Path, cancellationToken);
-            if (cached is not null) return cached;
-        }
         return await CreateThumbnailAsync(connection, movieId, image.Value.Id, image.Value.Path, validation, cancellationToken);
     }
 
