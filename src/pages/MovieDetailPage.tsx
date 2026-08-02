@@ -65,6 +65,40 @@ const horizontalScrollSx = {
   '&::-webkit-scrollbar': { display: 'none' },
 }
 
+function DetailActorRail({ actors, onOpen }: { actors: NamedItem[]; onOpen: (actorId: number) => void }) {
+  return <Box onWheel={horizontalWheel} sx={{ display: 'flex', gap: 2, overflowX: 'auto', pb: .25, scrollBehavior: 'smooth', ...horizontalScrollSx }}>
+    {actors.length ? actors.map(actor => <Box key={actor.id} onClick={() => onOpen(actor.id)} sx={{ flex: '0 0 84px', textAlign: 'center', cursor: 'pointer', color: 'primary.main', '&:hover': { color: 'primary.light' } }}>
+      <Avatar src={`${BRIDGE_ORIGIN}/api/actors/${actor.id}/image`} alt={actor.name} sx={{ width: 64, height: 64, mx: 'auto', mb: .75, bgcolor: 'action.hover', color: 'text.secondary', border: 1, borderColor: 'divider' }}>{actor.name.slice(0, 1)}</Avatar>
+      <Typography variant="body2" noWrap sx={{ fontWeight: 750 }}>{actor.name}</Typography>
+    </Box>) : <Typography variant="body2" color="text.secondary">暂无演员信息</Typography>}
+  </Box>
+}
+
+function DetailImageRail({ imageTab, displayedImages, heroImageUrl, heroOverrideUrl, onImageTabChange, onSelect }: {
+  imageTab: 'stills' | 'screenshots'
+  displayedImages: ImageAsset[]
+  heroImageUrl?: string
+  heroOverrideUrl?: string
+  onImageTabChange: (_: unknown, value: 'stills' | 'screenshots' | null) => void
+  onSelect: (asset: ImageAsset) => void
+}) {
+  return <Box>
+    <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'flex-start', mb: .5 }}>
+      <ToggleButtonGroup exclusive size="small" value={imageTab} onChange={onImageTabChange} sx={{ alignSelf: 'flex-start', '& .MuiToggleButton-root': { minHeight: 31, px: 1.25, py: 0.25 } }}>
+        <ToggleButton value="stills">剧照</ToggleButton>
+        <ToggleButton value="screenshots">截图</ToggleButton>
+      </ToggleButtonGroup>
+    </Stack>
+    <Box onWheel={horizontalWheel} sx={{ display: 'flex', gap: 1.25, overflowX: 'auto', pb: .5, minHeight: 185, scrollBehavior: 'smooth', ...horizontalScrollSx }}>
+      {displayedImages.length ? displayedImages.map(asset => <Box key={`${asset.type}-${asset.id}`} onClick={() => onSelect(asset)} sx={{ flex: '0 0 189px', height: 180, bgcolor: 'background.default', border: 1, borderColor: heroOverrideUrl === asset.url ? 'primary.main' : 'divider', borderRadius: 1, overflow: 'hidden', cursor: 'pointer' }}>
+        <SmartImage src={asset.url} alt={asset.type}/>
+      </Box>) : <Box sx={{ width: '100%', minHeight: 128, display: 'grid', placeItems: 'center', border: 1, borderColor: 'divider', borderRadius: 1, bgcolor: 'action.hover' }}>
+        <Typography color="text.secondary">{imageTab === 'stills' ? '暂无剧照' : '暂无截图'}</Typography>
+      </Box>}
+    </Box>
+  </Box>
+}
+
 function SectionTitle({ icon, title }: { icon: ReactNode; title: string }) {
   return <Stack direction="row" spacing={.75} sx={{ alignItems: 'center', mb: .75 }}>
     <Box sx={{ color: 'primary.main', display: 'flex' }}>{icon}</Box>
@@ -190,6 +224,8 @@ export default function MovieDetailPage() {
   const [viewerIndex, setViewerIndex] = useState(0)
   const [zoom, setZoom] = useState(1)
   const viewerImageRef = useRef<HTMLImageElement | null>(null)
+  const heroGridRef = useRef<HTMLDivElement | null>(null)
+  const [preservedHeroHeight, setPreservedHeroHeight] = useState<number>()
   const currentViewer = viewerItems[viewerIndex]
 
   const loadMovie = (movieId: number) => Promise.all([
@@ -434,7 +470,16 @@ export default function MovieDetailPage() {
   const normalizedTagSearch = tagSearch.trim().toLocaleLowerCase()
   const filteredTagOptions = useMemo(() => tagOptions.filter((tag) => tag.name.toLocaleLowerCase().includes(normalizedTagSearch)), [normalizedTagSearch, tagOptions])
   const selectedTagIds = useMemo(() => new Set(selectedTags.map((tag) => tag.id)), [selectedTags])
-  const heroColumns = { xs: '1fr', lg: 'minmax(0, 1fr) minmax(288px, 320px)' }
+  useEffect(() => {
+    const element = heroGridRef.current
+    if (!element) return
+    const updateHeight = () => setPreservedHeroHeight(Math.round(Math.max(360, (element.clientWidth - 332) * 9 / 16)))
+    updateHeight()
+    const observer = new ResizeObserver(updateHeight)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [movie?.id])
+  const heroColumns = { xs: '1fr', xl: 'minmax(0, 1fr) 640px' }
 
   return <Box sx={{ '@keyframes detailIn': { from: { opacity: 0, transform: 'translateY(10px)' }, to: { opacity: 1, transform: 'translateY(0)' } } }}>
     {error && <Alert severity="error">{error}</Alert>}
@@ -444,10 +489,15 @@ export default function MovieDetailPage() {
         <Box sx={{ flex: '1 1 auto' }}/>
       </Box>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: heroColumns, gap: 1.5, minWidth: 0, alignItems: 'start' }}>
-        <Box sx={{ aspectRatio: '16 / 9', minHeight: { xs: 250, md: 360 }, bgcolor: 'background.default', display: 'grid', placeItems: 'center', overflow: 'hidden', border: 1, borderColor: 'divider', borderRadius: 1 }}>
+      <Box ref={heroGridRef} sx={{ display: 'grid', gridTemplateColumns: heroColumns, gap: 1.5, minWidth: 0, alignItems: 'start' }}>
+        <Stack spacing={1.75} sx={{ minWidth: 0 }}>
+          <Box sx={{ aspectRatio: { xs: '16 / 9', xl: 'auto' }, height: { xl: preservedHeroHeight ? `${preservedHeroHeight}px` : undefined }, minHeight: { xs: 250, md: 360 }, bgcolor: 'background.default', display: 'grid', placeItems: 'center', overflow: 'hidden', border: 1, borderColor: 'divider', borderRadius: 1 }}>
           {displayedHeroImageUrl && !posterFailed ? <SmartImage src={displayedHeroImageUrl} alt={movie.code || movie.title || ''} fit="contain" eager bgcolor="background.default" onError={() => setPosterFailed(true)}/> : <Typography color="text.disabled">{posterFailed ? '图片损坏或不可用' : '暂无图片'}</Typography>}
-        </Box>
+          </Box>
+          <DetailActorRail actors={movie.actors} onOpen={(actorId) => navigate(`/actors/${actorId}`)}/>
+          <Divider sx={{ my: -.25 }}/>
+          <DetailImageRail imageTab={imageTab} displayedImages={displayedImages} heroImageUrl={heroImageUrl} heroOverrideUrl={heroOverrideUrl} onImageTabChange={onImageTabChange} onSelect={(asset) => { setHeroOverrideUrl(asset.id === 0 || asset.url === heroImageUrl ? undefined : asset.url); setPosterFailed(false) }}/>
+        </Stack>
         <Stack spacing={2} sx={{ minWidth: 0, p: { xs: 2, md: 2.5 }, border: 1, borderColor: 'divider', borderRadius: 1 }}>
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="h5" sx={{ fontWeight: 850 }}>{movie.code || '番号未知'}</Typography>
@@ -513,35 +563,6 @@ export default function MovieDetailPage() {
             </Stack>
           </Box>
         </Stack>
-      </Box>
-
-      <Divider sx={{ my: -.25 }}/>
-
-      <Box>
-        <Box onWheel={horizontalWheel} sx={{ display: 'flex', gap: 2, overflowX: 'auto', pb: .25, scrollBehavior: 'smooth', ...horizontalScrollSx }}>
-          {movie.actors.length ? movie.actors.map(actor => <Box key={actor.id} onClick={() => navigate(`/actors/${actor.id}`)} sx={{ flex: '0 0 84px', textAlign: 'center', cursor: 'pointer', color: 'primary.main', '&:hover': { color: 'primary.light' } }}>
-            <Avatar src={`${BRIDGE_ORIGIN}/api/actors/${actor.id}/image`} alt={actor.name} sx={{ width: 64, height: 64, mx: 'auto', mb: .75, bgcolor: 'action.hover', color: 'text.secondary', border: 1, borderColor: 'divider' }}>{actor.name.slice(0, 1)}</Avatar>
-            <Typography variant="body2" noWrap sx={{ fontWeight: 750 }}>{actor.name}</Typography>
-          </Box>) : <Typography variant="body2" color="text.secondary">暂无演员信息</Typography>}
-        </Box>
-      </Box>
-
-      <Divider sx={{ my: -.25 }}/>
-
-      <Box>
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'flex-start', mb: .5 }}>
-          <ToggleButtonGroup exclusive size="small" value={imageTab} onChange={onImageTabChange} sx={{ alignSelf: 'flex-start', '& .MuiToggleButton-root': { minHeight: 31, px: 1.25, py: 0.25 } }}>
-            <ToggleButton value="stills">剧照</ToggleButton>
-            <ToggleButton value="screenshots">截图</ToggleButton>
-          </ToggleButtonGroup>
-        </Stack>
-        <Box onWheel={horizontalWheel} sx={{ display: 'flex', gap: 1.25, overflowX: 'auto', pb: .5, minHeight: 185, scrollBehavior: 'smooth', ...horizontalScrollSx }}>
-          {displayedImages.length ? displayedImages.map((asset, index) => <Box key={`${asset.type}-${asset.id}`} onClick={() => { setHeroOverrideUrl(asset.id === 0 || asset.url === heroImageUrl ? undefined : asset.url); setPosterFailed(false) }} sx={{ flex: '0 0 189px', height: 180, bgcolor: 'background.default', border: 1, borderColor: heroOverrideUrl === asset.url ? 'primary.main' : 'divider', borderRadius: 1, overflow: 'hidden', cursor: 'pointer' }}>
-            <SmartImage src={asset.url} alt={asset.type}/>
-          </Box>) : <Box sx={{ width: '100%', minHeight: 128, display: 'grid', placeItems: 'center', border: 1, borderColor: 'divider', borderRadius: 1, bgcolor: 'action.hover' }}>
-            <Typography color="text.secondary">{imageTab === 'stills' ? '暂无剧照' : '暂无截图'}</Typography>
-          </Box>}
-        </Box>
       </Box>
 
       <Divider/>

@@ -6,7 +6,7 @@ using Microsoft.Extensions.Hosting;
 
 namespace LocalMediaManager.Bridge;
 
-public sealed record GeneratedCoverSettingsDto(bool Enabled = true, bool CheckOnStartup = true, bool BackgroundGeneration = true, string Scope = "Recent");
+public sealed record GeneratedCoverSettingsDto(bool Enabled = true, bool CheckOnStartup = true, bool BackgroundGeneration = true, string Scope = "Recent", int MaxConcurrentJobs = 3);
 
 public sealed class GeneratedCoverSettingsService(string databasePath)
 {
@@ -31,7 +31,7 @@ public sealed class GeneratedCoverSettingsService(string databasePath)
         await command.ExecuteNonQueryAsync(token); return clean;
     }
     private static GeneratedCoverSettingsDto Normalize(GeneratedCoverSettingsDto? value) => new(value?.Enabled ?? true, value?.CheckOnStartup ?? true, value?.BackgroundGeneration ?? true,
-        string.Equals(value?.Scope, "All", StringComparison.OrdinalIgnoreCase) ? "All" : "Recent");
+        string.Equals(value?.Scope, "All", StringComparison.OrdinalIgnoreCase) ? "All" : "Recent", Math.Clamp(value?.MaxConcurrentJobs ?? 3, 1, 4));
     private async Task<SqliteConnection> OpenAsync(SqliteOpenMode mode, CancellationToken token) { var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = mode, Cache = SqliteCacheMode.Shared }.ToString()); await c.OpenAsync(token); return c; }
     private static string Now() => DateTimeOffset.UtcNow.ToString("O");
 }
@@ -46,16 +46,38 @@ public sealed class GeneratedCoverTaskService(
     {
         try {
             await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+            await RequeueInterruptedTasksAsync(stoppingToken);
             GeneratedCoverSettingsDto initial = await settings.ReadAsync(stoppingToken);
             if (initial.Enabled && initial.CheckOnStartup && initial.BackgroundGeneration) await EnqueueEligibleAsync(initial, stoppingToken);
+            var workers = new List<Task>();
             while (!stoppingToken.IsCancellationRequested) {
+                workers.RemoveAll(worker => worker.IsCompleted);
                 GeneratedCoverSettingsDto current = await settings.ReadAsync(stoppingToken);
-                if (!current.Enabled || !current.BackgroundGeneration) { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); continue; }
-                long? task = await ClaimAsync(stoppingToken);
-                if (task is null) { await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken); continue; }
-                await RunAsync(task.Value, stoppingToken);
+                if (current.Enabled && current.BackgroundGeneration) {
+                    while (workers.Count < current.MaxConcurrentJobs) {
+                        long? task = await ClaimAsync(stoppingToken);
+                        if (task is null) break;
+                        workers.Add(RunWorkerAsync(task.Value, stoppingToken));
+                    }
+                }
+                if (workers.Count == 0) await Task.Delay(TimeSpan.FromSeconds(current.Enabled && current.BackgroundGeneration ? 2 : 5), stoppingToken);
+                else await Task.WhenAny(workers.Append(Task.Delay(TimeSpan.FromSeconds(2), stoppingToken)));
             }
         } catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+    }
+
+    private async Task RunWorkerAsync(long taskId, CancellationToken token)
+    {
+        try { await RunAsync(taskId, token); }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception error) { await FailAsync(taskId, error.Message, CancellationToken.None); }
+    }
+
+    private async Task RequeueInterruptedTasksAsync(CancellationToken token)
+    {
+        await using SqliteConnection connection = await OpenAsync(SqliteOpenMode.ReadWrite, token);
+        await ExecuteAsync(connection, "UPDATE Tasks SET Status='Pending',Stage='Pending',Progress=0,UpdatedAt=$at WHERE TaskType=$type AND Status IN ('Preparing','Running')", token,
+            ("$type", TaskType), ("$at", Now()));
     }
 
     public async Task<int> EnqueueEligibleAsync(GeneratedCoverSettingsDto? configured = null, CancellationToken token = default)

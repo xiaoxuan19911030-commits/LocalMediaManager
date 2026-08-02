@@ -250,10 +250,18 @@ export function MovieWall({
 
   useEffect(load, [load, reloadSignal])
   useEffect(() => {
-    if (!items.some(item => !item.coverUrl)) return
-    const timer = window.setInterval(() => { void load() }, 5000)
+    const missingIds = items.filter(item => !item.coverUrl).map(item => item.dataId)
+    if (missingIds.length === 0) return
+    const refreshMissingCovers = () => {
+      void bridge.videoCards(missingIds).then((updated) => {
+        const cards = new Map(updated.filter(item => item.coverUrl).map(item => [item.dataId, item]))
+        if (cards.size === 0) return
+        setItems(current => current.map(item => !item.coverUrl && cards.has(item.dataId) ? cards.get(item.dataId)! : item))
+      }).catch(() => undefined)
+    }
+    const timer = window.setInterval(refreshMissingCovers, 5000)
     return () => window.clearInterval(timer)
-  }, [items, load])
+  }, [items])
   useEffect(() => () => { loadSeq.current += 1 }, [])
   useEffect(() => { bridge.libraries().then(setLibraries).catch(() => undefined) }, [])
   useEffect(() => setAdaptivePageSize(pageSize), [pageSize])

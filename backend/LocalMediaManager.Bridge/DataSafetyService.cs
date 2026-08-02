@@ -62,7 +62,7 @@ public sealed class DataSafetyService(string databasePath, string configDatabase
                 }
                 var manifest = new {
                     product = "Local Media Manager",
-                    version = "0.7.7",
+                    version = "0.7.8",
                     createdAt = DateTime.UtcNow,
                     includes = included,
                     excludes = new[] { "original media files", "original images", "cookies", "tokens" },
@@ -158,7 +158,7 @@ public sealed class DataSafetyService(string databasePath, string configDatabase
             fields = snapshot.Fields.Where(field => !field.Sensitive).Select(field => new { field.Key, field.Category, field.ValueType, field.Value, field.DefaultValue, field.Mapped }),
             metaTube = metaTube with { BaseUrl = metaTube.BaseUrl },
         };
-        return new(DateTime.UtcNow.ToString("O"), "Local Media Manager", "0.7.7", JsonSerializer.SerializeToElement(safe));
+        return new(DateTime.UtcNow.ToString("O"), "Local Media Manager", "0.7.8", JsonSerializer.SerializeToElement(safe));
     }
 
     public Task<SettingsImportPreviewDto> PreviewSettingsImportAsync(JsonElement payload)
@@ -180,7 +180,7 @@ public sealed class DataSafetyService(string databasePath, string configDatabase
         }
         if (JsonSerializer.Serialize(payload).Contains("token", StringComparison.OrdinalIgnoreCase))
             warnings.Add("导入内容疑似包含敏感字段，预览不会应用这些内容。");
-        return Task.FromResult(new SettingsImportPreviewDto(changes.Count > 0, "0.7.7", categories.Order().ToList(), changes.Take(100).ToList(), warnings));
+        return Task.FromResult(new SettingsImportPreviewDto(changes.Count > 0, "0.7.8", categories.Order().ToList(), changes.Take(100).ToList(), warnings));
     }
 
     public async Task<SystemDiagnosticDto> DiagnosticsAsync(CancellationToken token = default)

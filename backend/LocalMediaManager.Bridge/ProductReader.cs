@@ -429,6 +429,16 @@ public static class ProductReader
         return await ReadFilteredCardsAsync(databasePath, bridgeUrl, plan.Condition, plan.Parameters, plan.OrderBy, limit, offset);
     }
 
+    public static async Task<IReadOnlyList<MediaCardDto>> ReadCardsByIdsAsync(string databasePath, string bridgeUrl, IEnumerable<long> movieIds)
+    {
+        long[] ids = movieIds.Where(id => id > 0).Distinct().Take(96).ToArray();
+        if (ids.Length == 0) return Array.Empty<MediaCardDto>();
+        var parameters = ids.Select((id, index) => ($"$id{index}", (object)id)).ToList();
+        string condition = $"m.Id IN ({string.Join(',', parameters.Select(parameter => parameter.Item1))})";
+        MediaPageDto page = await ReadFilteredCardsAsync(databasePath, bridgeUrl, condition, parameters, "m.Id", ids.Length, 0);
+        return page.Items;
+    }
+
     public static async Task<IReadOnlyList<long>> ReadAdvancedSearchMovieIdsAsync(string databasePath,
         string query, long? actorId, long? tagId, long? directorId, long? movieTagId, long? customTagId, long? seriesId, bool? favorite, bool? watched, double ratingMin, string ratingFilter, string metadata,
         string fileStatus, string metadataStatus, long? libraryId, string sort, long? genreId = null, long? studioId = null)

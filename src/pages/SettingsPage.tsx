@@ -1095,6 +1095,7 @@ function GeneratedCoverSettingsSection() {
       <TextField select size="small" disabled={!value.enabled} label="检查范围" value={value.scope} onChange={event => setValue({ ...value, scope: event.target.value as GeneratedCoverSettings['scope'] })}>
         <MenuItem value="Recent">最近新增影片</MenuItem><MenuItem value="All">全部影片</MenuItem>
       </TextField>
+      <TextField size="small" type="number" disabled={!value.enabled || !value.backgroundGeneration} label="后台并发数（1-4）" value={value.maxConcurrentJobs} onChange={event => setValue({ ...value, maxConcurrentJobs: Math.max(1, Math.min(4, Number(event.target.value) || 1)) })}/>
       <Box><Button variant="outlined" disabled={saving} onClick={() => void save()}>保存备用封面设置</Button></Box>
     </Stack>
   </SurfaceSection>

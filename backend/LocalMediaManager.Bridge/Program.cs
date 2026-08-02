@@ -240,7 +240,7 @@ app.Use(async (context, next) => {
 app.MapGet("/health", () => Results.Ok(new {
     product = "Local Media Manager",
     abbreviation = "LMM",
-    version = "0.7.7",
+    version = "0.7.8",
     status = "ok",
     databaseAvailable = File.Exists(databasePath),
     databasePath,
@@ -489,6 +489,13 @@ app.MapGet("/api/videos", async (int? limit, int? offset, string? search, string
     int take = Math.Clamp(limit ?? 24, 1, 96);
     int skip = Math.Max(0, offset ?? 0);
     return Results.Ok(await ProductReader.ReadVideosPageAsync(databasePath, bridgeUrl, search ?? "", sort ?? "newest", take, skip));
+});
+
+app.MapGet("/api/videos/cards", async (string? ids) => {
+    if (!File.Exists(databasePath)) return Results.Problem("Database is unavailable.", statusCode: 503);
+    long[] movieIds = (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(value => long.TryParse(value, out long id) ? id : 0).Where(id => id > 0).Distinct().Take(96).ToArray();
+    return Results.Ok(await ProductReader.ReadCardsByIdsAsync(databasePath, bridgeUrl, movieIds));
 });
 
 app.MapGet("/api/videos/{movieId:long}", async (long movieId, IMovieNumberExtractor extractor) => {
